@@ -2,8 +2,9 @@
 
 import { prisma } from "@/lib/db/prisma"
 import { requireSession } from "@/lib/auth/guards"
+import { ForbiddenError } from "@/lib/permissions/errors"
 import { intakeAnswersSchema, type IntakeAnswers } from "@/lib/validation/patient"
-import { createPatientFromIntake } from "@/lib/actions/patients"
+import { createPatientRecordFor } from "@/lib/queries/patients"
 
 export async function getActiveBranchByCode(code: string) {
   return prisma.branch.findFirst({ where: { code, isActive: true } })
@@ -66,18 +67,18 @@ export async function listIntakeQueue() {
 export async function processIntakeSubmission(submissionId: string) {
   const user = await requireSession()
   if (!["OWNER", "BRANCH_MANAGER", "FRONT_DESK"].includes(user.role)) {
-    throw new Error("Not permitted to process intake submissions")
+    throw new ForbiddenError("Not permitted to process intake submissions")
   }
 
   const submission = await prisma.intakeSubmission.findUniqueOrThrow({ where: { id: submissionId } })
   if (submission.processedAt) throw new Error("Already processed")
   if (user.role !== "OWNER" && submission.branchId !== user.homeBranchId) {
-    throw new Error("Cannot process an intake submission from another branch")
+    throw new ForbiddenError("Cannot process an intake submission from another branch")
   }
 
   const answers = submission.answers as unknown as IntakeAnswers
 
-  const patient = await createPatientFromIntake({ ...answers, homeBranchId: submission.branchId })
+  const patient = await createPatientRecordFor(user, { ...answers, homeBranchId: submission.branchId })
 
   await prisma.intakeSubmission.update({
     where: { id: submission.id },

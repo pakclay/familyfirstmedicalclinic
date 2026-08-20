@@ -5,6 +5,7 @@ import ExcelJS from "exceljs"
 import Papa from "papaparse"
 import { requireRole } from "@/lib/auth/guards"
 import { prisma } from "@/lib/db/prisma"
+import { runWithRls } from "@/lib/db/rls"
 import { generatePatientCode } from "@/lib/patients/patient-code"
 import { analyzeRow, type ParsedRowData } from "@/lib/import/analyze"
 import type { ColumnMapping, DateFormat, ImportRow } from "@/lib/import/target-fields"
@@ -85,12 +86,14 @@ export async function dryRunImport(
   dateFormat: DateFormat,
   branchId: string
 ): Promise<DryRunSummary> {
-  await requireRole(["OWNER"])
+  const user = await requireRole(["OWNER"])
 
-  const existing = await prisma.patient.findMany({
-    where: { homeBranchId: branchId, deletedAt: null },
-    select: { id: true, mobile: true, lastName: true, birthDate: true },
-  })
+  const existing = await runWithRls(user, (tx) =>
+    tx.patient.findMany({
+      where: { homeBranchId: branchId, deletedAt: null },
+      select: { id: true, mobile: true, lastName: true, birthDate: true },
+    })
+  )
   const byMobile = new Map(existing.map((p) => [p.mobile, p]))
   const byNameDob = new Map(existing.map((p) => [`${p.lastName.toLowerCase()}|${p.birthDate.toISOString().slice(0, 10)}`, p]))
 
@@ -145,7 +148,7 @@ export async function commitImport(
   let merged = 0
   let skipped = 0
 
-  await prisma.$transaction(async (tx) => {
+  await runWithRls(user, async (tx) => {
     for (const result of dryRun.results) {
       if (result.status === "error") {
         skipped++
@@ -233,13 +236,15 @@ export async function commitImport(
 }
 
 export async function listImportBatches() {
-  await requireRole(["OWNER"])
-  const grouped = await prisma.patient.groupBy({
-    by: ["importBatchId"],
-    where: { importBatchId: { not: null }, deletedAt: null },
-    _count: { _all: true },
-    _min: { createdAt: true },
-  })
+  const user = await requireRole(["OWNER"])
+  const grouped = await runWithRls(user, (tx) =>
+    tx.patient.groupBy({
+      by: ["importBatchId"],
+      where: { importBatchId: { not: null }, deletedAt: null },
+      _count: { _all: true },
+      _min: { createdAt: true },
+    })
+  )
   return grouped
     .map((g) => ({ importBatchId: g.importBatchId!, count: g._count._all, importedAt: g._min.createdAt! }))
     .sort((a, b) => b.importedAt.getTime() - a.importedAt.getTime())
@@ -250,10 +255,12 @@ export async function listImportBatches() {
  * rows have what changed for a manual fix). */
 export async function rollbackImportBatch(importBatchId: string) {
   const user = await requireRole(["OWNER"])
-  const result = await prisma.patient.updateMany({
-    where: { importBatchId, deletedAt: null },
-    data: { deletedAt: new Date() },
-  })
+  const result = await runWithRls(user, (tx) =>
+    tx.patient.updateMany({
+      where: { importBatchId, deletedAt: null },
+      data: { deletedAt: new Date() },
+    })
+  )
   await prisma.auditLog.create({
     data: {
       actorId: user.id,

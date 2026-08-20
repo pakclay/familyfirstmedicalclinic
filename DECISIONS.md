@@ -4,6 +4,90 @@ Running log of assumptions made where the spec was silent or where the
 environment forced a deviation. Dated, so the owner can correct any of
 these. Newest first.
 
+## 2026-08-20 — Phase 2
+
+Permission layer hardened: `scopedPrisma`-equivalent query layer, Postgres
+RLS as a real (not theoretical) backstop, role-aware DTOs, and a test
+suite proving a THERAPIST 403s reaching money — both at the application
+layer and at the database layer, independent of each other.
+
+- **RLS requires a non-superuser database role, which the local dev setup
+  didn't have.** Postgres unconditionally bypasses row security for
+  superusers — no policy or `FORCE ROW LEVEL SECURITY` setting can change
+  that. The `postgres` role this project's local Postgres uses (created in
+  Phase 0 for `winget install PostgreSQL`) is a superuser, so RLS policies
+  would have silently no-op'd for every query the app makes. Created a
+  second Postgres role, `webinar_app` (plain LOGIN, no superuser, granted
+  table privileges + default privileges so future migrations' new tables
+  stay accessible to it), and split the connection strings:
+  `DATABASE_URL` (postgres superuser) for `prisma migrate`/`generate` only,
+  `APP_DATABASE_URL` (webinar_app) for the actual running app
+  (`lib/db/prisma.ts`). This mirrors how Supabase itself separates the
+  migration/owner role from the RLS-constrained runtime role — the pattern
+  carries over cleanly whenever this moves to real Supabase.
+- **RLS policies define no DELETE rule at all** on Patient/SessionNote/
+  Payment/PayoutResult (not "DELETE limited to OWNER" — no policy for the
+  command at all, which Postgres treats as a hard deny for everyone,
+  `webinar_app` included). This was a deliberate reading of §11's "nothing
+  hard-deletes from the UI": rather than trust every future query to
+  remember to soft-delete, the database itself now refuses the DELETE
+  statement outright for the app's connection. Test fixture teardown
+  (`lib/test/superuser-prisma.ts`) uses the migration superuser connection
+  instead, which is the correct shape for this — an actual ops/support
+  script doing a real purge should look the same way, not paper over it
+  with a policy that quietly allows OWNER to hard-delete from the app.
+- **`ForbiddenError`** (`lib/permissions/errors.ts`) is the throw-based
+  403 the spec asks for ("assert... a forbidden read returns 403, not an
+  empty list"). Next.js Server Actions don't have literal HTTP status
+  codes the way a REST endpoint would, so a typed, named error that a
+  route handler could map to a real 403 later is the closest equivalent
+  available in this architecture. Every query-layer function that denies
+  access throws it — a role with genuine partial scope (e.g., a
+  BRANCH_MANAGER querying another branch's specific patient) still
+  correctly gets `null`/`[]`, since that's a real "not found in what you
+  can see" rather than "you have no access to this resource at all"; the
+  tests check both cases separately so the distinction doesn't blur.
+- **Split Phase 1's `lib/actions/patients.ts` into a query layer +
+  thin action wrappers** (`lib/queries/patients.ts` now holds the real
+  logic, taking an explicit `AbilitySubject` instead of calling
+  `requireSession()` itself). This was necessary, not optional, for
+  testability: Vitest can construct a fake `AbilitySubject` for any role
+  and call the query function directly, hitting the real database and RLS
+  policies, without needing to fake a Next.js request/cookie/session.
+  `lib/actions/import.ts`'s Patient-touching calls were also rewired
+  through `runWithRls()` for the same reason — without it, the importer
+  would have started failing under RLS (no GUCs set → every policy
+  evaluates to NULL → zero rows/denied writes).
+- **`lib/queries/payments.ts` and `lib/dto/payment.ts` are new
+  infrastructure with no UI yet** — Payment recording lands with Phase 3's
+  scheduling work. They exist now specifically so the Phase 2 "done when"
+  (a THERAPIST cannot reach any money figure, proven by test) has a real
+  money-bearing resource to test against rather than a hypothetical one.
+  `lib/queries/__tests__/payments.test.ts` is the test that matters most
+  this phase: it proves THERAPIST/DOCTOR/FRONT_DESK/MARKETING all throw
+  `ForbiddenError` calling `listPaymentsFor`, and — independently — that a
+  raw, intentionally unfiltered `tx.payment.findMany({})` under each of
+  those roles' RLS context still returns zero rows, proving the backstop
+  works even if the application-layer check were bypassed or buggy.
+- **DTO layer scope**: `toPatientDTO` is an explicit field allowlist, not
+  a redaction function — there's no role for which Patient data gets
+  money fields stripped, because no query ever selects money onto a
+  Patient response in the first place. Its test
+  (`lib/dto/__tests__/patient.test.ts`) proves that even if a future
+  query carelessly `include`s `patientPackages`/`payments` (both carry
+  centavos fields), the DTO still won't forward them — the "even nested"
+  half of §4.2's hard rule. `toPaymentDTO` has no redacted variant either,
+  by design: a role that can't read Payments is denied before
+  `listPaymentsFor` ever calls it, so there's no "money figure with the
+  number blanked out" state to model.
+- **RLS is applied to exactly the four tables §4.2 names** — Patient,
+  SessionNote, Payment, PayoutResult — not the whole schema. Broader
+  tables (Assessment, Prescription, Lead, etc.) get the same treatment as
+  their features land in later phases; the RLS backstop is scoped
+  narrowly for now rather than blanket-enabled on tables no code touches
+  yet, matching the "as a backstop" framing (defense in depth behind a
+  working application-layer check, not a replacement for one).
+
 ## 2026-08-20 — Phase 1
 
 Patients: list/search, profile + timeline, public + front-desk intake with
