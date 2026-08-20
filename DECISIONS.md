@@ -4,6 +4,63 @@ Running log of assumptions made where the spec was silent or where the
 environment forced a deviation. Dated, so the owner can correct any of
 these. Newest first.
 
+## 2026-08-20 — Phase 1
+
+Patients: list/search, profile + timeline, public + front-desk intake with
+consent capture, Excel/CSV importer. Verified end to end in-browser as
+FRONT_DESK (manual add, public intake submission, processing the intake
+queue into a patient) and as OWNER (patient list across branches, search).
+
+- **Front-desk "Add Patient" bypasses `IntakeSubmission` entirely** — it
+  calls the same patient-creation path directly rather than creating an
+  `IntakeSubmission` with `submittedVia: FRONT_DESK` first. §5 models that
+  enum value, implying a front-desk-authored submission record should
+  exist, but nothing in §6/§14 requires the extra round trip for a staff
+  member typing a walk-in's info directly into the system — an
+  `IntakeSubmission` row here would just be a same-request duplicate of the
+  `Patient` row it immediately becomes. Revisit if the owner wants a
+  submission-level audit trail independent of the patient record itself.
+- **Import wizard's file upload step could not be exercised through
+  either available browser tool** — the in-app Browser pane's `form_input`
+  refuses to programmatically set `<input type="file">` (browsers block
+  this for security), and Claude in Chrome wasn't connected this session.
+  Instead verified the actual parse → normalize → dedupe → validate
+  pipeline (`lib/import/analyze.ts`, `lib/import/normalize.ts`) directly
+  against the dev database with a crafted CSV covering a clean row, a
+  lenient-format mobile number, a genuine mobile-number conflict, an
+  unparseable date, and an invalid mobile — all five classified correctly.
+  The wizard's step transitions (map → dry run → review → commit) are
+  type-checked and lint-clean but not click-tested end to end. Worth a
+  real run with an actual file before trusting this in production.
+- **One branch per import run**, not a per-row branch column — §12 doesn't
+  specify either way. A spreadsheet is realistically one branch's export at
+  a time; multi-branch-per-file adds real complexity for a case that may
+  not occur. Revisit if the real spreadsheets mix branches.
+- **`importBatchId`** (plain string, not a modeled entity) was added to
+  `Patient` beyond §5's explicit field list, to satisfy §12's "wrap the
+  import in a transaction tagged with an importBatchId so a bad import can
+  be rolled back whole." Rollback is implemented as soft-delete (§11: no
+  hard deletes) of every patient the batch created; merges into existing
+  patients are not auto-reverted by rollback — the `AuditLog` before/after
+  rows have what changed for a manual fix, since automatically un-merging
+  would need to know what the operator does and doesn't want undone.
+- **Merge semantics**: an import row that matches an existing patient
+  (§12's "conflict") only fills fields the existing record has as empty —
+  it never overwrites data already in the system. This was a judgment
+  call, not a spec requirement; the alternative (overwrite with the
+  spreadsheet's values) risks clobbering anything staff have already
+  corrected since the last export.
+- **Default status for imported patients** is an operator-chosen dropdown
+  at import time (defaulting to `ACTIVE_PROGRAM`), not inferred from the
+  spreadsheet — §12 doesn't specify a source column for this, and guessing
+  a clinical status from raw Excel data risked being wrong in a way that's
+  hard to notice later.
+- New dependencies (`exceljs`, `papaparse`) pulled in a moderate `uuid`
+  advisory and reintroduced the `deepmerge-ts`/`@prisma/config` high
+  advisory already noted in Phase 0 as a Prisma-tooling transitive (dev/
+  build-time only, not shipped in the client bundle). Not blocking; flag
+  if `npm audit` needs to go clean before a real deploy.
+
 ## 2026-08-20 — Phase 0
 
 ### Open questions from §15 — still unanswered, not yet blocking

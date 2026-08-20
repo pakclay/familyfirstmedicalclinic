@@ -401,6 +401,9 @@ model Patient {
   updatedAt             DateTime                 @updatedAt @db.Timestamptz(6)
   deletedAt             DateTime?                @db.Timestamptz(6)
   createdById           String?
+  // §12: tags every patient created by a given Excel/CSV import run so a
+  // bad import can be rolled back (soft-deleted) as a whole batch.
+  importBatchId         String?
 
   homeBranch Branch    @relation(fields: [homeBranchId], references: [id])
   referredBy Patient?  @relation("PatientReferral", fields: [referredByPatientId], references: [id])
@@ -424,6 +427,7 @@ model Patient {
   @@index([status])
   @@index([mobile])
   @@index([lastName, birthDate])
+  @@index([importBatchId])
 }
 
 model PatientConsent {
