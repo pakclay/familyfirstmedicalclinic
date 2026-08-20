@@ -154,6 +154,8 @@ async function main() {
     },
   ]
 
+  const therapistUserIds: { email: string; id: string; homeBranchId: string }[] = []
+
   for (const u of users) {
     const user = await prisma.user.upsert({
       where: { email: u.email },
@@ -180,6 +182,140 @@ async function main() {
           startedAt: new Date("2023-01-01"),
         },
       })
+      if (u.homeBranchId) therapistUserIds.push({ email: u.email, id: user.id, homeBranchId: u.homeBranchId })
+    }
+  }
+
+  // ── Services (§13: ~14, split Wellness/Rehab) ─────────────────────────
+  const services = await Promise.all(
+    [
+      // Wellness — never touches the doctor queue, never gated by a prescription.
+      { code: "W-RECOVERY", name: "Recovery Session", category: "WELLNESS", durationMin: 45, priceCentavos: 80000 },
+      { code: "W-TUNEUP", name: "Body Tune-Up", category: "WELLNESS", durationMin: 60, priceCentavos: 120000 },
+      { code: "W-FLEX", name: "Flexology", category: "WELLNESS", durationMin: 45, priceCentavos: 90000 },
+      { code: "W-SPORTS", name: "Sports Massage", category: "WELLNESS", durationMin: 60, priceCentavos: 100000 },
+      { code: "W-COMPRESS", name: "Compression Therapy", category: "WELLNESS", durationMin: 30, priceCentavos: 50000 },
+      { code: "W-DEEPTISSUE", name: "Deep Tissue Massage", category: "WELLNESS", durationMin: 60, priceCentavos: 110000 },
+      { code: "W-CUPPING", name: "Cupping Therapy", category: "WELLNESS", durationMin: 30, priceCentavos: 60000 },
+      // Rehab — the initial assessment and taping don't require a prescription
+      // (there's nothing to prescribe against yet / it's a minor add-on);
+      // ongoing treatment sessions do. See DECISIONS.md.
+      {
+        code: "R-ASSESS",
+        name: "Initial Assessment",
+        category: "REHAB",
+        durationMin: 60,
+        priceCentavos: 150000,
+        requiresPrescription: false,
+      },
+      {
+        code: "R-ORTHO",
+        name: "Orthopedic Rehab",
+        category: "REHAB",
+        durationMin: 60,
+        priceCentavos: 120000,
+        requiresPrescription: true,
+      },
+      {
+        code: "R-POSTOP",
+        name: "Post-Op Rehab",
+        category: "REHAB",
+        durationMin: 60,
+        priceCentavos: 120000,
+        requiresPrescription: true,
+      },
+      {
+        code: "R-STROKE",
+        name: "Stroke Rehab",
+        category: "REHAB",
+        durationMin: 60,
+        priceCentavos: 150000,
+        requiresPrescription: true,
+      },
+      {
+        code: "R-SPINAL",
+        name: "Spinal Program",
+        category: "REHAB",
+        durationMin: 60,
+        priceCentavos: 150000,
+        requiresPrescription: true,
+      },
+      {
+        code: "R-DRYNEEDLE",
+        name: "Dry Needling",
+        category: "REHAB",
+        durationMin: 30,
+        priceCentavos: 80000,
+        requiresPrescription: true,
+      },
+      {
+        code: "R-TAPING",
+        name: "Taping",
+        category: "REHAB",
+        durationMin: 20,
+        priceCentavos: 40000,
+        requiresPrescription: false,
+      },
+    ].map((s) =>
+      prisma.service.upsert({
+        where: { code: s.code },
+        update: {},
+        create: {
+          code: s.code,
+          name: s.name,
+          category: s.category as "WELLNESS" | "REHAB",
+          durationMin: s.durationMin,
+          priceCentavos: s.priceCentavos,
+          requiresPrescription: s.requiresPrescription ?? false,
+        },
+      })
+    )
+  )
+  const recoveryService = services.find((s) => s.code === "W-RECOVERY")!
+
+  // ── Packages (§13: 5/10/20 sessions + intro offer) ────────────────────
+  // Package.name has no unique constraint, so upsert-by-name isn't
+  // available — find-or-create keeps the seed idempotent instead.
+  const packageSeeds = [
+    { name: "Intro Offer", serviceId: recoveryService.id, sessionCount: 1, priceCentavos: 49900, validityDays: 14 },
+    { name: "5-Session Package", serviceId: null, sessionCount: 5, priceCentavos: 360000, validityDays: 60 },
+    { name: "10-Session Package", serviceId: null, sessionCount: 10, priceCentavos: 680000, validityDays: 90 },
+    { name: "20-Session Package", serviceId: null, sessionCount: 20, priceCentavos: 1280000, validityDays: 180 },
+  ]
+  for (const p of packageSeeds) {
+    const existing = await prisma.package.findFirst({ where: { name: p.name } })
+    if (!existing) await prisma.package.create({ data: p })
+  }
+
+  // ── Rooms (2 per active branch) ────────────────────────────────────────
+  for (const branch of branches.filter((b) => b.isActive)) {
+    for (const roomName of ["Room 1", "Room 2"]) {
+      await prisma.room.upsert({
+        where: { branchId_name: { branchId: branch.id, name: roomName } },
+        update: {},
+        create: { branchId: branch.id, name: roomName },
+      })
+    }
+  }
+
+  // ── Therapist availability (Mon–Sat 9:00–18:00 at their home branch) ──
+  for (const t of therapistUserIds) {
+    for (let dayOfWeek = 1; dayOfWeek <= 6; dayOfWeek++) {
+      const existing = await prisma.therapistAvailability.findFirst({
+        where: { therapistId: t.id, branchId: t.homeBranchId, dayOfWeek },
+      })
+      if (!existing) {
+        await prisma.therapistAvailability.create({
+          data: {
+            therapistId: t.id,
+            branchId: t.homeBranchId,
+            dayOfWeek,
+            startTime: "09:00",
+            endTime: "18:00",
+            effectiveFrom: new Date("2023-01-01"),
+          },
+        })
+      }
     }
   }
 

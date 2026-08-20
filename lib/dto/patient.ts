@@ -29,6 +29,7 @@ export type PatientForDTO = {
   createdAt: Date
   emergencyContactName: string
   emergencyContactPhone: string
+  homeBranchId: string
   homeBranch: { name: string }
   consents: Array<{
     id: string
@@ -72,6 +73,7 @@ export function toPatientDTO(patient: PatientForDTO) {
     createdAt: patient.createdAt,
     emergencyContactName: patient.emergencyContactName,
     emergencyContactPhone: patient.emergencyContactPhone,
+    homeBranchId: patient.homeBranchId,
     homeBranch: { name: patient.homeBranch.name },
     consents: patient.consents.map((c) => ({
       id: c.id,

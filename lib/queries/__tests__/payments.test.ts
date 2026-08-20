@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { prisma } from "@/lib/db/prisma"
 import { runWithRls } from "@/lib/db/rls"
 import { superuserPrisma } from "@/lib/test/superuser-prisma"
-import { listPaymentsFor } from "../payments"
+import { listPaymentsFor, recordPaymentFor } from "../payments"
 import { createPatientRecordFor } from "../patients"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import type { AbilitySubject, Role } from "@/lib/permissions/ability"
@@ -100,6 +100,44 @@ describe("no role but OWNER/BRANCH_MANAGER can read a money figure", () => {
   it("BRANCH_MANAGER in a different branch sees nothing for this branch", async () => {
     const rows = await listPaymentsFor(subject("BRANCH_MANAGER", "mgr2", "some-other-branch-id"), branch.id)
     expect(rows).toHaveLength(0)
+  })
+})
+
+describe("FRONT_DESK can record a payment despite having no read access to Payment", () => {
+  // Regression test: Postgres RLS requires the SELECT policy to pass for
+  // an INSERT's implicit RETURNING clause too, and Prisma's .create()
+  // always does RETURNING. FRONT_DESK has an INSERT policy but
+  // deliberately no SELECT policy (§4.1: write-only) — that combination
+  // made every FRONT_DESK payment write fail until recordPaymentFor
+  // switched to a raw INSERT with no RETURNING. See DECISIONS.md.
+  it("FRONT_DESK's write succeeds and the row is correct when read back as OWNER", async () => {
+    const frontDesk = subject("FRONT_DESK", "fd-write-test", branch.id)
+    const result = await recordPaymentFor(frontDesk, {
+      patientId,
+      branchId: branch.id,
+      amountCentavos: 90000,
+      method: "GCASH",
+    })
+    expect(result.amountCentavos).toBe(90000)
+
+    const rows = await listPaymentsFor(owner, branch.id)
+    const written = rows.find((r) => r.id === result.id)
+    expect(written?.amountCentavos).toBe(90000)
+    expect(written?.method).toBe("GCASH")
+  })
+
+  it("FRONT_DESK still cannot read the payment it just wrote", async () => {
+    const frontDesk = subject("FRONT_DESK", "fd-write-test-2", branch.id)
+    const written = await recordPaymentFor(frontDesk, {
+      patientId,
+      branchId: branch.id,
+      amountCentavos: 12345,
+      method: "CASH",
+    })
+    await expect(listPaymentsFor(frontDesk, branch.id)).rejects.toThrow(ForbiddenError)
+    // and the RLS backstop agrees, independent of the app-layer check:
+    const rlsRows = await runWithRls(frontDesk, (tx) => tx.payment.findMany({ where: { id: written.id } }))
+    expect(rlsRows).toHaveLength(0)
   })
 })
 

@@ -4,6 +4,97 @@ Running log of assumptions made where the spec was silent or where the
 environment forced a deviation. Dated, so the owner can correct any of
 these. Newest first.
 
+## 2026-08-20 — Phase 3
+
+Scheduling: therapist availability, day-view calendar by branch/therapist,
+book → check-in → complete → no-show/cancel, package credit consumption,
+front-desk payment recording. Seeded 14 services, 4 packages, 8 rooms,
+and Mon–Sat 9–6 availability for the 4 seeded therapists. Verified live in
+the browser: booking, check-in, completion (both pay-per-visit and
+package-credit paths), the prescription gate blocking a REHAB session and
+the OWNER override unblocking it (with the AuditLog entry confirmed),
+selling a package, credit consumption incrementing correctly, and the
+double-booking guard actually excluding overlapping slots from the picker
+(not just the unit tests) after booking a conflicting one.
+
+- **Caught and fixed a real timezone-safety bug before it shipped**: the
+  availability engine used `toZonedTime(date, 'Asia/Manila')` followed by
+  plain (non-UTC) `Date` getters. That only produced correct results
+  because this dev machine's own system timezone happens to be Asia/Manila
+  — coincidentally matching the app's target zone and masking the bug in
+  every test run. `date-fns-tz`'s `toZonedTime` shifts the instant so its
+  **UTC** getters read as the target zone's wall-clock time; reading it
+  with non-UTC getters silently depends on the runtime's own timezone
+  matching, which is not guaranteed anywhere else (Vercel functions
+  default to UTC). Fixed by switching to `getUTCDay()`/`getUTCFullYear()`/
+  etc. throughout `lib/scheduling/availability.ts` and
+  `lib/scheduling/day-range.ts`. Worth grepping for the same
+  `toZonedTime(...).getX()` (non-UTC) pattern in future phases that touch
+  dates.
+- **Found and fixed a genuine Postgres RLS/Prisma interaction bug**: FRONT_DESK
+  could not record any payment at all — every `recordPaymentFor` call
+  failed with "new row violates row-level security policy," even though
+  the INSERT policy explicitly allows it. Root cause: `INSERT ...
+  RETURNING` requires the table's SELECT policy to also pass for the
+  returned row, and Prisma's `.create()` always does an implicit
+  `RETURNING *`. FRONT_DESK has an INSERT policy on Payment but
+  deliberately no SELECT policy (§4.1: "record only, cannot view
+  reports") — that exact combination is what broke. Confirmed by testing
+  a plain `INSERT` (succeeds) vs. the same `INSERT ... RETURNING`
+  (fails) directly against the policy. Fixed by writing Payment rows via
+  a raw `INSERT` with no `RETURNING` (`insertPaymentNoReturning` in
+  `lib/queries/payments.ts`, shared by `recordPaymentFor` and
+  `sellPackageFor`) and constructing the returned DTO from the input
+  already in hand, rather than reading the row back — which also means
+  the RLS SELECT policy stays exactly as restrictive as the ability
+  matrix intends, with no compromise needed. Added a regression test
+  (`lib/queries/__tests__/payments.test.ts`) proving FRONT_DESK's write
+  succeeds and is correct when read back as OWNER, while FRONT_DESK still
+  can't read it — both at the app layer and via the RLS backstop
+  directly.
+- **Fixed a second RLS/write conflict, inline this time**: completing an
+  appointment needs to set `Patient.lastVisitAt`, but THERAPIST has no
+  Patient write access at all (write:none on patientDemographics) and RLS
+  enforces that literally — so a THERAPIST completing their own
+  appointment would hit the same wall. Since the appointment-completion
+  authorization has already been checked by that point,
+  `completeAppointmentFor` re-presents as OWNER for just that one
+  statement (`SET LOCAL app.role = 'OWNER'` mid-transaction, scoped to
+  that single write) rather than weakening the Patient RLS policy itself.
+  Documented inline in `lib/queries/scheduling.ts`.
+- **Route interpretation**: `/intake/[token]`'s booking-driven per-patient
+  token variant doesn't exist yet (that's Phase 7) — Phase 3 booking is
+  entirely front-desk/staff-initiated (WALK_IN, PHONE, FB_MESSENGER,
+  REBOOK sources), no ONLINE source is reachable yet.
+- **Day/week calendar**: built as a day view with therapist columns (an
+  appointment-card list per therapist, not a pixel-positioned time grid)
+  plus prev/next-day navigation — not a true week grid. This reads as
+  "day view, easy to move between days" rather than the literal "day/week
+  toggle" the spec lists; revisit if a real week-at-a-glance grid turns
+  out to matter for how front desk actually works day to day.
+  §9's wellness/rehab color pairing is applied to every appointment card's
+  left border.
+- **No therapist-availability editing UI yet** — availability lives in
+  the `TherapistAvailability` table (seeded Mon–Sat 9–6 for the 4 seeded
+  therapists) and the booking/slot engine reads it correctly, but there's
+  no admin screen to add/change a therapist's hours or time off. The
+  `/console/therapists` page is still Phase 0's stub. Not required for
+  this phase's "front desk can run a full day" bar (which is about
+  running appointments against existing availability, not authoring it),
+  but real onboarding needs this before go-live.
+- **Package-to-service matching isn't enforced** — a generic package (no
+  `serviceId`) can be applied to any service at booking time; the intro
+  offer's `serviceId` link isn't currently checked against the appointment's
+  service either. Revisit if the owner wants packages restricted to
+  specific services.
+- **Payment collection is decoupled from appointment completion** —
+  "Record payment" is a separate action available on any non-terminal
+  appointment (for OWNER/FRONT_DESK), not a forced step at check-in or
+  completion. This was a deliberate simplification: forcing exact payment
+  timing into the completion flow would have added real complexity for a
+  question (when exactly does front desk collect money relative to the
+  session) the spec doesn't resolve.
+
 ## 2026-08-20 — Phase 2
 
 Permission layer hardened: `scopedPrisma`-equivalent query layer, Postgres

@@ -23,6 +23,7 @@ const BASE: PatientForDTO = {
   createdAt: new Date(),
   emergencyContactName: "Ana Dela Cruz",
   emergencyContactPhone: "09179876543",
+  homeBranchId: "branch1",
   homeBranch: { name: "Test Branch" },
   consents: [],
   intakeSubmissions: [],

@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto"
+import type { Prisma, PaymentMethod } from "@prisma/client"
 import { runWithRls } from "@/lib/db/rls"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import { scopeWhere } from "@/lib/permissions/scoped-queries"
-import type { AbilitySubject } from "@/lib/permissions/ability"
+import { canAccess, type AbilitySubject } from "@/lib/permissions/ability"
 import { toPaymentDTO } from "@/lib/dto/payment"
 
 /**
@@ -29,4 +31,77 @@ export async function listPaymentsFor(user: AbilitySubject, branchId: string) {
   )
 
   return rows.map(toPaymentDTO)
+}
+
+export type RecordPaymentInput = {
+  patientId: string
+  branchId: string
+  amountCentavos: number
+  method: PaymentMethod
+  referenceNo?: string
+  appointmentId?: string
+  patientPackageId?: string
+}
+
+/**
+ * §4.1: FRONT_DESK can record a payment but never read it back — Payment's
+ * RLS SELECT policy deliberately excludes FRONT_DESK. That's a real
+ * conflict with Prisma's `.create()`, which always does `INSERT ...
+ * RETURNING *`: Postgres RLS requires the SELECT policy to pass for a
+ * RETURNING clause too, so `.create()` fails for FRONT_DESK even though
+ * the INSERT itself is allowed (confirmed by testing a plain INSERT vs.
+ * one with RETURNING directly against the RLS policy — see DECISIONS.md).
+ * Using a raw INSERT with no RETURNING sidesteps that entirely, and the
+ * DTO is built from the input we already have rather than read back.
+ */
+export async function recordPaymentFor(user: AbilitySubject, input: RecordPaymentInput) {
+  if (!canAccess(user, "payments", "write")) throw new ForbiddenError("Your role cannot record payments")
+  if (user.role !== "OWNER" && user.homeBranchId !== input.branchId) {
+    throw new ForbiddenError("Cannot record a payment for another branch")
+  }
+  if (input.amountCentavos <= 0) throw new Error("Payment amount must be greater than zero")
+
+  const id = randomUUID()
+  const receivedAt = new Date()
+
+  await runWithRls(user, (tx) => insertPaymentNoReturning(tx, { id, receivedAt, receivedById: user.id, ...input }))
+
+  return toPaymentDTO({
+    id,
+    patientId: input.patientId,
+    amountCentavos: input.amountCentavos,
+    method: input.method,
+    referenceNo: input.referenceNo ?? null,
+    receivedAt,
+    isVoided: false,
+  })
+}
+
+/** Shared by recordPaymentFor and sellPackageFor (packages.ts) — see the
+ * comment above for why this avoids Prisma's `.create()`. */
+export async function insertPaymentNoReturning(
+  tx: Prisma.TransactionClient,
+  data: {
+    id: string
+    patientId: string
+    branchId: string
+    amountCentavos: number
+    method: PaymentMethod
+    referenceNo?: string
+    appointmentId?: string
+    patientPackageId?: string
+    receivedById: string
+    receivedAt: Date
+  }
+) {
+  await tx.$executeRaw`
+    INSERT INTO "Payment" (
+      id, "patientId", "branchId", "amountCentavos", method, "referenceNo",
+      "appointmentId", "patientPackageId", "receivedById", "receivedAt", "createdById", "createdAt", "updatedAt"
+    ) VALUES (
+      ${data.id}, ${data.patientId}, ${data.branchId}, ${data.amountCentavos}, ${data.method}::"PaymentMethod",
+      ${data.referenceNo ?? null}, ${data.appointmentId ?? null}, ${data.patientPackageId ?? null},
+      ${data.receivedById}, ${data.receivedAt}, ${data.receivedById}, now(), now()
+    )
+  `
 }

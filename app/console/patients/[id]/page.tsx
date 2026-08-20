@@ -1,10 +1,15 @@
 import { notFound } from "next/navigation"
 import { requireRole } from "@/lib/auth/guards"
 import { getPatient } from "@/lib/actions/patients"
+import { listActivePackages } from "@/lib/actions/packages"
+import { prisma } from "@/lib/db/prisma"
 import { ageInYears } from "@/lib/utils/age"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
+import { PatientPackagesCard } from "@/components/patients/patient-packages-card"
+
+const CAN_SELL_PACKAGES = ["OWNER", "BRANCH_MANAGER", "FRONT_DESK"]
 
 const CONSENT_LABELS: Record<string, string> = {
   TREATMENT: "Treatment",
@@ -16,10 +21,16 @@ const CONSENT_LABELS: Record<string, string> = {
 type TimelineEvent = { at: Date; label: string; detail?: string }
 
 export default async function PatientProfilePage({ params }: { params: Promise<{ id: string }> }) {
-  await requireRole(["OWNER", "BRANCH_MANAGER", "DOCTOR", "THERAPIST", "FRONT_DESK"])
+  const user = await requireRole(["OWNER", "BRANCH_MANAGER", "DOCTOR", "THERAPIST", "FRONT_DESK"])
   const { id } = await params
   const patient = await getPatient(id)
   if (!patient) notFound()
+
+  const canSellPackages = CAN_SELL_PACKAGES.includes(user.role)
+  const [activePackages, catalog] = await Promise.all([
+    listActivePackages(id).catch(() => []),
+    canSellPackages ? prisma.package.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }) : Promise.resolve([]),
+  ])
 
   const age = ageInYears(patient.birthDate)
 
@@ -112,6 +123,20 @@ export default async function PatientProfilePage({ params }: { params: Promise<{
             )}
           </CardContent>
         </Card>
+
+        <PatientPackagesCard
+          patientId={patient.id}
+          branchId={patient.homeBranchId}
+          canSell={canSellPackages}
+          activePackages={activePackages.map((p) => ({
+            id: p.id,
+            sessionsUsed: p.sessionsUsed,
+            sessionsTotal: p.sessionsTotal,
+            expiresAt: p.expiresAt.toISOString(),
+            package: { name: p.package.name },
+          }))}
+          catalog={catalog.map((c) => ({ id: c.id, name: c.name }))}
+        />
       </div>
     </div>
   )
