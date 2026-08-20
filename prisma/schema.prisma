@@ -1,0 +1,941 @@
+// Stretch Lab PH — system of record
+// See /DECISIONS.md for assumptions made where the spec was silent.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────
+
+enum Role {
+  OWNER
+  BRANCH_MANAGER
+  DOCTOR
+  THERAPIST
+  FRONT_DESK
+  MARKETING
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACTOR
+}
+
+enum Sex {
+  MALE
+  FEMALE
+}
+
+enum PatientStatus {
+  LEAD
+  INTAKE_PENDING
+  FOR_ASSESSMENT
+  FOR_DOCTOR_REVIEW
+  ACTIVE_PROGRAM
+  ON_HOLD
+  COMPLETED
+  LAPSED
+  DISCHARGED
+}
+
+enum ConsentType {
+  TREATMENT
+  DATA_PRIVACY
+  MARKETING
+  PHOTO
+}
+
+enum SubmittedVia {
+  PUBLIC_LINK
+  KIOSK
+  FRONT_DESK
+}
+
+enum AttachmentKind {
+  XRAY
+  MRI
+  REFERRAL
+  ID
+  OTHER
+}
+
+enum Track {
+  WELLNESS
+  REHAB
+}
+
+enum PrescriptionStatus {
+  DRAFT
+  SIGNED
+  EXPIRED
+}
+
+enum CarePlanStatus {
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  DISCONTINUED
+}
+
+enum AppointmentStatus {
+  BOOKED
+  CONFIRMED
+  CHECKED_IN
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum AppointmentSource {
+  ONLINE
+  WALK_IN
+  PHONE
+  FB_MESSENGER
+  REBOOK
+}
+
+enum PatientPackageStatus {
+  ACTIVE
+  CONSUMED
+  EXPIRED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CASH
+  GCASH
+  MAYA
+  CARD
+  BANK
+  HMO
+}
+
+enum ServiceCategory {
+  WELLNESS
+  REHAB
+}
+
+enum LeadSource {
+  FB_LEAD_ADS
+  FB_MESSENGER
+  IG
+  WALK_IN
+  REFERRAL
+  GOOGLE
+  WEBSITE
+  EVENT
+}
+
+enum LeadStage {
+  NEW
+  CONTACTED
+  QUALIFIED
+  BOOKED
+  SHOWED
+  CONVERTED
+  LOST
+}
+
+enum LeadActivityType {
+  CALL
+  MESSAGE
+  VISIT
+  NOTE
+  STAGE_CHANGE
+}
+
+enum FollowUpSubjectType {
+  LEAD
+  PATIENT
+}
+
+enum FollowUpReason {
+  NEW_LEAD
+  NO_REPLY
+  LAPSED_CLIENT
+  PACKAGE_EXPIRING
+  MISSED_APPOINTMENT
+  POST_DISCHARGE_CHECK
+}
+
+enum FollowUpStatus {
+  OPEN
+  DONE
+  SNOOZED
+  DISMISSED
+}
+
+enum QuotaPeriodKind {
+  WEEKLY
+  SEMI_MONTHLY
+  MONTHLY
+}
+
+enum QuotaMetric {
+  COMPLETED_SESSIONS
+  ATTRIBUTED_REVENUE
+  NEW_PATIENTS_CONVERTED
+}
+
+enum BonusType {
+  FLAT
+  PER_UNIT_ABOVE_THRESHOLD
+  PERCENT_OF_ATTRIBUTED_REVENUE
+}
+
+enum StackingMode {
+  HIGHEST_TIER_ONLY
+  CUMULATIVE
+}
+
+enum QuotaPeriodStatus {
+  OPEN
+  LOCKED
+}
+
+enum PayoutStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  PAID
+}
+
+enum NotificationChannelKind {
+  SMS
+  EMAIL
+  MESSENGER
+  VIBER
+}
+
+enum MessageTemplateTrigger {
+  APPOINTMENT_REMINDER
+  FOLLOW_UP_NUDGE
+  LEAD_WELCOME
+  PACKAGE_EXPIRING
+  LAPSED_CHECKIN
+  POST_DISCHARGE_CHECK
+  MARKETING_BLAST
+}
+
+enum MessageStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Core
+// ─────────────────────────────────────────────────────────────────────────
+
+model Branch {
+  id           String    @id @default(cuid())
+  code         String    @unique
+  name         String
+  address      String
+  city         String
+  province     String
+  phone        String
+  openingHours Json
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt    DateTime? @db.Timestamptz(6)
+  createdById  String?
+
+  users                 User[]
+  patients              Patient[]
+  therapistAvailability TherapistAvailability[]
+  rooms                 Room[]
+  appointments          Appointment[]
+  payments              Payment[]
+  leads                 Lead[]
+  assessments           Assessment[]
+  quotaPeriods          QuotaPeriod[]
+  intakeSubmissions     IntakeSubmission[]
+
+  @@index([isActive])
+}
+
+model User {
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  passwordHash       String
+  name               String
+  role               Role
+  homeBranchId       String?
+  isActive           Boolean   @default(true)
+  lastLoginAt        DateTime? @db.Timestamptz(6)
+  mustChangePassword Boolean   @default(true)
+  createdAt          DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt          DateTime? @db.Timestamptz(6)
+  createdById        String?
+
+  homeBranch       Branch?           @relation(fields: [homeBranchId], references: [id])
+  therapistProfile TherapistProfile?
+
+  @@index([role])
+  @@index([homeBranchId])
+}
+
+model TherapistProfile {
+  id               String         @id @default(cuid())
+  userId           String         @unique
+  licenseNo        String?
+  specialties      String[]
+  bio              String?
+  photoUrl         String?
+  isBookableOnline Boolean        @default(true)
+  servicesOffered  String[]
+  quotaSchemeId    String?
+  employmentType   EmploymentType
+  startedAt        DateTime       @db.Timestamptz(6)
+  createdAt        DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime       @updatedAt @db.Timestamptz(6)
+  deletedAt        DateTime?      @db.Timestamptz(6)
+  createdById      String?
+
+  user        User         @relation(fields: [userId], references: [id])
+  quotaScheme QuotaScheme? @relation(fields: [quotaSchemeId], references: [id])
+
+  @@index([quotaSchemeId])
+}
+
+model Service {
+  id                   String          @id @default(cuid())
+  code                 String          @unique
+  name                 String
+  category             ServiceCategory
+  durationMin          Int
+  priceCentavos        Int
+  isCommissionable     Boolean         @default(true)
+  requiresPrescription Boolean         @default(false)
+  isBookableOnline     Boolean         @default(true)
+  description          String?
+  isActive             Boolean         @default(true)
+  createdAt            DateTime        @default(now()) @db.Timestamptz(6)
+  updatedAt            DateTime        @updatedAt @db.Timestamptz(6)
+  deletedAt            DateTime?       @db.Timestamptz(6)
+  createdById          String?
+
+  packages     Package[]
+  appointments Appointment[]
+  leads        Lead[]
+
+  @@index([category])
+}
+
+model Package {
+  id            String    @id @default(cuid())
+  name          String
+  serviceId     String?
+  sessionCount  Int
+  priceCentavos Int
+  validityDays  Int
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt     DateTime? @db.Timestamptz(6)
+  createdById   String?
+
+  service         Service?         @relation(fields: [serviceId], references: [id])
+  patientPackages PatientPackage[]
+}
+
+model Room {
+  id          String    @id @default(cuid())
+  branchId    String
+  name        String
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt   DateTime? @db.Timestamptz(6)
+  createdById String?
+
+  branch       Branch        @relation(fields: [branchId], references: [id])
+  appointments Appointment[]
+
+  @@unique([branchId, name])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Patient
+// ─────────────────────────────────────────────────────────────────────────
+
+model Patient {
+  id                    String                   @id @default(cuid())
+  patientCode           String                   @unique
+  firstName             String
+  lastName              String
+  middleName            String?
+  birthDate             DateTime                 @db.Date
+  sex                   Sex
+  mobile                String
+  email                 String?
+  address               String
+  city                  String
+  province              String
+  occupation            String?
+  sportOrActivity       String?
+  referralSource        String?
+  referredByPatientId   String?
+  emergencyContactName  String
+  emergencyContactPhone String
+  homeBranchId          String
+  primaryTherapistId    String?
+  status                PatientStatus            @default(LEAD)
+  lastVisitAt           DateTime?                @db.Timestamptz(6)
+  tags                  String[]
+  preferredChannel      NotificationChannelKind?
+  channelIdentifiers    Json?
+  createdAt             DateTime                 @default(now()) @db.Timestamptz(6)
+  updatedAt             DateTime                 @updatedAt @db.Timestamptz(6)
+  deletedAt             DateTime?                @db.Timestamptz(6)
+  createdById           String?
+
+  homeBranch Branch    @relation(fields: [homeBranchId], references: [id])
+  referredBy Patient?  @relation("PatientReferral", fields: [referredByPatientId], references: [id])
+  referrals  Patient[] @relation("PatientReferral")
+
+  consents          PatientConsent[]
+  intakeSubmissions IntakeSubmission[]
+  attachments       Attachment[]
+  assessments       Assessment[]
+  prescriptions     Prescription[]
+  carePlans         CarePlan[]
+  sessionNotes      SessionNote[]
+  appointments      Appointment[]
+  patientPackages   PatientPackage[]
+  payments          Payment[]
+  leadsConverted    Lead[]             @relation("LeadConvertedPatient")
+  messageLogs       MessageLog[]
+
+  @@index([homeBranchId])
+  @@index([primaryTherapistId])
+  @@index([status])
+  @@index([mobile])
+  @@index([lastName, birthDate])
+}
+
+model PatientConsent {
+  id           String      @id @default(cuid())
+  patientId    String
+  consentType  ConsentType
+  granted      Boolean
+  grantedAt    DateTime    @db.Timestamptz(6)
+  ipAddress    String?
+  formVersion  String
+  guardianName String?
+  createdAt    DateTime    @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime    @updatedAt @db.Timestamptz(6)
+  deletedAt    DateTime?   @db.Timestamptz(6)
+  createdById  String?
+
+  patient Patient @relation(fields: [patientId], references: [id])
+
+  @@index([patientId, consentType])
+}
+
+model IntakeSubmission {
+  id            String       @id @default(cuid())
+  patientId     String?
+  branchId      String
+  formVersion   String
+  answers       Json
+  submittedAt   DateTime     @db.Timestamptz(6)
+  submittedVia  SubmittedVia
+  processedAt   DateTime?    @db.Timestamptz(6)
+  processedById String?
+  createdAt     DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime     @updatedAt @db.Timestamptz(6)
+  deletedAt     DateTime?    @db.Timestamptz(6)
+  createdById   String?
+
+  patient Patient? @relation(fields: [patientId], references: [id])
+  branch  Branch   @relation(fields: [branchId], references: [id])
+
+  @@index([branchId])
+  @@index([patientId])
+}
+
+model Attachment {
+  id           String         @id @default(cuid())
+  patientId    String
+  kind         AttachmentKind
+  storagePath  String
+  uploadedById String
+  createdAt    DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime       @updatedAt @db.Timestamptz(6)
+  deletedAt    DateTime?      @db.Timestamptz(6)
+  createdById  String?
+
+  patient Patient @relation(fields: [patientId], references: [id])
+
+  @@index([patientId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Clinical
+// ─────────────────────────────────────────────────────────────────────────
+
+model Assessment {
+  id                String    @id @default(cuid())
+  patientId         String
+  branchId          String
+  assessedById      String
+  assessedAt        DateTime  @db.Timestamptz(6)
+  track             Track
+  chiefComplaint    String
+  painScale         Int
+  painLocation      String?
+  onsetDate         DateTime? @db.Date
+  mechanismOfInjury String?
+  romFindings       Json?
+  specialTests      Json?
+  redFlags          String[]
+  recommendation    String
+  needsDoctorReview Boolean   @default(false)
+  createdAt         DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt         DateTime? @db.Timestamptz(6)
+  createdById       String?
+
+  patient       Patient        @relation(fields: [patientId], references: [id])
+  branch        Branch         @relation(fields: [branchId], references: [id])
+  prescriptions Prescription[]
+
+  @@index([patientId])
+  @@index([branchId])
+  @@index([needsDoctorReview])
+}
+
+model Prescription {
+  id                 String             @id @default(cuid())
+  patientId          String
+  assessmentId       String
+  doctorId           String
+  diagnosis          String
+  icd10              String?
+  prescribedSessions Int
+  frequencyPerWeek   Int
+  modalities         String[]
+  precautions        String?
+  goals              String?
+  validFrom          DateTime           @db.Date
+  validUntil         DateTime           @db.Date
+  signedAt           DateTime?          @db.Timestamptz(6)
+  status             PrescriptionStatus @default(DRAFT)
+  createdAt          DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime           @updatedAt @db.Timestamptz(6)
+  deletedAt          DateTime?          @db.Timestamptz(6)
+  createdById        String?
+
+  patient    Patient    @relation(fields: [patientId], references: [id])
+  assessment Assessment @relation(fields: [assessmentId], references: [id])
+  carePlans  CarePlan[]
+
+  @@index([patientId])
+  @@index([status])
+}
+
+model CarePlan {
+  id                  String         @id @default(cuid())
+  patientId           String
+  prescriptionId      String?
+  track               Track
+  totalSessions       Int
+  completedSessions   Int            @default(0)
+  startedAt           DateTime       @db.Timestamptz(6)
+  targetEndDate       DateTime?      @db.Date
+  status              CarePlanStatus @default(ACTIVE)
+  assignedTherapistId String
+  createdAt           DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime       @updatedAt @db.Timestamptz(6)
+  deletedAt           DateTime?      @db.Timestamptz(6)
+  createdById         String?
+
+  patient      Patient       @relation(fields: [patientId], references: [id])
+  prescription Prescription? @relation(fields: [prescriptionId], references: [id])
+
+  @@index([patientId])
+  @@index([assignedTherapistId])
+  @@index([status])
+}
+
+// SessionNote is immutable once signed — enforce in application layer (no update after signedAt is set).
+model SessionNote {
+  id                  String    @id @default(cuid())
+  appointmentId       String    @unique
+  patientId           String
+  therapistId         String
+  subjective          String
+  objective           String
+  assessment          String
+  plan                String
+  painBefore          Int?
+  painAfter           Int?
+  modalitiesPerformed String[]
+  durationMin         Int
+  signedAt            DateTime? @db.Timestamptz(6)
+  createdAt           DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt           DateTime? @db.Timestamptz(6)
+  createdById         String?
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id])
+  patient     Patient     @relation(fields: [patientId], references: [id])
+
+  @@index([patientId])
+  @@index([therapistId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Scheduling & commerce
+// ─────────────────────────────────────────────────────────────────────────
+
+model Appointment {
+  id               String            @id @default(cuid())
+  patientId        String
+  branchId         String
+  therapistId      String
+  serviceId        String
+  roomId           String?
+  startsAt         DateTime          @db.Timestamptz(6)
+  endsAt           DateTime          @db.Timestamptz(6)
+  status           AppointmentStatus @default(BOOKED)
+  source           AppointmentSource
+  patientPackageId String?
+  notes            String?
+  checkedInAt      DateTime?         @db.Timestamptz(6)
+  completedAt      DateTime?         @db.Timestamptz(6)
+  cancelledAt      DateTime?         @db.Timestamptz(6)
+  cancelReason     String?
+  noShowFee        Int?
+  createdAt        DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime          @updatedAt @db.Timestamptz(6)
+  deletedAt        DateTime?         @db.Timestamptz(6)
+  createdById      String?
+
+  patient        Patient         @relation(fields: [patientId], references: [id])
+  branch         Branch          @relation(fields: [branchId], references: [id])
+  service        Service         @relation(fields: [serviceId], references: [id])
+  room           Room?           @relation(fields: [roomId], references: [id])
+  patientPackage PatientPackage? @relation(fields: [patientPackageId], references: [id])
+  sessionNote    SessionNote?
+  payments       Payment[]
+
+  @@unique([therapistId, startsAt])
+  @@index([branchId, startsAt])
+  @@index([patientId])
+  @@index([status])
+}
+
+model PatientPackage {
+  id            String               @id @default(cuid())
+  patientId     String
+  packageId     String
+  purchasedAt   DateTime             @db.Timestamptz(6)
+  sessionsTotal Int
+  sessionsUsed  Int                  @default(0)
+  expiresAt     DateTime             @db.Timestamptz(6)
+  status        PatientPackageStatus @default(ACTIVE)
+  createdAt     DateTime             @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime             @updatedAt @db.Timestamptz(6)
+  deletedAt     DateTime?            @db.Timestamptz(6)
+  createdById   String?
+
+  patient      Patient       @relation(fields: [patientId], references: [id])
+  package      Package       @relation(fields: [packageId], references: [id])
+  appointments Appointment[]
+  payments     Payment[]
+
+  @@index([patientId])
+  @@index([status])
+}
+
+model Payment {
+  id               String        @id @default(cuid())
+  patientId        String
+  branchId         String
+  amountCentavos   Int
+  method           PaymentMethod
+  referenceNo      String?
+  appointmentId    String?
+  patientPackageId String?
+  receivedById     String
+  receivedAt       DateTime      @db.Timestamptz(6)
+  isVoided         Boolean       @default(false)
+  voidReason       String?
+  createdAt        DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime      @updatedAt @db.Timestamptz(6)
+  deletedAt        DateTime?     @db.Timestamptz(6)
+  createdById      String?
+
+  patient        Patient         @relation(fields: [patientId], references: [id])
+  branch         Branch          @relation(fields: [branchId], references: [id])
+  appointment    Appointment?    @relation(fields: [appointmentId], references: [id])
+  patientPackage PatientPackage? @relation(fields: [patientPackageId], references: [id])
+
+  @@index([branchId, receivedAt])
+  @@index([patientId])
+}
+
+model TherapistAvailability {
+  id            String    @id @default(cuid())
+  therapistId   String
+  branchId      String
+  dayOfWeek     Int
+  startTime     String
+  endTime       String
+  effectiveFrom DateTime  @db.Date
+  effectiveTo   DateTime? @db.Date
+  createdAt     DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt     DateTime? @db.Timestamptz(6)
+  createdById   String?
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@index([therapistId])
+  @@index([branchId])
+}
+
+model TimeOff {
+  id          String    @id @default(cuid())
+  therapistId String
+  startsAt    DateTime  @db.Timestamptz(6)
+  endsAt      DateTime  @db.Timestamptz(6)
+  reason      String?
+  createdAt   DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt   DateTime? @db.Timestamptz(6)
+  createdById String?
+
+  @@index([therapistId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// CRM
+// ─────────────────────────────────────────────────────────────────────────
+
+model Lead {
+  id                    String     @id @default(cuid())
+  fullName              String
+  mobile                String
+  email                 String?
+  source                LeadSource
+  campaignName          String?
+  interestedInServiceId String?
+  branchId              String
+  assignedToId          String
+  stage                 LeadStage  @default(NEW)
+  nextFollowUpAt        DateTime?  @db.Timestamptz(6)
+  lostReason            String?
+  convertedPatientId    String?
+  rawPayload            Json?
+  createdAt             DateTime   @default(now()) @db.Timestamptz(6)
+  updatedAt             DateTime   @updatedAt @db.Timestamptz(6)
+  deletedAt             DateTime?  @db.Timestamptz(6)
+  createdById           String?
+
+  interestedInService Service?       @relation(fields: [interestedInServiceId], references: [id])
+  branch              Branch         @relation(fields: [branchId], references: [id])
+  convertedPatient    Patient?       @relation("LeadConvertedPatient", fields: [convertedPatientId], references: [id])
+  activities          LeadActivity[]
+
+  @@index([branchId, stage])
+  @@index([assignedToId])
+  @@index([mobile])
+}
+
+model LeadActivity {
+  id          String           @id @default(cuid())
+  leadId      String
+  type        LeadActivityType
+  body        String?
+  byUserId    String
+  occurredAt  DateTime         @db.Timestamptz(6)
+  createdAt   DateTime         @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime         @updatedAt @db.Timestamptz(6)
+  deletedAt   DateTime?        @db.Timestamptz(6)
+  createdById String?
+
+  lead Lead @relation(fields: [leadId], references: [id])
+
+  @@index([leadId])
+}
+
+// subjectId points at Lead.id or Patient.id depending on subjectType — enforced in application layer, not a DB relation.
+model FollowUpTask {
+  id           String              @id @default(cuid())
+  subjectType  FollowUpSubjectType
+  subjectId    String
+  reason       FollowUpReason
+  dueAt        DateTime            @db.Timestamptz(6)
+  assignedToId String
+  status       FollowUpStatus      @default(OPEN)
+  completedAt  DateTime?           @db.Timestamptz(6)
+  outcome      String?
+  createdAt    DateTime            @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime            @updatedAt @db.Timestamptz(6)
+  deletedAt    DateTime?           @db.Timestamptz(6)
+  createdById  String?
+
+  // subjectId is polymorphic (Lead.id or Patient.id per subjectType) so it is
+  // NOT a real foreign key — a single column can't satisfy two FK constraints
+  // at once. Resolve the target row in application code via subjectType.
+
+  @@index([assignedToId, status, dueAt])
+  @@index([subjectType, subjectId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Incentives & audit
+// ─────────────────────────────────────────────────────────────────────────
+
+model QuotaScheme {
+  name          String
+  period        QuotaPeriodKind
+  metric        QuotaMetric
+  countingRules Json
+  tiers         Json
+  stacking      StackingMode
+  effectiveFrom DateTime        @db.Date
+  effectiveTo   DateTime?       @db.Date
+  isActive      Boolean         @default(true)
+  id            String          @id @default(cuid())
+  createdAt     DateTime        @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime        @updatedAt @db.Timestamptz(6)
+  deletedAt     DateTime?       @db.Timestamptz(6)
+  createdById   String?
+
+  therapistProfiles TherapistProfile[]
+  quotaPeriods      QuotaPeriod[]
+
+  @@index([isActive])
+}
+
+model QuotaPeriod {
+  id          String            @id @default(cuid())
+  schemeId    String
+  branchId    String?
+  periodStart DateTime          @db.Timestamptz(6)
+  periodEnd   DateTime          @db.Timestamptz(6)
+  status      QuotaPeriodStatus @default(OPEN)
+  createdAt   DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime          @updatedAt @db.Timestamptz(6)
+  deletedAt   DateTime?         @db.Timestamptz(6)
+  createdById String?
+
+  scheme        QuotaScheme    @relation(fields: [schemeId], references: [id])
+  branch        Branch?        @relation(fields: [branchId], references: [id])
+  payoutResults PayoutResult[]
+
+  @@index([schemeId])
+  @@index([periodStart, periodEnd])
+}
+
+model PayoutResult {
+  id            String       @id @default(cuid())
+  therapistId   String
+  quotaPeriodId String
+  metricValue   Int
+  tierReached   Int
+  bonusCentavos Int
+  lineItems     Json
+  computedAt    DateTime     @db.Timestamptz(6)
+  status        PayoutStatus @default(DRAFT)
+  approvedById  String?
+  approvedAt    DateTime?    @db.Timestamptz(6)
+  notes         String?
+  createdAt     DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime     @updatedAt @db.Timestamptz(6)
+  deletedAt     DateTime?    @db.Timestamptz(6)
+  createdById   String?
+
+  quotaPeriod QuotaPeriod @relation(fields: [quotaPeriodId], references: [id])
+
+  @@unique([therapistId, quotaPeriodId])
+  @@index([therapistId])
+  @@index([status])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String
+  action     String
+  entityType String
+  entityId   String
+  before     Json?
+  after      Json?
+  ipAddress  String?
+  userAgent  String?
+  at         DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([entityType, entityId])
+  @@index([actorId, at])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Messaging (§8.1)
+// ─────────────────────────────────────────────────────────────────────────
+
+model MessageTemplate {
+  id           String                  @id @default(cuid())
+  name         String
+  trigger      MessageTemplateTrigger
+  channel      NotificationChannelKind
+  bodyTemplate String
+  locale       String
+  isActive     Boolean                 @default(true)
+  createdAt    DateTime                @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime                @updatedAt @db.Timestamptz(6)
+  deletedAt    DateTime?               @db.Timestamptz(6)
+  createdById  String?
+
+  messageLogs MessageLog[]
+
+  @@index([trigger, channel, locale])
+}
+
+model MessageLog {
+  id          String                  @id @default(cuid())
+  patientId   String
+  channel     NotificationChannelKind
+  templateId  String?
+  payload     Json
+  status      MessageStatus           @default(QUEUED)
+  providerRef String?
+  error       String?
+  sentAt      DateTime?               @db.Timestamptz(6)
+  createdAt   DateTime                @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime                @updatedAt @db.Timestamptz(6)
+
+  patient  Patient          @relation(fields: [patientId], references: [id])
+  template MessageTemplate? @relation(fields: [templateId], references: [id])
+
+  @@index([patientId])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Settings (owner-editable thresholds, retention policy — §8, §11)
+// ─────────────────────────────────────────────────────────────────────────
+
+model AppSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       Json
+  updatedById String?
+  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+}
