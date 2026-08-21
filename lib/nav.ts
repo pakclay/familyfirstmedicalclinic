@@ -4,7 +4,9 @@ export type NavItem = { label: string; href: string }
 
 const CONSOLE_NAV: NavItem[] = [
   { label: "Dashboard", href: "/console/dashboard" },
-  { label: "Patients", href: "/console/patients" },
+  // lives under /staff — shared with front desk rather than reimplemented
+  // per role; middleware already allows CLINIC_ADMIN/HOLDING_ADMIN there.
+  { label: "Patients", href: "/staff/patients" },
 ]
 
 const HOLDING_ONLY_NAV: NavItem[] = [

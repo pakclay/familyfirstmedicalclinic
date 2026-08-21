@@ -9,6 +9,102 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-08-21 — M2: patients
+
+Walk-in registration (§7.2), duplicate-avoiding phone search, patient
+search, and patient profile with visit history. Verified end-to-end live in
+the browser as Quezon City front desk: searching an already-seeded
+patient's number ("09170001111") found her despite the stored value being
+formatted differently ("+63 917 000 1111"), checked her in at queue #1;
+registering a genuinely new patient ("Rosa Garcia") got queue #2 in the
+same clinic/day; both then showed up correctly in patient search and in
+their own profile's visit history. `lib/queries/__tests__/registration.test.ts`
+(7 tests) covers the same ground plus clinic-scoping on the two new
+mutations and the minor/guardian validation path.
+
+- **§7.2's registration flow inherently includes a queue check-in, not just
+  a Patient row** — "registers a walk-in" only makes sense end-to-end if
+  the walk-in actually gets a queue number, and §7.2 itself says so
+  ("Creates a queue entry with source = walk_in, status checked_in").
+  Built the minimum queue-entry machinery needed for that (`nextQueueNumber`,
+  `QueueEntry` creation) now, ahead of M3's actual queue *board* (Call Next,
+  Recall, Assign Doctor, priority reordering, public display, patient status
+  page) — same "infrastructure ahead of the phase that surfaces it" approach
+  used for Payment in the prior project's Phase 2. `/staff/queue` is still
+  M3's stub; M2 only needed queue entries to exist, not to be managed yet.
+- **Queue number allocation uses a Postgres transaction-scoped advisory
+  lock** (`pg_advisory_xact_lock(hashtext(clinicId || day))`), not a plain
+  `max + 1` read-then-write. Under the default READ COMMITTED isolation,
+  two concurrent transactions can both read the same max before either
+  commits and then both try to insert the same number — the
+  `@@unique([clinicId, queueDate, queueNumber])` constraint would catch the
+  collision, but only after the fact, as a failure to handle. The advisory
+  lock serializes allocation for that clinic+day key instead, so the second
+  transaction just waits for the first to commit — no retry logic needed,
+  and it self-releases at commit/rollback (`_xact` variant). Matches §7.1's
+  literal "generate it inside a transaction so two simultaneous bookings
+  can't collide."
+- **"Today" for queue-numbering must use the clinic's own timezone, not the
+  server's** — a naive `new Date()` UTC calendar-date read would be a full
+  day behind Manila's actual date for the 16:00–23:59 UTC window every day
+  (Manila is UTC+8). `lib/queries/queue.ts`'s `todayAsQueueDate(timezone)`
+  uses `date-fns-tz`'s `toZonedTime` plus **UTC** getters on the shifted
+  instant — the exact fix pattern this repo's own history already recorded
+  once (prior project's `availability.ts` bug, `toZonedTime(...).getX()`
+  with non-UTC getters silently depending on the host machine's own
+  timezone). Takes the clinic's `timezone` column explicitly rather than
+  hardcoding `Asia/Manila`, even though every seeded clinic currently uses
+  it.
+- **Phone matching can't be done with a DB-level `contains` on normalized
+  digits** — found this the hard way via a failing test, not by reasoning
+  it through up front. A stored number like "+63 917 555 0001" has a space
+  inside almost any fixed-width digit window, so a `contains` filter built
+  from normalized (punctuation-stripped) digits routinely misses rows whose
+  *raw* text just happens to have a space or dash in that exact span.
+  `searchPatientsByPhone` now fetches the clinic's own patients (§13: an
+  MVP roster is dozens to a few hundred, a real query at this scale, not a
+  performance problem hiding as a design choice) and normalizes/compares in
+  JS instead.
+- **No silent auto-match on walk-in registration** — §7.2's "phone-number
+  search first to avoid duplicates" is a staff-driven UI step
+  (`searchPatientsByPhone` → front desk picks an existing match or
+  confirms "none of these"), deliberately different from §7.1's public
+  booking flow, which *does* auto-match by phone + last name + birthdate
+  with no human in the loop. That auto-match logic is out of scope until
+  M3 wires up online booking; conflating the two now would mean a walk-in
+  could silently attach to the wrong record with no staff member ever
+  seeing a decision point.
+- **`registerWalkIn`/`checkInExistingPatient` take `unknown` input and
+  parse with the same Zod schema the UI's server action already validated**
+  — deliberate double-validation, not redundant duplication: the action's
+  own `safeParse` exists purely to turn a bad submission into a friendly
+  inline error instead of an unhandled exception; the query function
+  re-validates independently so it's safe to call from anywhere (tests
+  included — `registration.test.ts` calls it directly with raw
+  string-typed fixture data) without trusting the caller already did it.
+- **Patient profile's "visit history" is queue-entry history, not
+  consultation history** — §6/§7.4 model the actual consultation record
+  (chief complaint, diagnosis, medicines) as a separate table that doesn't
+  exist until M4. For M2, "prior visits" means the queue entries themselves
+  (date, source, status, priority) — the acceptance line ("surfaces their
+  prior visits") is satisfied by that; clinical detail per visit lands with
+  M4's consultation screen.
+- **Moved patient search/profile from `/console/patients` to
+  `/staff/patients`, deleting the M1 console-only version** — §9 lists
+  "patient search" and "patient profile with history" under *Staff*
+  screens, not Clinic Admin's own console, and middleware already allows
+  FRONT_DESK/CLINIC_ADMIN/HOLDING_ADMIN on `/staff/*`. Building it once
+  under `/staff` and pointing the console sidebar's "Patients" link there
+  avoided a second, drifting implementation of the same list/detail logic
+  for clinic admins.
+- **Guardian fields render unconditionally on the registration form** (not
+  shown/hidden based on the entered birthdate) with helper text explaining
+  they're only required for a minor — client-side conditional reveal was
+  possible but not load-bearing for correctness, since the server-side Zod
+  `superRefine` is the actual enforcement point regardless of what the form
+  shows. Revisit for polish if the always-visible fields prove confusing
+  in real use.
+
 ## 2026-08-21 — Pivot + Section 13 decisions
 
 Before any schema/code, per SPEC.md §0's own instruction to restate the plan
