@@ -24,6 +24,7 @@ export type Resource =
   | "intakeSubmissions"
   | "soapNotes"
   | "prescription"
+  | "carePlan"
   | "appointments"
   | "packages"
   | "payments"
@@ -80,6 +81,23 @@ export const ABILITY_MATRIX: Matrix = {
     BRANCH_MANAGER: { read: "branch", write: "none" },
     DOCTOR: { read: "all", write: "all" },
     THERAPIST: { read: "own", write: "none" },
+    FRONT_DESK: NONE,
+    MARKETING: NONE,
+  },
+  // Not one of §4.1's table rows — CarePlan sits between prescription and
+  // scheduling and isn't named explicitly, but §6 requires assigning one
+  // (which sets Patient.primaryTherapistId) and someone has to be allowed
+  // to do that. Modeled the same way soapNotes/prescription are: the two
+  // roles actually present at that point in the workflow (THERAPIST for
+  // WELLNESS triage, DOCTOR right after signing a REHAB prescription) get
+  // write access to their own patients; OWNER always can; BRANCH_MANAGER
+  // gets read for branch ops visibility, matching its pattern everywhere
+  // else in the matrix.
+  carePlan: {
+    OWNER: { read: "all", write: "all" },
+    BRANCH_MANAGER: { read: "branch", write: "none" },
+    DOCTOR: { read: "all", write: "all" },
+    THERAPIST: { read: "own", write: "own" },
     FRONT_DESK: NONE,
     MARKETING: NONE,
   },

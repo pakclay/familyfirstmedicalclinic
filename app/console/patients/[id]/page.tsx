@@ -2,12 +2,15 @@ import { notFound } from "next/navigation"
 import { requireRole } from "@/lib/auth/guards"
 import { getPatient } from "@/lib/actions/patients"
 import { listActivePackages } from "@/lib/actions/packages"
+import { listAssessments, listPrescriptions, listCarePlans } from "@/lib/actions/clinical"
+import { canAccess } from "@/lib/permissions/ability"
 import { prisma } from "@/lib/db/prisma"
 import { ageInYears } from "@/lib/utils/age"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { PatientPackagesCard } from "@/components/patients/patient-packages-card"
+import { PatientClinicalCard } from "@/components/patients/patient-clinical-card"
 
 const CAN_SELL_PACKAGES = ["OWNER", "BRANCH_MANAGER", "FRONT_DESK"]
 
@@ -27,9 +30,22 @@ export default async function PatientProfilePage({ params }: { params: Promise<{
   if (!patient) notFound()
 
   const canSellPackages = CAN_SELL_PACKAGES.includes(user.role)
-  const [activePackages, catalog] = await Promise.all([
+  const canWriteAssessment = canAccess(user, "soapNotes", "write")
+  const canWritePrescription = canAccess(user, "prescription", "write")
+  const canWriteCarePlan = canAccess(user, "carePlan", "write")
+
+  const [activePackages, catalog, assessments, prescriptions, carePlans, branchTherapists] = await Promise.all([
     listActivePackages(id).catch(() => []),
     canSellPackages ? prisma.package.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }) : Promise.resolve([]),
+    listAssessments(id).catch(() => []),
+    listPrescriptions(id).catch(() => []),
+    listCarePlans(id).catch(() => []),
+    canWriteCarePlan
+      ? prisma.user.findMany({
+          where: { role: "THERAPIST", homeBranchId: patient.homeBranchId, isActive: true, deletedAt: null },
+          select: { id: true, name: true },
+        })
+      : Promise.resolve([]),
   ])
 
   const age = ageInYears(patient.birthDate)
@@ -45,6 +61,15 @@ export default async function PatientProfilePage({ params }: { params: Promise<{
       at: c.grantedAt,
       label: `${CONSENT_LABELS[c.consentType] ?? c.consentType} consent ${c.granted ? "granted" : "declined"}`,
     })),
+    ...assessments.map((a) => ({
+      at: a.assessedAt,
+      label: `${a.track === "REHAB" ? "Rehab" : "Wellness"} assessment recorded`,
+      detail: a.chiefComplaint,
+    })),
+    ...prescriptions
+      .filter((p) => p.signedAt)
+      .map((p) => ({ at: p.signedAt!, label: "Prescription signed", detail: p.diagnosis })),
+    ...carePlans.map((c) => ({ at: c.startedAt, label: `Care plan started (${c.track.toLowerCase()})` })),
   ].sort((a, b) => b.at.getTime() - a.at.getTime())
 
   return (
@@ -84,6 +109,38 @@ export default async function PatientProfilePage({ params }: { params: Promise<{
             )}
           </CardContent>
         </Card>
+
+        <PatientClinicalCard
+          patientId={patient.id}
+          branchId={patient.homeBranchId}
+          canWriteAssessment={canWriteAssessment}
+          canWritePrescription={canWritePrescription}
+          canWriteCarePlan={canWriteCarePlan}
+          therapists={branchTherapists}
+          assessments={assessments.map((a) => ({
+            id: a.id,
+            track: a.track,
+            assessedAt: a.assessedAt.toISOString(),
+            chiefComplaint: a.chiefComplaint,
+            needsDoctorReview: a.needsDoctorReview,
+            recommendation: a.recommendation,
+          }))}
+          prescriptions={prescriptions.map((p) => ({
+            id: p.id,
+            assessmentId: p.assessmentId,
+            diagnosis: p.diagnosis,
+            status: p.status,
+            prescribedSessions: p.prescribedSessions,
+          }))}
+          carePlans={carePlans.map((c) => ({
+            id: c.id,
+            track: c.track,
+            status: c.status,
+            totalSessions: c.totalSessions,
+            completedSessions: c.completedSessions,
+            assignedTherapistName: c.assignedTherapistName,
+          }))}
+        />
       </div>
 
       <div className="space-y-6">

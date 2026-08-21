@@ -262,16 +262,35 @@ export async function cancelAppointmentFor(user: AbilitySubject, appointmentId: 
 
 export type CompleteAppointmentResult = { appointment: { id: string; status: string } }
 
+export type SoapNoteFields = {
+  subjective: string
+  objective: string
+  assessment: string
+  plan: string
+  painBefore?: number
+  painAfter?: number
+  modalitiesPerformed: string[]
+}
+
 /**
  * §6's prescription gate + §6's "completing an appointment consumes one
  * credit from the linked PatientPackage in the same transaction," both
  * enforced here since this is the one place an appointment becomes
  * COMPLETED.
+ *
+ * The SOAP note is optional here, deliberately — the ability matrix gives
+ * OWNER/BRANCH_MANAGER/FRONT_DESK no write access to soapNotes at all
+ * (they can complete an appointment administratively, but can't
+ * clinically document one), and §7.1's quota `countingRules.
+ * requireSignedSessionNote` is where "no note, no credit" actually gets
+ * enforced (Phase 5), not here. When a THERAPIST/DOCTOR does provide one,
+ * it's created already-signed (§5: "immutable once signed") in the same
+ * transaction as completion.
  */
 export async function completeAppointmentFor(
   user: AbilitySubject,
   appointmentId: string,
-  opts: { overrideReason?: string } = {}
+  opts: { overrideReason?: string; soapNote?: SoapNoteFields } = {}
 ): Promise<CompleteAppointmentResult> {
   requireWriteScope(user)
 
@@ -326,6 +345,29 @@ export async function completeAppointmentFor(
         data: {
           sessionsUsed,
           status: sessionsUsed >= pkg.sessionsTotal ? "CONSUMED" : "ACTIVE",
+        },
+      })
+    }
+
+    // DOCTOR has appointments write:none (checked by requireWriteScope
+    // above, so a DOCTOR never reaches this line at all) — only THERAPIST
+    // can complete an appointment and also hold soapNotes write access.
+    if (opts.soapNote && user.role === "THERAPIST") {
+      await tx.sessionNote.create({
+        data: {
+          appointmentId: appt.id,
+          patientId: appt.patientId,
+          therapistId: appt.therapistId,
+          subjective: opts.soapNote.subjective,
+          objective: opts.soapNote.objective,
+          assessment: opts.soapNote.assessment,
+          plan: opts.soapNote.plan,
+          painBefore: opts.soapNote.painBefore,
+          painAfter: opts.soapNote.painAfter,
+          modalitiesPerformed: opts.soapNote.modalitiesPerformed,
+          durationMin: appt.service.durationMin,
+          signedAt: new Date(),
+          createdById: user.id,
         },
       })
     }

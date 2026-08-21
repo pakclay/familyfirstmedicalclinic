@@ -27,6 +27,11 @@ export const NAV_ITEMS: NavItem[] = [
     roles: ["OWNER", "BRANCH_MANAGER", "DOCTOR", "THERAPIST", "FRONT_DESK"],
   },
   {
+    label: "Doctor Queue",
+    href: "/console/doctor-queue",
+    roles: ["OWNER", "DOCTOR"],
+  },
+  {
     label: "Leads",
     href: "/console/leads",
     roles: ["OWNER", "BRANCH_MANAGER", "FRONT_DESK", "MARKETING"],

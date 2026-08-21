@@ -26,10 +26,13 @@ import { recordPayment } from "@/lib/actions/payments"
 import type { AppointmentView } from "./appointment-card"
 import type { PaymentMethod } from "@prisma/client"
 
+const EMPTY_SOAP = { subjective: "", objective: "", assessment: "", plan: "", painBefore: "", painAfter: "", modalitiesPerformed: "" }
+
 export function AppointmentDetailSheet({
   appointment,
   isOwner,
   canRecordPayments,
+  canWriteSoapNotes,
   branchId,
   onOpenChange,
   onChanged,
@@ -37,6 +40,7 @@ export function AppointmentDetailSheet({
   appointment: AppointmentView | null
   isOwner: boolean
   canRecordPayments: boolean
+  canWriteSoapNotes: boolean
   branchId: string
   onOpenChange: (open: boolean) => void
   onChanged: () => void
@@ -51,6 +55,8 @@ export function AppointmentDetailSheet({
   const [paymentAmount, setPaymentAmount] = useState("")
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("CASH")
   const [priceHint, setPriceHint] = useState<{ name: string; priceCentavos: number } | null>(null)
+  const [showSoap, setShowSoap] = useState(false)
+  const [soap, setSoap] = useState(EMPTY_SOAP)
 
   if (!appointment) return null
 
@@ -69,6 +75,29 @@ export function AppointmentDetailSheet({
     } finally {
       setPending(false)
     }
+  }
+
+  function completeWithSoap() {
+    if (!soap.subjective.trim() || !soap.objective.trim() || !soap.assessment.trim() || !soap.plan.trim()) {
+      setError("Fill in all four SOAP fields, or skip the note.")
+      return
+    }
+    run(() =>
+      completeAppointment(appointment!.id, {
+        soapNote: {
+          subjective: soap.subjective,
+          objective: soap.objective,
+          assessment: soap.assessment,
+          plan: soap.plan,
+          painBefore: soap.painBefore ? Number(soap.painBefore) : undefined,
+          painAfter: soap.painAfter ? Number(soap.painAfter) : undefined,
+          modalitiesPerformed: soap.modalitiesPerformed
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+        },
+      })
+    )
   }
 
   async function openPaymentForm() {
@@ -132,10 +161,56 @@ export function AppointmentDetailSheet({
               <Button
                 size="sm"
                 disabled={pending || !overrideReason.trim()}
-                onClick={() => run(() => completeAppointment(appointment.id, overrideReason))}
+                onClick={() => run(() => completeAppointment(appointment.id, { overrideReason }))}
               >
                 Complete with override
               </Button>
+            </div>
+          ) : null}
+
+          {showSoap ? (
+            <div className="space-y-2 rounded-md border border-border p-3">
+              <Label>SOAP note</Label>
+              <Textarea placeholder="Subjective" value={soap.subjective} onChange={(e) => setSoap({ ...soap, subjective: e.target.value })} />
+              <Textarea placeholder="Objective" value={soap.objective} onChange={(e) => setSoap({ ...soap, objective: e.target.value })} />
+              <Textarea placeholder="Assessment" value={soap.assessment} onChange={(e) => setSoap({ ...soap, assessment: e.target.value })} />
+              <Textarea placeholder="Plan" value={soap.plan} onChange={(e) => setSoap({ ...soap, plan: e.target.value })} />
+              <div className="flex gap-2">
+                <Input
+                  type="number"
+                  min={0}
+                  max={10}
+                  placeholder="Pain before (0-10)"
+                  value={soap.painBefore}
+                  onChange={(e) => setSoap({ ...soap, painBefore: e.target.value })}
+                />
+                <Input
+                  type="number"
+                  min={0}
+                  max={10}
+                  placeholder="Pain after (0-10)"
+                  value={soap.painAfter}
+                  onChange={(e) => setSoap({ ...soap, painAfter: e.target.value })}
+                />
+              </div>
+              <Input
+                placeholder="Modalities performed, comma-separated"
+                value={soap.modalitiesPerformed}
+                onChange={(e) => setSoap({ ...soap, modalitiesPerformed: e.target.value })}
+              />
+              <div className="flex gap-2">
+                <Button size="sm" disabled={pending} onClick={completeWithSoap}>
+                  Complete with note
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={pending}
+                  onClick={() => run(() => completeAppointment(appointment.id))}
+                >
+                  Complete without note
+                </Button>
+              </div>
             </div>
           ) : null}
 
@@ -190,8 +265,12 @@ export function AppointmentDetailSheet({
                 Check in
               </Button>
             )}
-            {appointment.status === "CHECKED_IN" && (
-              <Button size="sm" disabled={pending} onClick={() => run(() => completeAppointment(appointment.id))}>
+            {appointment.status === "CHECKED_IN" && !showSoap && (
+              <Button
+                size="sm"
+                disabled={pending}
+                onClick={() => (canWriteSoapNotes ? setShowSoap(true) : run(() => completeAppointment(appointment.id)))}
+              >
                 Complete
               </Button>
             )}

@@ -12,7 +12,19 @@ import { isMinor } from "@/lib/validation/patient"
 
 const PATIENT_SCOPE_FIELDS = { branchField: "homeBranchId", ownField: "primaryTherapistId" } as const
 
-function requireReadScope(user: AbilitySubject) {
+/**
+ * THERAPIST's "own" scope on patientDemographics can't be just
+ * `primaryTherapistId` — that field is only set once a care plan is
+ * created (Phase 4), but §6's workflow has the assessing PT reading the
+ * patient's chart *before* any care plan exists (intake -> assessment ->
+ * doctor review -> care plan). Treating "own" as "assigned as primary
+ * therapist OR has an appointment with this patient" is what actually
+ * lets that first assessment happen. See DECISIONS.md.
+ */
+function requireReadScope(user: AbilitySubject): Prisma.PatientWhereInput {
+  if (user.role === "THERAPIST") {
+    return { OR: [{ primaryTherapistId: user.id }, { appointments: { some: { therapistId: user.id } } }] }
+  }
   const where = scopeWhere(user, "patientDemographics", "read", PATIENT_SCOPE_FIELDS)
   if (!where) throw new ForbiddenError("Your role cannot read patient records")
   return where

@@ -22,6 +22,7 @@ export type ScheduleViewProps = {
   canPickBranch: boolean
   isOwner: boolean
   canRecordPayments: boolean
+  canWriteSoapNotes: boolean
   branches: { id: string; name: string }[]
   therapists: { id: string; name: string }[]
   services: { id: string; name: string; category: string; durationMin: number; requiresPrescription: boolean }[]
@@ -30,7 +31,8 @@ export type ScheduleViewProps = {
 }
 
 export function ScheduleView(props: ScheduleViewProps) {
-  const { dateKey, branchId, canPickBranch, isOwner, canRecordPayments, branches, therapists, services, rooms, appointments } = props
+  const { dateKey, branchId, canPickBranch, isOwner, canRecordPayments, canWriteSoapNotes, branches, therapists, services, rooms, appointments } =
+    props
   const router = useRouter()
   const [bookOpen, setBookOpen] = useState(false)
   const [selected, setSelected] = useState<AppointmentView | null>(null)
@@ -132,6 +134,7 @@ export function ScheduleView(props: ScheduleViewProps) {
         appointment={selected}
         isOwner={isOwner}
         canRecordPayments={canRecordPayments}
+        canWriteSoapNotes={canWriteSoapNotes}
         branchId={branchId}
         onOpenChange={(open) => !open && setSelected(null)}
         onChanged={() => {

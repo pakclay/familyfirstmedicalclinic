@@ -30,6 +30,7 @@ export default async function SchedulePage({
       canPickBranch={user.role === "OWNER"}
       isOwner={user.role === "OWNER"}
       canRecordPayments={canAccess(user, "payments", "write")}
+      canWriteSoapNotes={canAccess(user, "soapNotes", "write")}
       branches={branches.map((b) => ({ id: b.id, name: b.name }))}
       therapists={bookingContext.therapists.map((t) => ({ id: t.id, name: t.name }))}
       services={bookingContext.services}

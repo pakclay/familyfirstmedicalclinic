@@ -12,6 +12,7 @@ import {
   markNoShowFor,
   cancelAppointmentFor,
   type CreateAppointmentInput,
+  type SoapNoteFields,
 } from "@/lib/queries/scheduling"
 
 export async function listAppointments(query: { branchId: string; therapistId?: string; dayStart: Date; dayEnd: Date }) {
@@ -45,9 +46,9 @@ export async function checkInAppointment(appointmentId: string) {
   return checkInAppointmentFor(user, appointmentId)
 }
 
-export async function completeAppointment(appointmentId: string, overrideReason?: string) {
+export async function completeAppointment(appointmentId: string, opts: { overrideReason?: string; soapNote?: SoapNoteFields } = {}) {
   const user = await requireSession()
-  return completeAppointmentFor(user, appointmentId, { overrideReason })
+  return completeAppointmentFor(user, appointmentId, opts)
 }
 
 export async function markNoShow(appointmentId: string, noShowFeeCentavos?: number) {
