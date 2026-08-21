@@ -9,7 +9,7 @@ export default async function LoginPage({
   const { next } = await searchParams
 
   return (
-    <main className="flex min-h-full flex-1 items-center justify-center bg-muted p-4">
+    <main className="flex min-h-screen items-center justify-center bg-muted p-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle className="text-xl">Family First Medical Clinic</CardTitle>

@@ -1,11 +1,10 @@
-import type { Prisma } from "@prisma/client"
 import { runWithRls } from "@/lib/db/rls"
 import { isHoldingAdmin, requireClinicId, type AbilitySubject } from "@/lib/permissions/ability"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import { toPatientDTO, type PatientDTO } from "@/lib/dto/patient"
 import { toQueueEntryDTO, type QueueEntryDTO } from "@/lib/dto/queue-entry"
 import { patientIntakeSchema } from "@/lib/validation/patient"
-import { nextQueueNumber, todayAsQueueDate } from "@/lib/queries/queue"
+import { nextQueueNumber, todayAsQueueDate, clinicTimezone } from "@/lib/queries/queue"
 import { generateAccessToken } from "@/lib/utils/token"
 
 /**
@@ -153,11 +152,6 @@ export async function searchPatientsByPhone(user: AbilitySubject, phone: string)
       .slice(0, 10)
       .map(toPatientDTO)
   })
-}
-
-async function clinicTimezone(tx: Prisma.TransactionClient, clinicId: string): Promise<string> {
-  const clinic = await tx.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { timezone: true } })
-  return clinic.timezone
 }
 
 /**

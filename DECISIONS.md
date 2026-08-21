@@ -9,6 +9,101 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-08-21 — M3: queue
+
+Unified queue (booked + walk-in share one numbering line), priority
+ordering, staff queue board (Call Next, Recall, Mark No-Show, Assign
+Doctor, Check In, Start Consultation, up/down manual reorder), doctor
+queue, public display, patient status page, and public booking
+(`/book/{clinic_slug}`) — grouped with the other public screens per §9
+even though §12's one-line M3 summary doesn't name it explicitly (see
+below). Verified end-to-end live in the browser: booked a patient online
+for today (queue #3), confirmed her status page said "booking confirmed,"
+checked her in from the staff board (now shows "checked in and waiting"),
+called next (priority-and-time ordering picked the right patient), watched
+the public display and her own status page both reflect the new "now
+serving" number, assigned a doctor, started the consultation, and
+confirmed that doctor's own queue showed only that one patient. 27/27
+tests pass (`lib/queries/__tests__/queue.test.ts` covers ordering,
+transitions, clinic scoping, and the public-facing flows).
+
+- **`/book/{clinic_slug}` is in scope for M3** even though §12's M3 line
+  only names "staff board, doctor queue, public display, patient status
+  page." §9 explicitly groups `/book/{clinic_slug}` and "booking
+  confirmation" under the same "Public" heading as `/q/{access_token}` and
+  `/display/{clinic_slug}` (both undisputedly M3), and M3's own accept
+  line requires "booking and walk-in entries interleave correctly" — which
+  needs a real way to produce a booked (not walk-in) entry. Building it now
+  rather than inventing a test-only seeding path kept the accept test
+  honest.
+- **§6's `booked → checked_in → waiting → called → in_consultation →
+  completed` isn't fully linear in practice, and the spec doesn't say how
+  `checked_in` and `waiting` differ.** Read it as: `CHECKED_IN` = arrived,
+  no doctor yet; `WAITING` = arrived *and* assigned a doctor. Assigning a
+  doctor is what moves a `CHECKED_IN` entry to `WAITING`; `WAITING` isn't a
+  separate manual step. Both statuses are equally eligible for Call Next
+  (`ACTIVE_STATUSES`) — a doctor doesn't have to be assigned before someone
+  can be called, since front desk may legitimately call the next number
+  before deciding who sees them.
+- **A doctor must be assignable to an entry that's already been `CALLED`,
+  not just while it's `CHECKED_IN`/`WAITING`.** Caught this by actually
+  clicking through the flow in the browser, not by reasoning about it in
+  advance: the first version only showed the "Assign doctor" dropdown on
+  waiting-section rows, so a patient called before a doctor was picked had
+  no way to ever get one — `Start Consultation` was permanently disabled
+  for them with no path forward. Fixed by allowing `assignDoctor` on a
+  `CALLED` entry too (added a regression test for exactly this — assigning
+  a doctor to a `CALLED` entry keeps it `CALLED`, doesn't revert it to
+  `WAITING`), and added the same dropdown to the Called section.
+- **Manual reorder (§7.3's up/down control) swaps the two entries'
+  `checkedInAt` values instead of using a separate position column.**
+  There's no `sortOrder` field in §6's schema, and adding one this deep
+  into a milestone felt like more machinery than the requirement needed —
+  moving a normal entry ahead of the rest of the normal tier (never past
+  the priority tier) is exactly what a `checkedInAt` swap produces, since
+  ordering is already `(priority tier, checkedInAt)`. Every reorder still
+  writes an audit log row per the spec's explicit requirement.
+- **Queue number allocation and "Call Next" both serialize via the same
+  transaction-scoped Postgres advisory lock pattern** (keyed
+  `clinicId+day` for numbering, `clinicId+day+":call"` for calling) — two
+  front-desk staff clicking Call Next at the same instant must not call
+  the same patient twice, for the same reason two simultaneous bookings
+  can't get the same number (§7.1). No retry logic needed; the second
+  transaction just waits.
+- **Public booking's Patient auto-match (phone + last name + birthdate,
+  §7.1) reuses the same format-invariant phone comparison as the staff
+  side's duplicate search** (M2) rather than a DB-level equality check, for
+  the identical reason: a caller's phone formatting won't line up
+  character-for-character with what's stored.
+- **The patient status page's "estimated wait" is `patientsAhead × 15
+  minutes`** — a flat, documented placeholder (`AVERAGE_MINUTES_PER_PATIENT`
+  in `lib/queries/public-queue.ts`), not a real average. §7.3 asks for an
+  estimate but nothing in the spec supplies a real number yet; M6's
+  reporting (average consultation duration) is the natural place to derive
+  a real one later.
+- **A queue-entry access token "expires at end of day" (§10) by checking
+  whether its `queueDate` is still today**, not by storing a separate
+  expiry timestamp — `queueDate` already *is* the day the token is valid
+  for, so a second field would just be able to disagree with it. A
+  next-day booking's token simply isn't live yet rather than being treated
+  as already expired, which also seemed like the more correct read of "the
+  token for tomorrow's booking" than an error.
+- **Looking up a queue entry by access token needs full cross-clinic
+  visibility** (`runWithFullVisibility` in `lib/db/rls.ts`) since there's
+  no clinic to scope the RLS session by until *after* the row is found —
+  documented as intentionally different from the M1 cross-clinic-403
+  pattern: token possession is itself the authorization here, not an
+  access violation to detect and log.
+- **Full-bleed pages (`/display`, `/login`, `/q/{token}`, `app/forbidden.tsx`)
+  use `min-h-screen` instead of `min-h-full`.** Found by literally looking
+  at the rendered display screen: `min-h-full` needs every ancestor up to
+  `<body>` to resolve a *definite* height for the percentage chain to work,
+  and `body`'s own `min-h-full` (a min-height, not a height) doesn't
+  reliably give descendants one — the display screen rendered as a
+  dark box sized to its content with a large gray gap below it, not a
+  full-bleed screen. `min-h-screen` is self-contained (relative to the
+  viewport directly) and doesn't depend on that chain.
+
 ## 2026-08-21 — M2: patients
 
 Walk-in registration (§7.2), duplicate-avoiding phone search, patient
