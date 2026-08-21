@@ -20,8 +20,8 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Stretch Lab PH",
-  description: "Performance Recovery • Body Tune-Up • Pain Management",
+  title: "Family First Medical Clinic",
+  description: "General checkups, walk-ins, and follow-ups — book, queue, and consult, paperless.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

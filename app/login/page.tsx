@@ -1,19 +1,24 @@
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { LoginForm } from "./login-form"
 
-export default function LoginPage({
+export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ callbackUrl?: string; error?: string }>
+  searchParams: Promise<{ next?: string }>
 }) {
+  const { next } = await searchParams
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="w-full max-w-sm space-y-6">
-        <div className="text-center">
-          <p className="font-heading text-xl font-bold tracking-tight">Stretch Lab PH</p>
-          <p className="text-sm text-muted-foreground">Staff console sign-in</p>
-        </div>
-        <LoginForm searchParams={searchParams} />
-      </div>
-    </div>
+    <main className="flex min-h-full flex-1 items-center justify-center bg-muted p-4">
+      <Card className="w-full max-w-sm">
+        <CardHeader>
+          <CardTitle className="text-xl">Family First Medical Clinic</CardTitle>
+          <CardDescription>Staff and doctor sign-in.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <LoginForm next={next ?? "/"} />
+        </CardContent>
+      </Card>
+    </main>
   )
 }

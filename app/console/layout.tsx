@@ -1,46 +1,37 @@
+import Link from "next/link"
 import { redirect } from "next/navigation"
 import { auth } from "@/auth"
-import { prisma } from "@/lib/db/prisma"
 import { navForRole } from "@/lib/nav"
-import { ROLE_LABELS } from "@/lib/role-labels"
-import { SidebarNav } from "@/components/console/sidebar-nav"
 import { SignOutButton } from "@/components/console/sign-out-button"
 
 export default async function ConsoleLayout({ children }: { children: React.ReactNode }) {
   const session = await auth()
-  if (!session?.user || !session.user.isActive) {
-    redirect("/login")
-  }
+  if (!session?.user) redirect("/login")
 
-  const { user } = session
-  const branch = user.homeBranchId
-    ? await prisma.branch.findUnique({ where: { id: user.homeBranchId }, select: { name: true } })
-    : null
-
-  const items = navForRole(user.role)
+  const nav = navForRole(session.user.role)
 
   return (
-    <div className="flex min-h-screen w-full">
-      <aside className="flex w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground">
-        <div className="px-5 py-6">
-          <p className="font-heading text-lg font-bold tracking-tight">Stretch Lab PH</p>
-          <p className="text-xs text-sidebar-foreground/60">Performance Recovery · Body Tune-Up · Pain Management</p>
-        </div>
-        <SidebarNav items={items} />
+    <div className="flex min-h-full">
+      <aside className="flex w-56 shrink-0 flex-col gap-1 border-r border-sidebar-border bg-sidebar p-4 text-sidebar-foreground">
+        <div className="mb-4 font-heading text-sm font-semibold">Family First</div>
+        {nav.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            className="rounded-md px-3 py-2 text-sm hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          >
+            {item.label}
+          </Link>
+        ))}
       </aside>
-
       <div className="flex flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-border bg-card px-6 py-4">
-          <div>
-            <p className="text-sm font-medium">{user.name}</p>
-            <p className="text-xs text-muted-foreground">
-              {ROLE_LABELS[user.role]}
-              {branch ? ` · ${branch.name}` : user.role === "OWNER" ? " · All branches" : ""}
-            </p>
-          </div>
+        <header className="flex items-center justify-between border-b border-border px-6 py-3">
+          <span className="text-sm text-muted-foreground">
+            {session.user.name} · {session.user.role.replace("_", " ")}
+          </span>
           <SignOutButton />
         </header>
-        <main className="flex-1 bg-background p-6">{children}</main>
+        <main className="flex-1 p-6">{children}</main>
       </div>
     </div>
   )

@@ -1,89 +1,31 @@
 "use client"
 
-import { use, useState, useTransition } from "react"
-import { useForm } from "react-hook-form"
-import { zodResolver } from "@hookform/resolvers/zod"
-import { loginSchema, type LoginInput } from "@/lib/validation/auth"
-import { loginAction } from "./actions"
+import { useActionState } from "react"
+import { loginAction, type LoginState } from "./actions"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Label } from "@/components/ui/label"
 
-export function LoginForm({
-  searchParams,
-}: {
-  searchParams: Promise<{ callbackUrl?: string; error?: string }>
-}) {
-  const { callbackUrl } = use(searchParams)
-  const [serverError, setServerError] = useState<string | null>(null)
-  const [isPending, startTransition] = useTransition()
+const initialState: LoginState = { error: null }
 
-  const form = useForm<LoginInput>({
-    resolver: zodResolver(loginSchema),
-    defaultValues: { email: "", password: "" },
-  })
-
-  function onSubmit(values: LoginInput) {
-    setServerError(null)
-    const formData = new FormData()
-    formData.set("email", values.email)
-    formData.set("password", values.password)
-    if (callbackUrl) formData.set("callbackUrl", callbackUrl)
-
-    startTransition(async () => {
-      const result = await loginAction({}, formData)
-      if (result?.error) {
-        setServerError(result.error)
-      }
-    })
-  }
+export function LoginForm({ next }: { next: string }) {
+  const [state, formAction, pending] = useActionState(loginAction, initialState)
 
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        {serverError ? (
-          <Alert variant="destructive">
-            <AlertDescription>{serverError}</AlertDescription>
-          </Alert>
-        ) : null}
-        <FormField
-          control={form.control}
-          name="email"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Email</FormLabel>
-              <FormControl>
-                <Input type="email" autoComplete="email" placeholder="you@stretchlabph.com" {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-        <FormField
-          control={form.control}
-          name="password"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Password</FormLabel>
-              <FormControl>
-                <Input type="password" autoComplete="current-password" {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-        <Button type="submit" className="w-full" disabled={isPending}>
-          {isPending ? "Signing in…" : "Sign in"}
-        </Button>
-      </form>
-    </Form>
+    <form action={formAction} className="flex flex-col gap-4">
+      <input type="hidden" name="next" value={next} />
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="email">Email</Label>
+        <Input id="email" name="email" type="email" autoComplete="username" required autoFocus />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="password">Password</Label>
+        <Input id="password" name="password" type="password" autoComplete="current-password" required />
+      </div>
+      {state.error && <p className="text-sm text-destructive">{state.error}</p>}
+      <Button type="submit" disabled={pending} className="mt-2 h-11 text-base">
+        {pending ? "Signing in…" : "Sign in"}
+      </Button>
+    </form>
   )
 }

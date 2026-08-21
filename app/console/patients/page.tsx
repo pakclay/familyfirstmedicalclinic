@@ -1,116 +1,52 @@
 import Link from "next/link"
-import { requireRole } from "@/lib/auth/guards"
-import { listPatients } from "@/lib/actions/patients"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import type { PatientStatus } from "@prisma/client"
+import { redirect } from "next/navigation"
+import { auth } from "@/auth"
+import { listPatients } from "@/lib/queries/patients"
+import type { AbilitySubject } from "@/lib/permissions/ability"
 
-const STATUS_LABELS: Record<PatientStatus, string> = {
-  LEAD: "Lead",
-  INTAKE_PENDING: "Intake pending",
-  FOR_ASSESSMENT: "For assessment",
-  FOR_DOCTOR_REVIEW: "For doctor review",
-  ACTIVE_PROGRAM: "Active program",
-  ON_HOLD: "On hold",
-  COMPLETED: "Completed",
-  LAPSED: "Lapsed",
-  DISCHARGED: "Discharged",
-}
+export default async function PatientsPage() {
+  const session = await auth()
+  if (!session?.user) redirect("/login")
 
-const CAN_WRITE = ["OWNER", "BRANCH_MANAGER", "FRONT_DESK"]
+  const user: AbilitySubject = {
+    id: session.user.id,
+    role: session.user.role,
+    clinicId: session.user.clinicId,
+    holdingCompanyId: session.user.holdingCompanyId,
+  }
 
-export default async function PatientsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ q?: string }>
-}) {
-  const user = await requireRole(["OWNER", "BRANCH_MANAGER", "DOCTOR", "THERAPIST", "FRONT_DESK"])
-  const { q } = await searchParams
-  const patients = await listPatients({ search: q })
-  const canWrite = CAN_WRITE.includes(user.role)
+  if (user.role === "HOLDING_ADMIN") {
+    return (
+      <div>
+        <h1 className="text-2xl font-heading font-semibold">Patients</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Pick a clinic from the Clinics page to browse its patients — a holding admin isn&apos;t scoped
+          to one clinic, so this list needs an explicit clinic first.
+        </p>
+      </div>
+    )
+  }
+
+  const patients = await listPatients(user)
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Patients</h1>
-          <p className="text-sm text-muted-foreground">
-            {user.role === "THERAPIST" ? "Your assigned patients." : "Showing what your role can see."}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          {canWrite ? (
-            <Button asChild variant="outline">
-              <Link href="/console/patients/intake-queue">Intake queue</Link>
-            </Button>
-          ) : null}
-          {canWrite ? (
-            <Button asChild>
-              <Link href="/console/patients/new">Add patient</Link>
-            </Button>
-          ) : null}
-        </div>
-      </div>
-
-      <form className="max-w-sm">
-        <Input type="search" name="q" placeholder="Search name, mobile, or patient code" defaultValue={q ?? ""} />
-      </form>
-
-      <div className="rounded-md border border-border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Patient code</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>Mobile</TableHead>
-              <TableHead>Branch</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Last visit</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {patients.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
-                  No patients yet.
-                </TableCell>
-              </TableRow>
-            ) : (
-              patients.map((p) => (
-                <TableRow key={p.id} className="cursor-pointer">
-                  <TableCell className="font-numeric">
-                    <Link href={`/console/patients/${p.id}`} className="hover:underline">
-                      {p.patientCode}
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    <Link href={`/console/patients/${p.id}`} className="hover:underline">
-                      {p.lastName}, {p.firstName}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="font-numeric">{p.mobile}</TableCell>
-                  <TableCell>{p.homeBranch.name}</TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">{STATUS_LABELS[p.status]}</Badge>
-                  </TableCell>
-                  <TableCell className="font-numeric text-muted-foreground">
-                    {p.lastVisitAt ? new Date(p.lastVisitAt).toLocaleDateString("en-PH") : "—"}
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+    <div>
+      <h1 className="text-2xl font-heading font-semibold">Patients</h1>
+      <ul className="mt-4 divide-y divide-border rounded-md border border-border">
+        {patients.map((p) => (
+          <li key={p.id}>
+            <Link href={`/console/patients/${p.id}`} className="flex justify-between px-4 py-3 text-sm hover:bg-accent">
+              <span>
+                {p.lastName}, {p.firstName}
+              </span>
+              <span className="font-numeric text-muted-foreground">{p.age}y · {p.phone}</span>
+            </Link>
+          </li>
+        ))}
+        {patients.length === 0 && (
+          <li className="px-4 py-6 text-center text-sm text-muted-foreground">No patients yet.</li>
+        )}
+      </ul>
     </div>
   )
 }

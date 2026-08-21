@@ -1,3 +1,8 @@
 export function ageInYears(birthDate: Date, now: Date = new Date()): number {
-  return Math.floor((now.getTime() - birthDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25))
+  let age = now.getUTCFullYear() - birthDate.getUTCFullYear()
+  const hasHadBirthdayThisYear =
+    now.getUTCMonth() > birthDate.getUTCMonth() ||
+    (now.getUTCMonth() === birthDate.getUTCMonth() && now.getUTCDate() >= birthDate.getUTCDate())
+  if (!hasHadBirthdayThisYear) age -= 1
+  return age
 }

@@ -1,83 +1,73 @@
 import NextAuth from "next-auth"
 import Credentials from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
-
 import { prisma } from "@/lib/db/prisma"
-import type { Role } from "@/lib/permissions/ability"
-
-const IDLE_TIMEOUT_SECONDS = 8 * 60 * 60 // §11: 8-hour idle timeout
+import { authConfig } from "@/auth.config"
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
-  // Auth.js requires JWT sessions for the Credentials provider — database
-  // sessions aren't supported there. "Owner can revoke a session
-  // immediately" (§11) is instead enforced by re-checking isActive/deletedAt
-  // against Postgres inside the jwt callback on every request, so a
-  // deactivation takes effect on that user's very next navigation.
-  session: {
-    strategy: "jwt",
-    maxAge: IDLE_TIMEOUT_SECONDS,
-    updateAge: 30 * 60, // slide the expiry forward on activity, at most every 30 min
-  },
-  pages: {
-    signIn: "/login",
-  },
+  ...authConfig,
   providers: [
     Credentials({
       credentials: {
-        email: { label: "Email", type: "email" },
-        password: { label: "Password", type: "password" },
+        email: {},
+        password: {},
       },
-      authorize: async (credentials) => {
+      async authorize(credentials) {
         const email = credentials?.email
         const password = credentials?.password
-        if (typeof email !== "string" || typeof password !== "string") {
-          return null
-        }
+        if (typeof email !== "string" || typeof password !== "string") return null
 
-        const user = await prisma.user.findUnique({
-          where: { email: email.toLowerCase() },
-        })
-        if (!user || !user.isActive || user.deletedAt) return null
+        const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } })
+        if (!user || !user.isActive) return null
 
         const valid = await bcrypt.compare(password, user.passwordHash)
         if (!valid) return null
 
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { lastLoginAt: new Date() },
-        })
-
         return {
           id: user.id,
-          email: user.email,
           name: user.name,
+          email: user.email,
+          role: user.role,
+          clinicId: user.clinicId,
+          holdingCompanyId: user.holdingCompanyId,
+          mustChangePassword: user.mustChangePassword,
         }
       },
     }),
   ],
   callbacks: {
-    async jwt({ token }) {
-      if (!token.sub) return token
-
-      const dbUser = await prisma.user.findUnique({ where: { id: token.sub } })
-      if (!dbUser || !dbUser.isActive || dbUser.deletedAt) {
-        token.isActive = false
+    ...authConfig.callbacks,
+    async jwt({ token, user }) {
+      if (user) {
+        // authorize() above always returns a real id; NextAuth's base User
+        // type just declares it optional for providers that don't.
+        token.id = user.id!
+        token.role = user.role
+        token.clinicId = user.clinicId
+        token.holdingCompanyId = user.holdingCompanyId
+        token.mustChangePassword = user.mustChangePassword
         return token
       }
 
-      token.role = dbUser.role as Role
-      token.homeBranchId = dbUser.homeBranchId
-      token.mustChangePassword = dbUser.mustChangePassword
-      token.isActive = true
+      // Re-check isActive on every request (not just at login) so a
+      // deactivation takes effect on the user's next navigation. Auth.js's
+      // Credentials provider only supports JWT sessions, not database
+      // sessions, so this re-check inside the jwt callback is the closest
+      // equivalent to "revoke a session immediately" available here — it
+      // takes effect on the next request, not necessarily mid-request on
+      // an already-open tab. Only reachable from auth.ts's Node.js-runtime
+      // callers (route handlers, server components) — middleware uses
+      // auth.config.ts's edge-safe callbacks instead, which never touch
+      // Prisma.
+      const current = await prisma.user.findUnique({ where: { id: token.id } })
+      if (!current || !current.isActive) {
+        return null
+      }
+      token.role = current.role
+      token.clinicId = current.clinicId
+      token.holdingCompanyId = current.holdingCompanyId
+      token.mustChangePassword = current.mustChangePassword
       return token
-    },
-    async session({ session, token }) {
-      session.user.id = token.sub!
-      session.user.role = token.role as Role
-      session.user.homeBranchId = token.homeBranchId as string | null
-      session.user.mustChangePassword = token.mustChangePassword as boolean
-      session.user.isActive = token.isActive as boolean
-      return session
     },
   },
 })

@@ -1,63 +1,20 @@
-import type { Role } from "@/lib/permissions/ability"
+import type { Role } from "@prisma/client"
 
-export type NavItem = {
-  label: string
-  href: string
-  roles: Role[]
-}
+export type NavItem = { label: string; href: string }
 
-// Who sees what in the console sidebar. This is deliberately a flat
-// allowlist rather than routed through ability.ts — several of these pages
-// (e.g. "Therapists" as a staff roster) don't map to a single ability-matrix
-// resource. Page- and query-level access still goes through can().
-export const NAV_ITEMS: NavItem[] = [
-  {
-    label: "Dashboard",
-    href: "/console/dashboard",
-    roles: ["OWNER", "BRANCH_MANAGER", "DOCTOR", "THERAPIST", "FRONT_DESK", "MARKETING"],
-  },
-  {
-    label: "Patients",
-    href: "/console/patients",
-    roles: ["OWNER", "BRANCH_MANAGER", "DOCTOR", "THERAPIST", "FRONT_DESK"],
-  },
-  {
-    label: "Schedule",
-    href: "/console/schedule",
-    roles: ["OWNER", "BRANCH_MANAGER", "DOCTOR", "THERAPIST", "FRONT_DESK"],
-  },
-  {
-    label: "Doctor Queue",
-    href: "/console/doctor-queue",
-    roles: ["OWNER", "DOCTOR"],
-  },
-  {
-    label: "Leads",
-    href: "/console/leads",
-    roles: ["OWNER", "BRANCH_MANAGER", "FRONT_DESK", "MARKETING"],
-  },
-  {
-    label: "Therapists",
-    href: "/console/therapists",
-    roles: ["OWNER", "BRANCH_MANAGER", "FRONT_DESK"],
-  },
-  {
-    label: "Payouts",
-    href: "/console/payouts",
-    roles: ["OWNER", "BRANCH_MANAGER", "THERAPIST"],
-  },
-  {
-    label: "Reports",
-    href: "/console/reports",
-    roles: ["OWNER", "BRANCH_MANAGER", "MARKETING"],
-  },
-  {
-    label: "Settings",
-    href: "/console/settings",
-    roles: ["OWNER"],
-  },
+const CONSOLE_NAV: NavItem[] = [
+  { label: "Dashboard", href: "/console/dashboard" },
+  { label: "Patients", href: "/console/patients" },
+]
+
+const HOLDING_ONLY_NAV: NavItem[] = [
+  { label: "Clinics", href: "/console/clinics" },
+  { label: "Users", href: "/console/users" },
+  { label: "Audit log", href: "/console/audit-log" },
 ]
 
 export function navForRole(role: Role): NavItem[] {
-  return NAV_ITEMS.filter((item) => item.roles.includes(role))
+  if (role === "HOLDING_ADMIN") return [...CONSOLE_NAV, ...HOLDING_ONLY_NAV]
+  if (role === "CLINIC_ADMIN") return CONSOLE_NAV
+  return []
 }

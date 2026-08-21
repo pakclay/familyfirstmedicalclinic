@@ -1,90 +1,53 @@
-/**
- * Explicit-allowlist DTO for Patient. This is the "even nested" half of
- * the §4.2 hard rule: money never leaves through a Patient response no
- * matter what a future query accidentally `include`s (patientPackages,
- * payments — both carry centavos fields). Serializing through this
- * function instead of returning a raw Prisma object is what makes that
- * guarantee hold regardless of what the query fetched.
- */
+import type { Patient } from "@prisma/client"
+import { ageInYears } from "@/lib/utils/age"
 
-export type PatientForDTO = {
+/**
+ * Explicit field allowlist, not a redaction function — every field here is
+ * safe for any role that can read a Patient at all (clinic scoping is
+ * enforced before this ever runs). Age is derived here rather than stored
+ * (§6: "never store age").
+ */
+export type PatientDTO = {
   id: string
-  patientCode: string
+  clinicId: string
   firstName: string
   lastName: string
   middleName: string | null
-  birthDate: Date
+  birthdate: Date
+  age: number
+  isMinor: boolean
   sex: "MALE" | "FEMALE"
-  mobile: string
+  phone: string
   email: string | null
   address: string
-  city: string
-  province: string
-  occupation: string | null
-  sportOrActivity: string | null
-  referralSource: string | null
-  primaryTherapistId: string | null
-  status: string
-  lastVisitAt: Date | null
-  createdAt: Date
   emergencyContactName: string
   emergencyContactPhone: string
-  homeBranchId: string
-  homeBranch: { name: string }
-  consents: Array<{
-    id: string
-    consentType: string
-    granted: boolean
-    grantedAt: Date
-  }>
-  intakeSubmissions: Array<{
-    id: string
-    submittedAt: Date
-    submittedVia: string
-  }>
-  // Deliberately not part of the input type — see the "even nested" test.
-  // If a future query starts `include`-ing these, TypeScript won't stop
-  // it, but toPatientDTO() below will still never read or forward them.
-  [key: string]: unknown
+  guardianName: string | null
+  guardianPhone: string | null
+  notes: string | null
+  createdAt: Date
 }
 
-export type PatientDTO = ReturnType<typeof toPatientDTO>
-
-export function toPatientDTO(patient: PatientForDTO) {
+export function toPatientDTO(patient: Patient): PatientDTO {
+  const age = ageInYears(patient.birthdate)
   return {
     id: patient.id,
-    patientCode: patient.patientCode,
+    clinicId: patient.clinicId,
     firstName: patient.firstName,
     lastName: patient.lastName,
     middleName: patient.middleName,
-    birthDate: patient.birthDate,
+    birthdate: patient.birthdate,
+    age,
+    isMinor: age < 18,
     sex: patient.sex,
-    mobile: patient.mobile,
+    phone: patient.phone,
     email: patient.email,
     address: patient.address,
-    city: patient.city,
-    province: patient.province,
-    occupation: patient.occupation,
-    sportOrActivity: patient.sportOrActivity,
-    referralSource: patient.referralSource,
-    primaryTherapistId: patient.primaryTherapistId,
-    status: patient.status,
-    lastVisitAt: patient.lastVisitAt,
-    createdAt: patient.createdAt,
     emergencyContactName: patient.emergencyContactName,
     emergencyContactPhone: patient.emergencyContactPhone,
-    homeBranchId: patient.homeBranchId,
-    homeBranch: { name: patient.homeBranch.name },
-    consents: patient.consents.map((c) => ({
-      id: c.id,
-      consentType: c.consentType,
-      granted: c.granted,
-      grantedAt: c.grantedAt,
-    })),
-    intakeSubmissions: patient.intakeSubmissions.map((s) => ({
-      id: s.id,
-      submittedAt: s.submittedAt,
-      submittedVia: s.submittedVia,
-    })),
+    guardianName: patient.guardianName,
+    guardianPhone: patient.guardianPhone,
+    notes: patient.notes,
+    createdAt: patient.createdAt,
   }
 }
