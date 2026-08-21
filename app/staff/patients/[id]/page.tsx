@@ -1,6 +1,7 @@
 import { redirect, notFound, forbidden } from "next/navigation"
 import { auth } from "@/auth"
 import { getPatientById, listPatientVisits } from "@/lib/queries/patients"
+import { listPatientConsultationHistory } from "@/lib/queries/consultations"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import type { AbilitySubject } from "@/lib/permissions/ability"
 import { Badge } from "@/components/ui/badge"
@@ -44,7 +45,11 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
   }
   if (!patient) notFound()
 
-  const visits = await listPatientVisits(user, id)
+  const [visits, consultations] = await Promise.all([
+    listPatientVisits(user, id),
+    listPatientConsultationHistory(user, id),
+  ])
+  const consultationByQueueEntry = new Map(consultations.map((c) => [c.queueEntryId, c]))
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -82,27 +87,44 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
       </dl>
 
       <h2 className="mt-8 text-lg font-heading font-semibold">Visit history</h2>
-      <p className="text-sm text-muted-foreground">
-        Consultation notes and medicine dispensing land in M4 — this is the queue-visit record for now.
-      </p>
       <ul className="mt-3 divide-y divide-border rounded-md border border-border">
-        {visits.map((v) => (
-          <li key={v.id} className="flex items-center justify-between px-4 py-3 text-sm">
-            <span>
-              {v.queueDate.toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" })}
-              {" · "}
-              {SOURCE_LABEL[v.source]}
-              {v.priority === "PRIORITY" && (
-                <Badge variant="outline" className="ml-2 border-priority text-priority">
-                  Priority
-                </Badge>
+        {visits.map((v) => {
+          const consultation = consultationByQueueEntry.get(v.id)
+          return (
+            <li key={v.id} className="px-4 py-3 text-sm">
+              <div className="flex items-center justify-between">
+                <span>
+                  {v.queueDate.toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" })}
+                  {" · "}
+                  {SOURCE_LABEL[v.source]}
+                  {v.priority === "PRIORITY" && (
+                    <Badge variant="outline" className="ml-2 border-priority text-priority">
+                      Priority
+                    </Badge>
+                  )}
+                </span>
+                <span className="font-numeric text-muted-foreground">
+                  #{v.queueNumber} · {STATUS_LABEL[v.status]}
+                </span>
+              </div>
+              {consultation && (
+                <div className="mt-1.5 border-l-2 border-border pl-2.5 text-xs text-muted-foreground">
+                  <p>
+                    {consultation.doctorName}
+                    {consultation.diagnosis && <> · {consultation.diagnosis}</>}
+                  </p>
+                  {consultation.medicines.length > 0 && (
+                    <p>
+                      {consultation.medicines
+                        .map((m) => `${m.medicineName}${m.dosage ? ` (${m.dosage})` : ""}`)
+                        .join(", ")}
+                    </p>
+                  )}
+                </div>
               )}
-            </span>
-            <span className="font-numeric text-muted-foreground">
-              #{v.queueNumber} · {STATUS_LABEL[v.status]}
-            </span>
-          </li>
-        ))}
+            </li>
+          )
+        })}
         {visits.length === 0 && (
           <li className="px-4 py-6 text-center text-sm text-muted-foreground">No visits yet.</li>
         )}

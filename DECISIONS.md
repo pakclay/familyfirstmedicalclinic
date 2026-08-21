@@ -9,6 +9,104 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-08-22 — M4: consultation, medicine, payment
+
+The doctor's consultation screen (§7.4): patient identity/age/priority/
+notes, collapsible prior-visit history, vitals/findings/diagnosis/
+treatment-plan/follow-up-date form, a searchable live-stock medicine
+picker with "X left → Y after" preview, and payment capture defaulting to
+an itemized consultation-fee-plus-medicines total. Saving is one
+transaction: Consultation row, per-medicine stock deduction (or not, for
+prescribed-only/free-text rows), Payment row, and the queue entry marked
+`COMPLETED` — all or nothing. "My collections today" (§9 doctor screen)
+and the patient profile's now-enriched visit history are the two places
+M4's accept line is actually checked.
+
+Verified live end-to-end as Dr. Quezon City 1: checked in and called Maria
+Santos (from the M2/M3 seed data), assigned a doctor, opened the
+consultation screen, searched "Paracet" in the medicine picker (found the
+seeded catalog item, showed "200 left"), set quantity 4 and watched the
+preview read "200 left → 196 after" — the exact format §7.4 specifies —
+and the payment amount auto-filled to ₱512.00 (₱500 consultation fee +
+4×₱3.00). Submitting completed the consultation, redirected to an
+empty "My queue" (entry no longer active), showed ₱512.00 attributed to
+the doctor on "My collections today," and the patient's profile
+immediately showed the diagnosis and dispensed medicine. Confirmed
+directly against Postgres that `current_stock` (196) matches the new
+`stock_movements` row's `balance_after`. 33/33 tests pass
+(`lib/queries/__tests__/consultations.test.ts`, 6 tests, plus the
+existing 27).
+
+- **A medicine row's stock effect is governed by the toggle, not by
+  whether it happens to match a catalog item.** §6's "`medicine_id` is
+  nullable so a doctor can record a medicine dispensed elsewhere (advised,
+  not dispensed)" reads as *the reason* the field is nullable, not a rule
+  that only free-text rows may be prescribed-only. Modeled it as: a row
+  picked from the catalog can still be toggled "prescribed only" (stock
+  untouched, `medicineId` saved as `null` on the `MedicineDispensed` row
+  even though a catalog match existed, since the record represents "not
+  from our stock"); free text that doesn't match anything is *always*
+  prescribed-only, since there's no stock to deduct from. Documented
+  inline in `lib/validation/consultation.ts` and enforced there via a
+  schema refinement (`dispensedFromStock` requires a `medicineId`), not
+  just left to client-side UI discipline.
+- **Insufficient stock blocks the whole save with no override yet** — the
+  override checkbox + audit-logged reason is explicitly M4b's own accept
+  line (§12), but "leaves stock untouched on failure" is basic
+  transactional correctness M4 shouldn't ship without, so it's built now:
+  every dispensed-from-stock row is checked against a *fresh* read of
+  `current_stock` before anything is written, and a shortfall throws
+  `InsufficientStockError` before the transaction does anything else —
+  Prisma's `$transaction` rolls back the whole thing, so a rejected save
+  really does leave stock, the consultation, and the queue entry exactly
+  as they were. Test coverage matches M4b's own future acceptance
+  wording almost verbatim, on the theory that a check this central is
+  worth nailing now rather than only when the override UI arrives.
+- **Payment amount is auto-computed (consultation fee + Σ dispensed
+  `sellingPrice` × quantity) but stays an editable field**, not a locked
+  total — matches the itemized-billing decision from the SPEC.md §13
+  Q&A (payment total = consultation fee + medicines, `sellingPrice`
+  actively drives the bill) while leaving room for real-world discounts,
+  partial payments, or a doctor overriding a wrong catalog price.
+- **Found a real timezone bug in the query layer before it shipped, not
+  by clicking through the UI:** `listMyCollectionsToday`'s first draft
+  filtered `Payment.receivedAt` (a real timestamp) using
+  `todayAsQueueDate()` as if it were an instant boundary. That function
+  deliberately returns a UTC-midnight *stand-in for a calendar-date
+  label* — correct for a `@db.Date` column, where only the Y-M-D matters,
+  but wrong as a real instant: Manila midnight is UTC 16:00 the
+  *previous* day, 8 hours off from UTC midnight of the same Y-M-D digits.
+  Using it directly would've silently excluded roughly the first 8 hours
+  of every Manila business day from "today's collections." Added
+  `todayInstantRange()` (`lib/queries/queue.ts`), which uses
+  `date-fns-tz`'s `fromZonedTime` to re-read that same UTC-constructed
+  Y-M-D as *wall-clock time in the clinic's zone* and get the correct
+  absolute instant — a different function for a different problem, not a
+  fix to the original one, since `todayAsQueueDate` is still exactly
+  right for every `@db.Date` use (queue numbering, booking windows).
+- **A doctor can only open/save a consultation for a queue entry currently
+  assigned to them** (`entry.doctorId === doctor.id`, checked in both
+  `getConsultationScreenData` and `saveConsultation`), matching §4's role
+  scope ("Doctor: ... own queue") — not just relying on the doctor queue
+  *list* already being filtered; a doctor guessing another doctor's
+  queue-entry URL gets a `ForbiddenError` → redirect, the same defense-in-
+  depth posture as every other role check in this build.
+- **"Schedules a follow-up reminder" (§7.4's last sentence) isn't built
+  yet** — the `followUpDate` field saves correctly on the Consultation
+  row, but no `Notification` row is created for it. Notifications
+  (channel interface, `MockChannel`, templates) don't exist until M5;
+  wiring a follow-up trigger to a system that isn't there yet would mean
+  either stubbing it or building M5 early. Same deferral this build
+  already made for §7.1's "send the same link by SMS" in M3.
+- **Fixed a pre-existing display bug found while verifying this milestone
+  live, not introduced by it:** the patient profile and doctor header both
+  prepended "Dr. " to a name that already had it baked in from seed data
+  (`"Dr. Quezon City 1"`), rendering "Dr. Dr. Quezon City 1." Fixed the
+  two display sites rather than the seed data, since that took effect
+  immediately against the demo data already on screen instead of requiring
+  a reseed; worth reconsidering whether `User.name` should ever store a
+  title at all once real doctor names replace the placeholders.
+
 ## 2026-08-21 — M3: queue
 
 Unified queue (booked + walk-in share one numbering line), priority

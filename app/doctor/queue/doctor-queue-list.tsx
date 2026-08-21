@@ -30,7 +30,7 @@ export function DoctorQueueList({ initialEntries }: { initialEntries: StaffQueue
     startTransition(async () => {
       try {
         await startConsultationAction(id)
-        router.refresh()
+        router.push(`/doctor/consultation/${id}`)
       } catch {
         setError("Couldn't start the consultation — try again.")
       }
@@ -62,6 +62,11 @@ export function DoctorQueueList({ initialEntries }: { initialEntries: StaffQueue
             {e.status === "CALLED" && (
               <Button size="sm" disabled={pending} onClick={() => handleStart(e.id)}>
                 Start consultation
+              </Button>
+            )}
+            {e.status === "IN_CONSULTATION" && (
+              <Button size="sm" variant="outline" disabled={pending} onClick={() => router.push(`/doctor/consultation/${e.id}`)}>
+                Continue
               </Button>
             )}
           </li>

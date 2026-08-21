@@ -1,5 +1,5 @@
 import type { Prisma, QueueEntry, QueueStatus } from "@prisma/client"
-import { toZonedTime } from "date-fns-tz"
+import { toZonedTime, fromZonedTime } from "date-fns-tz"
 import { runWithRls } from "@/lib/db/rls"
 import { isHoldingAdmin, requireClinicId, type AbilitySubject } from "@/lib/permissions/ability"
 import { ForbiddenError } from "@/lib/permissions/errors"
@@ -56,6 +56,24 @@ export function todayAsQueueDate(timezone: string): Date {
 export function tomorrowAsQueueDate(timezone: string): Date {
   const today = todayAsQueueDate(timezone)
   return new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 1))
+}
+
+/**
+ * The real UTC instants bounding "today" in the clinic's own timezone —
+ * for filtering actual timestamps (e.g. `Payment.receivedAt`), which is
+ * a different problem from `todayAsQueueDate`'s calendar-*label* (a
+ * `@db.Date` column only ever stores Y-M-D, so a UTC-midnight stand-in for
+ * that date is fine there). Manila midnight is UTC 16:00 the *previous*
+ * day, 8 hours away from UTC midnight of the same Y-M-D digits — using
+ * `todayAsQueueDate`'s value directly as an instant boundary would miss
+ * every real timestamp in that 8-hour window. `fromZonedTime` re-reads the
+ * UTC-constructed Y-M-D-00:00:00 as if it were *wall-clock time in the
+ * target zone* and returns the correct absolute instant.
+ */
+export function todayInstantRange(timezone: string): { start: Date; end: Date } {
+  const start = fromZonedTime(todayAsQueueDate(timezone), timezone)
+  const end = fromZonedTime(tomorrowAsQueueDate(timezone), timezone)
+  return { start, end }
 }
 
 export async function clinicTimezone(tx: Prisma.TransactionClient, clinicId: string): Promise<string> {
