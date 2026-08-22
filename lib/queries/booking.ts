@@ -5,6 +5,7 @@ import { toQueueEntryDTO, type QueueEntryDTO } from "@/lib/dto/queue-entry"
 import { bookingIntakeSchema } from "@/lib/validation/patient"
 import { nextQueueNumber, todayAsQueueDate, tomorrowAsQueueDate } from "@/lib/queries/queue"
 import { generateAccessToken } from "@/lib/utils/token"
+import { sendNotification } from "@/lib/queries/notifications"
 
 export class ClinicNotFoundError extends Error {}
 
@@ -95,6 +96,27 @@ export async function createPublicBooking(
         entityType: "QueueEntry",
         entityId: queueEntry.id,
         changes: { source: "FACEBOOK", patientId: patient.id, matched: !!match },
+      },
+    })
+
+    // §7.6: "Booking confirmed" — queue number + status link + clinic
+    // address, sent by SMS (§7.6 DECISION: SMS is the primary channel,
+    // reaching every patient regardless of whether they messaged on
+    // Facebook — Messenger can't be the sole channel for this).
+    const statusUrl = `${process.env.NEXTAUTH_URL ?? "http://localhost:3000"}/q/${queueEntry.accessToken}`
+    await sendNotification(tx, {
+      clinicId: clinic.id,
+      patientId: patient.id,
+      queueEntryId: queueEntry.id,
+      to: patient.phone,
+      channel: "SMS",
+      templateKey: "booking_confirmed",
+      payload: {
+        patientName: patient.firstName,
+        clinicName: clinic.name,
+        clinicAddress: clinic.address,
+        queueNumber: queueEntry.queueNumber,
+        statusUrl,
       },
     })
 

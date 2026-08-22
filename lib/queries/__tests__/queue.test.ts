@@ -125,6 +125,12 @@ describe("queue", () => {
 
   afterAll(async () => {
     await superuserPrisma.auditLog.deleteMany({ where: { clinicId: clinic.id } })
+    // notifications.patient_id is ON DELETE RESTRICT (queue_entry_id is
+    // SET NULL, which is why afterEach's queueEntry cleanup alone never
+    // needed this) — M5 wired real notification sends into callNextEntry/
+    // markNoShow/moveQueueEntryOrder, so tests that exercise those now
+    // leave rows here too.
+    await superuserPrisma.notification.deleteMany({ where: { clinicId: clinic.id } })
     await superuserPrisma.patient.deleteMany({ where: { clinicId: clinic.id } })
     await superuserPrisma.doctor.deleteMany({ where: { clinicId: clinic.id } })
     await superuserPrisma.user.deleteMany({ where: { clinicId: clinic.id } })

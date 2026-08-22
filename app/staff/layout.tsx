@@ -8,6 +8,8 @@ const STAFF_NAV = [
   { label: "Register walk-in", href: "/staff/register" },
   { label: "Patients", href: "/staff/patients" },
   { label: "Inventory", href: "/staff/inventory" },
+  { label: "Follow-ups", href: "/staff/follow-ups" },
+  { label: "Notifications", href: "/staff/notifications" },
 ]
 
 export default async function StaffLayout({ children }: { children: React.ReactNode }) {

@@ -5,6 +5,7 @@ import { isHoldingAdmin, requireClinicId, type AbilitySubject } from "@/lib/perm
 import { ForbiddenError } from "@/lib/permissions/errors"
 import { toQueueEntryDTO, type QueueEntryDTO } from "@/lib/dto/queue-entry"
 import { compareQueueOrder } from "@/lib/utils/queue-order"
+import { sendNotification } from "@/lib/queries/notifications"
 
 /**
  * Allocates the next queue number for a clinic/day inside an existing
@@ -151,6 +152,44 @@ async function findClinicEntry(tx: Prisma.TransactionClient, clinicId: string, q
   return entry
 }
 
+/**
+ * §7.6 "~3 patients ahead" trigger. Not a single event — it's a condition
+ * that becomes true as the queue advances, so this re-checks every active
+ * entry after anything that could change someone's position (calling the
+ * next patient, a no-show, or a manual reorder) and sends to whoever just
+ * landed within 3 places of being called. Skips position 0 (they're about
+ * to get the separate "now serving" notification directly) and anyone
+ * already sent this for the same queue entry, so re-running it after every
+ * queue change doesn't re-notify the same patient each time.
+ */
+async function notifyAlmostYourTurn(tx: Prisma.TransactionClient, clinicId: string, queueDate: Date): Promise<void> {
+  const active = await tx.queueEntry.findMany({
+    where: { clinicId, queueDate, status: { in: ACTIVE_STATUSES } },
+    include: { patient: { select: { id: true, firstName: true, phone: true } } },
+  })
+  active.sort(compareQueueOrder)
+  const targets = active.slice(1, 4)
+  if (targets.length === 0) return
+
+  const clinic = await tx.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { name: true } })
+  for (const entry of targets) {
+    const alreadySent = await tx.notification.findFirst({
+      where: { queueEntryId: entry.id, templateKey: "almost_your_turn" },
+      select: { id: true },
+    })
+    if (alreadySent) continue
+    await sendNotification(tx, {
+      clinicId,
+      patientId: entry.patient.id,
+      queueEntryId: entry.id,
+      to: entry.patient.phone,
+      channel: "SMS",
+      templateKey: "almost_your_turn",
+      payload: { patientName: entry.patient.firstName, clinicName: clinic.name, queueNumber: entry.queueNumber },
+    })
+  }
+}
+
 /** A booked (online/Facebook) patient has physically arrived — §7.1's booked → checked_in transition. */
 export async function checkInBookedEntry(user: AbilitySubject, queueEntryId: string): Promise<QueueEntryDTO> {
   const clinicId = requireClinicId(user)
@@ -231,11 +270,26 @@ export async function callNextEntry(user: AbilitySubject): Promise<StaffQueueEnt
     const updated = await tx.queueEntry.update({
       where: { id: next.id },
       data: { status: "CALLED", calledAt: new Date() },
-      include: { patient: { select: { firstName: true, lastName: true, birthdate: true } }, doctor: { include: { user: { select: { name: true } } } } },
+      include: { patient: true, doctor: { include: { user: { select: { name: true } } } } },
     })
     await tx.auditLog.create({
       data: { clinicId, userId: user.id, action: "queue_entry.call_next", entityType: "QueueEntry", entityId: updated.id },
     })
+
+    // §7.6 "Number called."
+    const clinic = await tx.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { name: true } })
+    await sendNotification(tx, {
+      clinicId,
+      patientId: updated.patientId,
+      queueEntryId: updated.id,
+      to: updated.patient.phone,
+      channel: "SMS",
+      templateKey: "now_serving",
+      payload: { patientName: updated.patient.firstName, clinicName: clinic.name, queueNumber: updated.queueNumber },
+    })
+    // Calling someone moves everyone behind them one place closer.
+    await notifyAlmostYourTurn(tx, clinicId, queueDate)
+
     return toStaffQueueEntryDTO(updated)
   })
 }
@@ -264,10 +318,28 @@ export async function markNoShow(user: AbilitySubject, queueEntryId: string): Pr
     if (![...ACTIVE_STATUSES, "CALLED"].includes(entry.status)) {
       throw new Error(`Cannot mark a queue entry with status ${entry.status} as no-show`)
     }
-    const updated = await tx.queueEntry.update({ where: { id: queueEntryId }, data: { status: "NO_SHOW" } })
+    const updated = await tx.queueEntry.update({
+      where: { id: queueEntryId },
+      data: { status: "NO_SHOW" },
+      include: { patient: true },
+    })
     await tx.auditLog.create({
       data: { clinicId, userId: user.id, action: "queue_entry.no_show", entityType: "QueueEntry", entityId: queueEntryId },
     })
+
+    const clinic = await tx.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { name: true, phone: true } })
+    await sendNotification(tx, {
+      clinicId,
+      patientId: updated.patientId,
+      queueEntryId: updated.id,
+      to: updated.patient.phone,
+      channel: "SMS",
+      templateKey: "no_show",
+      payload: { patientName: updated.patient.firstName, clinicName: clinic.name, clinicPhone: clinic.phone },
+    })
+    // A no-show frees up the position everyone behind them was counting.
+    await notifyAlmostYourTurn(tx, clinicId, entry.queueDate)
+
     return toQueueEntryDTO(updated)
   })
 }
@@ -334,5 +406,6 @@ export async function moveQueueEntryOrder(
         changes: { direction, swappedWith: neighbor.id },
       },
     })
+    await notifyAlmostYourTurn(tx, clinicId, entry.queueDate)
   })
 }

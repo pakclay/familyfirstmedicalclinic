@@ -9,6 +9,83 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-08-22 — M5: notifications
+
+`NotificationChannel` interface with `MockChannel` (default, logs to
+console + the `notifications` table), stubbed `SmsChannel`/
+`MessengerChannel` that throw a clear error instead of silently no-op'ing
+if switched on before a real integration exists, and all five templates
+in one file (`lib/notifications/templates.ts`). Wired into the three
+event-triggered sends (booking confirmed, number called, no-show) plus
+the position-based "almost your turn" recompute, the follow-up list's
+one-tap send (§9 staff screen), and the notification log viewer.
+
+Verified live: booked a patient online and found the fully-rendered SMS
+text (queue number, real `/q/{token}` link, clinic address) both in the
+mock channel's console log and on `/staff/notifications`; checked her in
+and called her, and watched a second, correctly-worded `now_serving`
+notification appear; marked a different patient a no-show and confirmed
+a third notification with their own name and the clinic's phone number.
+`almost_your_turn`'s "notify once, only for patients newly within range"
+logic is covered by test rather than manual clicking through a 5-deep
+queue — verified there that calling `Call Next` a second time adds zero
+new notifications when nobody new entered the window. 48/48 tests pass
+(6 new in `lib/queries/__tests__/notifications.test.ts`).
+
+- **A second real "Dr. Dr." double-prefix bug, caught by a test failure
+  before it ever reached the browser this time.** The `follow_up_due`
+  template hardcoded "with Dr. {doctorName}," but seeded (and any
+  real-world) doctor display names already carry the title — the exact
+  class of bug M4 found and fixed in two UI display spots. Fixed the
+  template instead of the data this time (same tradeoff reasoning as
+  M4: fixing the template takes effect immediately, without a reseed);
+  worth someone eventually deciding once whether `User.name` should ever
+  store a title at all, rather than re-discovering this a third time.
+- **"~3 patients ahead" is a recomputed condition, not a single event** —
+  §7.6 lists it as a trigger point, but nothing in the app *causes* a
+  patient to become "3rd in line" the way calling someone or marking a
+  no-show is a discrete action. Implemented as a helper
+  (`notifyAlmostYourTurn` in `lib/queries/queue.ts`) that re-scans the
+  active queue and fires for anyone newly in the top few places, called
+  after every action that can change other patients' effective position:
+  `callNextEntry`, `markNoShow`, and `moveQueueEntryOrder`. A
+  `notifications` existence check (by `queueEntryId` + `templateKey`)
+  before each send is what makes "recompute after every change" safe
+  rather than spammy — same patient never gets it twice.
+- **Position 0 of the *remaining* active queue (after the just-called
+  entry is removed) doesn't get `almost_your_turn`.** That's the patient
+  who is now next in line — they're about to receive `now_serving`
+  directly on the next call, so a separate "almost your turn" heads-up
+  immediately before it would be redundant. Written as `active.slice(1,
+  4)` on the recomputed pool; caught the exact off-by-one this produces
+  (skips the newly-next patient, not literally "3 ahead" from the
+  pre-call pool) via a failing test assertion, not by reasoning it
+  through in advance — fixed the test's expectation to match the correct
+  behavior rather than the behavior to match a hastily-written
+  expectation, after actually working out which one was right.
+- **§7.6's literal "please proceed to Room X" became "please proceed to
+  the clinic"** — there's no room/counter field anywhere in §6's schema,
+  and this build hasn't added one (no evidence the real clinic assigns
+  numbered rooms). Fabricating a room number would be worse than omitting
+  it; revisit if the owner confirms clinics do have numbered rooms/
+  counters worth tracking.
+- **The follow-up "one-tap send" can be sent more than once per
+  consultation** — the list shows "Send reminder" vs. "Send again" based
+  on whether a `follow_up_due` notification already exists for that
+  queue entry, but never disables the button. A patient who didn't show
+  up for a first reminder plausibly needs a second nudge; there's no
+  spec language suggesting a hard one-time limit the way `almost_your_turn`
+  needed one (that one exists purely to avoid re-notifying on every
+  queue-position recompute, a mechanical concern with no analogue here).
+- **Sending happens inside the same DB transaction as the triggering
+  write** (booking, call-next, no-show, follow-up send) — fine for
+  `MockChannel`, which is synchronous and local, but worth flagging now:
+  a real network-calling channel (Semaphore, Messenger) held open inside
+  a Postgres transaction is a real latency/lock-duration problem. When a
+  live channel actually gets wired up, sending should move outside the
+  transaction (e.g. queue the notification row first, dispatch after
+  commit) rather than reuse this exact shape unchanged.
+
 ## 2026-08-22 — M4b: inventory
 
 Full medicine catalog management (add/edit/deactivate, clinic admin only),
