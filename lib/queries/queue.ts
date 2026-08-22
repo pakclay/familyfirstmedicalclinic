@@ -42,15 +42,24 @@ export async function nextQueueNumber(
  * (stored as a plain `@db.Date`) — not the server's or host machine's.
  * Manila is UTC+8, so naively using the server's UTC calendar date would
  * be a whole day behind Manila's actual date for the 16:00–23:59 UTC
- * window every day. `toZonedTime` shifts the instant so its **UTC**
- * getters read as the target zone's wall-clock time; reading it with plain
- * (non-UTC) getters would silently depend on the host machine's own
- * timezone matching — the exact bug this repo's history already caught
- * once in the availability engine (see DECISIONS.md, prior project).
+ * window every day.
+ *
+ * `toZonedTime`'s result must be read with **plain** (non-UTC) getters —
+ * per date-fns-tz 3.x's own implementation, it stores the target zone's
+ * wall-clock components via `setFullYear`/`setHours` (local setters), so
+ * `.getFullYear()`/`.getDate()` read back the zoned date regardless of the
+ * host machine's own timezone, while `.getUTCFullYear()`/`.getUTCDate()`
+ * read the *unshifted* original UTC value — the opposite of what an
+ * earlier version of this function assumed. That mismatch was invisible
+ * whenever the host's own local timezone happened to be UTC (getUTCX and
+ * getX coincide there), which is why it went uncaught through the rest of
+ * this build; it surfaces the moment the host runs in a non-UTC zone
+ * during the 8-hour window where Manila's calendar date has already
+ * ticked over but UTC's hasn't yet.
  */
 export function todayAsQueueDate(timezone: string): Date {
   const zoned = toZonedTime(new Date(), timezone)
-  return new Date(Date.UTC(zoned.getUTCFullYear(), zoned.getUTCMonth(), zoned.getUTCDate()))
+  return new Date(Date.UTC(zoned.getFullYear(), zoned.getMonth(), zoned.getDate()))
 }
 
 /** `queueDate` for "tomorrow" in the clinic's own calendar day — §7.1's same-day/next-day booking window. */
@@ -67,13 +76,24 @@ export function tomorrowAsQueueDate(timezone: string): Date {
  * that date is fine there). Manila midnight is UTC 16:00 the *previous*
  * day, 8 hours away from UTC midnight of the same Y-M-D digits — using
  * `todayAsQueueDate`'s value directly as an instant boundary would miss
- * every real timestamp in that 8-hour window. `fromZonedTime` re-reads the
- * UTC-constructed Y-M-D-00:00:00 as if it were *wall-clock time in the
- * target zone* and returns the correct absolute instant.
+ * every real timestamp in that 8-hour window.
+ *
+ * `fromZonedTime` reads its input's **plain** (non-UTC) getters as the
+ * wall-clock numbers to reinterpret in `timezone` — per date-fns-tz 3.x's
+ * own implementation, it discards the input's actual instant entirely.
+ * `todayAsQueueDate`'s `Date.UTC(...)`-built value only has the right Y-M-D
+ * under *plain* getters when the host's own local timezone happens to be
+ * UTC; anywhere else those getters read back a shifted date. Rebuilding
+ * the Y-M-D with the plain `Date` constructor (which every JS engine reads
+ * back via its own plain getters, regardless of host timezone) is what
+ * `fromZonedTime` actually expects — matching the documented example in
+ * its own JSDoc, which uses a plain-constructed date, not a UTC one.
  */
 export function todayInstantRange(timezone: string): { start: Date; end: Date } {
-  const start = fromZonedTime(todayAsQueueDate(timezone), timezone)
-  const end = fromZonedTime(tomorrowAsQueueDate(timezone), timezone)
+  const today = todayAsQueueDate(timezone)
+  const start = fromZonedTime(new Date(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()), timezone)
+  const tomorrow = tomorrowAsQueueDate(timezone)
+  const end = fromZonedTime(new Date(tomorrow.getUTCFullYear(), tomorrow.getUTCMonth(), tomorrow.getUTCDate()), timezone)
   return { start, end }
 }
 

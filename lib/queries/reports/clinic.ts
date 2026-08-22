@@ -90,8 +90,10 @@ export async function getClinicReport(user: AbilitySubject, params: DateRangePar
 
     const dailyRevenueMap = new Map<string, number>()
     for (const p of payments) {
+      // toZonedTime's result must be read with plain (non-UTC) getters —
+      // see todayAsQueueDate in lib/queries/queue.ts for why.
       const zoned = toZonedTime(p.receivedAt, clinic.timezone)
-      const dayLabel = `${zoned.getUTCFullYear()}-${String(zoned.getUTCMonth() + 1).padStart(2, "0")}-${String(zoned.getUTCDate()).padStart(2, "0")}`
+      const dayLabel = `${zoned.getFullYear()}-${String(zoned.getMonth() + 1).padStart(2, "0")}-${String(zoned.getDate()).padStart(2, "0")}`
       dailyRevenueMap.set(dayLabel, (dailyRevenueMap.get(dayLabel) ?? 0) + p.amount)
     }
     const dailyRevenue = [...dailyRevenueMap.entries()]

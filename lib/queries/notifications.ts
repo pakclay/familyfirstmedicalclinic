@@ -4,6 +4,7 @@ import { requireClinicId, type AbilitySubject } from "@/lib/permissions/ability"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import { getNotificationChannel } from "@/lib/notifications/channel"
 import { renderTemplate, type TemplateKey, type TemplatePayloads } from "@/lib/notifications/templates"
+import { clinicTimezone, todayAsQueueDate } from "@/lib/queries/queue"
 
 /**
  * Renders the template, sends through whichever channel driver
@@ -103,7 +104,17 @@ export type FollowUpDue = {
 export async function listDueFollowUps(user: AbilitySubject): Promise<FollowUpDue[]> {
   const clinicId = requireClinicId(user)
   return runWithRls(user, async (tx) => {
-    const today = new Date(new Date().toDateString())
+    // followUpDate is a `@db.Date` column, so "today" must be built the
+    // same UTC-midnight-as-calendar-label way todayAsQueueDate builds
+    // queueDate — not `new Date(new Date().toDateString())`, which
+    // reinterprets the local calendar date as a real local-midnight
+    // instant. Those two "midnights" only coincide when the server's own
+    // timezone happens to match the clinic's, and even then are 0-23h
+    // apart depending on the server's UTC offset — so a same-day
+    // follow-up could silently fail to show as due for hours after local
+    // midnight. Same bug class as M4's payment instant-range fix.
+    const timezone = await clinicTimezone(tx, clinicId)
+    const today = todayAsQueueDate(timezone)
     const consultations = await tx.consultation.findMany({
       where: { clinicId, deletedAt: null, followUpDate: { not: null, lte: today } },
       include: {
