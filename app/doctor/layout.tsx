@@ -6,6 +6,7 @@ import { SignOutButton } from "@/components/console/sign-out-button"
 const DOCTOR_NAV = [
   { label: "My queue", href: "/doctor/queue" },
   { label: "My collections", href: "/doctor/collections" },
+  { label: "Remittance", href: "/doctor/remittance" },
 ]
 
 export default async function DoctorLayout({ children }: { children: React.ReactNode }) {

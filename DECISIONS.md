@@ -9,6 +9,103 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-08-22 — M6: reporting and reconciliation
+
+Clinic reports (visits, new-vs-returning, revenue total and by doctor,
+average wait/consultation duration, no-show rate, top diagnoses, top
+medicines, expenses, net, a revenue-over-time bar chart), the inventory
+report (stock valuation at cost, per-medicine received/dispensed/
+adjusted/returned reconciliation over a date range), the holding
+consolidated report (all clinics side by side, combined P&L, ranking by
+revenue and volume), CSV export for all three, and cash reconciliation
+(`/staff/remittance` + a matching `/doctor/remittance`, since doctors are
+collectors too).
+
+Verified live end-to-end: the holding admin's consolidated report showed
+all three clinics with Quezon City's real ₱1,132.00 in revenue, and a
+direct Postgres query (`SUM(payments.amount) GROUP BY clinic`) confirmed
+that figure was exactly the sum of that clinic's payment rows for the
+range — §12's accept line checked directly against the database, not just
+asserted by the app. Recorded a ₱15,000.00 expense and watched the clinic
+report's net figure update to match (₱1,132.00 − ₱15,000.00 —
+deliberately large to make the arithmetic obvious). Submitted a
+remittance as a doctor with a ₱20.00 shortfall, watched the variance
+display correctly on both the doctor's own screen and the clinic admin's
+pending-confirmation queue complete with the doctor's notes, and
+confirmed it. CSV export verified via direct `fetch()` against the route
+handlers, returning correctly-shaped rows. 56/56 tests pass (8 new in
+`lib/queries/reports/__tests__/reports.test.ts`).
+
+- **Doctors get their own `/doctor/remittance`, reusing the exact same
+  form component as `/staff/remittance`** rather than one shared route.
+  §7.7's screen is literally named `/staff/remittance` and §1 says
+  "today doctors take cash directly" — a doctor is as much a "collector"
+  under §7.7 as front desk is, but middleware's `/staff/*` gate is
+  reserved for front-desk/admin screens, and punching a doctor-shaped
+  hole in that gate felt like the wrong fix for a role-boundary that
+  exists on purpose. The underlying query functions
+  (`getMyRemittanceStatus`/`submitRemittance`) already took any
+  clinic-scoped `AbilitySubject` with no role check — only
+  `listPendingRemittances`/`confirmRemittance` are clinic-admin-gated,
+  correctly.
+- **`expectedAmount` is never a parameter `submitRemittance` accepts** —
+  it's always computed server-side from real `Payment` rows for that
+  collector's day, the same number `/doctor/collections` (M4) already
+  shows. There's no code path where a collector's own claimed "expected"
+  figure could reach the database; §7.7's whole point ("digitizing
+  payments just moves an unverified number into a database" otherwise)
+  would be defeated by trusting the client for the one number the
+  variance is measured against.
+- **New vs. returning patients is defined by *first checked-in visit ever
+  at this clinic*, computed by checking whether each in-range patient has
+  any checked-in visit before the range start** — not by `Patient.createdAt`
+  (a patient can be registered without a same-day visit, e.g. imported or
+  pre-registered) and not by a stored "first visit" flag (would need
+  updating exactly once per patient, an easy invariant to accidentally
+  break later). Costs one extra query per report (fetch prior visits for
+  the range's distinct patient IDs) in exchange for never being able to
+  drift from the actual visit history.
+- **No-show rate's denominator is only patients who actually
+  checked in** (`checkedInAt` in range), not every `QueueEntry` touched in
+  the range. A `BOOKED` entry that's simply still upcoming, or was
+  `CANCELLED` before ever arriving, was never "expected to show up and
+  didn't" the way a no-show specifically is — `markNoShow` itself only
+  accepts `CHECKED_IN`/`WAITING`/`CALLED` entries (§7.3, unchanged from
+  M3), so every `NO_SHOW` row already necessarily has `checkedInAt` set;
+  the report's population just mirrors that same rule.
+- **Every report resolves its own real UTC instant range per clinic
+  timezone** (`resolveReportInstantRange`, reusing the `fromZonedTime`
+  pattern from M4's `todayInstantRange`) rather than accepting raw
+  start/end `Date` objects from the query string directly. The holding
+  report resolves this *once per clinic* inside its loop, not once
+  globally, since nothing here assumes every clinic shares a timezone
+  even though all three seeded ones currently do.
+- **CSV export is one flat "metric,value" table per clinic/holding report,
+  not a literal dump of every underlying row** — the report's own summary
+  numbers (visits, revenue, doctor breakdown, top diagnoses/medicines) are
+  what a clinic admin actually asked for in §8's "every report has ...
+  CSV export," and building a separate multi-table export format for
+  something CSV isn't naturally shaped for felt like solving a problem
+  nobody described. The inventory report's CSV is the one exception —
+  its `rows` (one row per medicine) were already naturally tabular, so
+  that export is the row data directly, not a summary of it.
+- **Chose recharts' `BarChart` over `LineChart`** for "revenue over time"
+  — daily revenue is a small number of discrete buckets (days), and a bar
+  better represents "this much money on this day" than a line implying
+  interpolation between days that didn't necessarily have any activity.
+  Recharts was already a dependency (inherited from the prior project's
+  scaffold) — matches §8's "do not build a charting framework" instruction
+  by construction, not by restraint.
+- **Recharts 3.10.1's `Tooltip` `formatter` prop types `value` as
+  possibly `undefined` and not necessarily a plain `number`** (a
+  `ValueType | undefined` union), which broke a first draft written
+  against the simpler signature training data assumes for recharts v2.
+  Caught immediately by `tsc`, not at runtime — fixed by reading the
+  installed package's own `.d.ts` rather than guessing, the same
+  "check the installed version, don't assume" discipline AGENTS.md's
+  warning about this Next.js version already established for other
+  breaking-change surprises this build has hit.
+
 ## 2026-08-22 — M5: notifications
 
 `NotificationChannel` interface with `MockChannel` (default, logs to

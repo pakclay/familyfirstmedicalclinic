@@ -10,6 +10,7 @@ const STAFF_NAV = [
   { label: "Inventory", href: "/staff/inventory" },
   { label: "Follow-ups", href: "/staff/follow-ups" },
   { label: "Notifications", href: "/staff/notifications" },
+  { label: "Remittance", href: "/staff/remittance" },
 ]
 
 export default async function StaffLayout({ children }: { children: React.ReactNode }) {
