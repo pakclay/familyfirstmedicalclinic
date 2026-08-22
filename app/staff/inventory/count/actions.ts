@@ -3,7 +3,7 @@
 import { auth } from "@/auth"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import type { AbilitySubject } from "@/lib/permissions/ability"
-import { saveConsultation, InsufficientStockError } from "@/lib/queries/consultations"
+import { submitPhysicalCount, type PhysicalCountResult } from "@/lib/queries/inventory"
 
 async function actingUser(): Promise<AbilitySubject> {
   const session = await auth()
@@ -16,28 +16,18 @@ async function actingUser(): Promise<AbilitySubject> {
   }
 }
 
-export type SaveConsultationResult =
-  | { ok: true; consultationId: string }
-  | { ok: false; error: string; insufficientStock?: boolean }
-
-export async function saveConsultationAction(
-  queueEntryId: string,
+export async function submitPhysicalCountAction(
   input: Record<string, unknown>
-): Promise<SaveConsultationResult> {
+): Promise<{ ok: true; result: PhysicalCountResult } | { ok: false; error: string }> {
   const user = await actingUser()
   try {
-    const result = await saveConsultation(user, queueEntryId, input)
-    return { ok: true, consultationId: result.consultationId }
+    const result = await submitPhysicalCount(user, input)
+    return { ok: true, result }
   } catch (err) {
-    if (err instanceof InsufficientStockError) {
-      return { ok: false, error: err.message, insufficientStock: true }
-    }
+    if (err instanceof ForbiddenError) return { ok: false, error: err.message }
     if (err && typeof err === "object" && "issues" in err) {
       const zodErr = err as { issues: { message: string }[] }
       return { ok: false, error: zodErr.issues[0]?.message ?? "Check the form for errors." }
-    }
-    if (err instanceof Error) {
-      return { ok: false, error: err.message }
     }
     return { ok: false, error: "Something went wrong. Please try again." }
   }

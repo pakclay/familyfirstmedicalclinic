@@ -11,6 +11,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import type { ConsultationScreenData } from "@/lib/queries/consultations"
 import { MedicineRow, type MedicineRowState } from "./medicine-row"
 import { saveConsultationAction } from "./actions"
+import { Checkbox } from "@/components/ui/checkbox"
 
 function newRow(): MedicineRowState {
   return {
@@ -40,6 +41,8 @@ export function ConsultationForm({ data }: { data: ConsultationScreenData }) {
   const [paymentNotes, setPaymentNotes] = useState("")
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [offerOverride, setOfferOverride] = useState(false)
+  const [override, setOverride] = useState(false)
 
   // §13's decision: itemized separately — consultation fee + Σ(dispensed
   // sellingPrice × quantity). Auto-computed as a *default*, not locked —
@@ -82,6 +85,7 @@ export function ConsultationForm({ data }: { data: ConsultationScreenData }) {
           instructions: r.instructions,
           dispensedFromStock: r.dispensedFromStock,
         })),
+      overrideInsufficientStock: override,
       payment: {
         amount: Math.round(Number(displayedAmount) * 100),
         method,
@@ -94,6 +98,7 @@ export function ConsultationForm({ data }: { data: ConsultationScreenData }) {
     setPending(false)
     if (!res.ok) {
       setError(res.error)
+      setOfferOverride(!!res.insufficientStock)
       return
     }
     router.push("/doctor/queue")
@@ -234,9 +239,20 @@ export function ConsultationForm({ data }: { data: ConsultationScreenData }) {
           </CardContent>
         </Card>
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && (
+          <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3">
+            <p className="text-sm text-destructive">{error}</p>
+            {offerOverride && (
+              <label className="mt-2 flex items-start gap-2 text-sm">
+                <Checkbox checked={override} onCheckedChange={(c) => setOverride(c === true)} className="mt-0.5" />
+                Dispense anyway (stock count is wrong) — this updates stock to reflect what was actually given and
+                logs that you overrode the check.
+              </label>
+            )}
+          </div>
+        )}
         <Button type="submit" disabled={pending} className="h-12 text-base">
-          {pending ? "Saving…" : "Complete consultation"}
+          {pending ? "Saving…" : override ? "Complete consultation anyway" : "Complete consultation"}
         </Button>
       </form>
     </div>

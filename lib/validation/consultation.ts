@@ -41,6 +41,10 @@ export const consultationSchema = z.object({
   treatmentPlan: z.string().trim().optional(),
   followUpDate: z.union([z.literal(""), z.coerce.date()]).optional(),
   medicines: z.array(medicineRowSchema).default([]),
+  // §7.5 DECISION: "dispense anyway (stock count is wrong)" — bypasses the
+  // insufficient-stock block for every row in this save, not per-row; see
+  // lib/queries/consultations.ts for what it actually does to the ledger.
+  overrideInsufficientStock: z.boolean().default(false),
   payment: z.object({
     amount: z.coerce.number().int().min(0, "Amount can't be negative"),
     method: z.enum(["CASH", "GCASH", "CARD", "HMO", "OTHER"]),

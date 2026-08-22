@@ -5,6 +5,7 @@ import { listPatientConsultationHistory } from "@/lib/queries/consultations"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import type { AbilitySubject } from "@/lib/permissions/ability"
 import { Badge } from "@/components/ui/badge"
+import { DispensedMedicineList } from "./dispensed-medicine-list"
 
 const STATUS_LABEL: Record<string, string> = {
   BOOKED: "Booked",
@@ -114,11 +115,11 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
                     {consultation.diagnosis && <> · {consultation.diagnosis}</>}
                   </p>
                   {consultation.medicines.length > 0 && (
-                    <p>
-                      {consultation.medicines
-                        .map((m) => `${m.medicineName}${m.dosage ? ` (${m.dosage})` : ""}`)
-                        .join(", ")}
-                    </p>
+                    <DispensedMedicineList
+                      patientId={id}
+                      medicines={consultation.medicines}
+                      canDelete={session.user.role === "CLINIC_ADMIN"}
+                    />
                   )}
                 </div>
               )}

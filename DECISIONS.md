@@ -9,6 +9,77 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-08-22 — M4b: inventory
+
+Full medicine catalog management (add/edit/deactivate, clinic admin only),
+receive stock, the physical count workflow, the movement ledger view,
+low-stock/expiring/expired filters and dashboard panels, and the two
+pieces M4 deliberately deferred: the insufficient-stock override
+("dispense anyway") and corrections (deleting a dispensed row via a
+compensating `return` movement, never an edit).
+
+Verified live end-to-end as clinic admin + doctor: received 50 units of
+Amoxicillin (120 → 170); ran a physical count that found Mefenamic Acid
+at 25 instead of the system's 30, submitted with a reason, and got back
+"1 discrepancy, total variance ₱-10.00" with a matching `ADJUSTMENT`
+movement; edited Mefenamic Acid's reorder level without touching its
+stock; corrected Maria Santos's earlier Paracetamol dispense from her
+patient profile, watched it disappear from her visible history and stock
+return from 196 to 200 via a `RETURN` movement while the original
+`DISPENSE` movement stayed exactly as it was; then, as a doctor,
+attempted to dispense 30 Mefenamic Acid against a stock of 25, got
+blocked with "25 available, 30 requested," checked "dispense anyway,"
+resubmitted, and confirmed stock went to **-5** with an audit log entry
+naming the doctor. 42/42 tests pass (9 new in
+`lib/queries/__tests__/inventory.test.ts`, on top of M4's 6).
+
+- **The override "drives stock to the true figure" by dispensing the
+  *full requested amount*, allowing `current_stock` to go negative** —
+  not by capping the dispense at whatever the system thought was
+  available. Re-read §7.5's phrase a few times before committing to this:
+  the alternative (silently dispensing only what the system shows as
+  available) would misrepresent what the doctor actually handed the
+  patient, and negative stock is itself a legible signal to run a
+  physical count rather than a value to hide. The audit log entry named
+  the doctor (verified directly in Postgres, not just asserted in a
+  test) is what makes this a supervised exception rather than a quiet
+  bypass.
+- **Corrections (deleting a dispensed row) are clinic-admin-only**, not
+  available to the prescribing doctor. §7.5 doesn't say who may do this;
+  scoped it to the oversight role rather than letting a doctor
+  unilaterally undo their own already-saved clinical/financial record,
+  consistent with the read-only "Correct" action living on the patient
+  profile page (where clinic admins already review history) rather than
+  inside the doctor's own consultation flow.
+- **The physical count's "required reason" is one reason per submission,
+  applied to every discrepancy movement it creates**, not a separate
+  reason per medicine. §7.5 says "writes one adjustment movement per
+  discrepancy with a required reason" — satisfied literally (every
+  adjustment movement does carry a reason), and a single free-text reason
+  per count event ("Monthly count," "Post-delivery recount") is how a
+  real physical count actually happens: one session, one cause, many
+  line items. A medicine left blank in the count form is treated as "not
+  counted this time" and produces no movement at all, rather than being
+  read as "counted as zero."
+- **Receiving stock updates `unitCost` unconditionally on every receipt**
+  (this delivery's cost becomes the medicine's stored cost), but only
+  updates `expiryDate` when the receiving staff explicitly checks "this
+  delivery's expiry is later" — matching §7.5's DECISION that this is a
+  human call, not an automatic max() comparison, since §7.5 also commits
+  to no batch/lot tracking (one stock number, one expiry date, so
+  whichever delivery should "win" the stored expiry has to be a real
+  choice, not a formula).
+- **A new catalog medicine starts at 0 stock; only `receiveStock` (or a
+  physical count) ever changes `current_stock`** — `createMedicine` never
+  takes an initial-quantity field, even though that'd save a step for the
+  common case of adding a medicine and immediately stocking it. Keeping
+  "catalog exists" and "stock arrived" as two separate, separately
+  audited events (via two different screens, `/staff/inventory/new` then
+  `/staff/inventory/receive`) was worth the extra click to preserve —
+  every unit of stock traces to a real receipt movement with no
+  exception, which is exactly the invariant M4b's own accept line tests
+  for.
+
 ## 2026-08-22 — M4: consultation, medicine, payment
 
 The doctor's consultation screen (§7.4): patient identity/age/priority/

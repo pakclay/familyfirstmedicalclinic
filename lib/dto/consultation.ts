@@ -1,4 +1,5 @@
 export type MedicineDispensedSummary = {
+  id: string
   medicineName: string
   dosage: string | null
   quantity: number

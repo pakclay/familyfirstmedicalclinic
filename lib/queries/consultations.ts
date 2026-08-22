@@ -69,6 +69,7 @@ export async function getConsultationScreenData(
         diagnosis: c.diagnosis,
         followUpDate: c.followUpDate,
         medicines: c.medicinesDispensed.map((md) => ({
+          id: md.id,
           medicineName: md.medicineName,
           dosage: md.dosage,
           quantity: md.quantity,
@@ -110,6 +111,7 @@ export async function listPatientConsultationHistory(
       diagnosis: c.diagnosis,
       followUpDate: c.followUpDate,
       medicines: c.medicinesDispensed.map((md) => ({
+        id: md.id,
         medicineName: md.medicineName,
         dosage: md.dosage,
         quantity: md.quantity,
@@ -130,9 +132,10 @@ export class InsufficientStockError extends Error {
  * §7.4/§7.5: saves the consultation, dispenses medicine (deducting stock
  * in the same transaction — a failure anywhere rolls back everything,
  * nothing is half-saved), records the payment, and marks the queue entry
- * completed. §7.5's insufficient-stock override checkbox is M4b's job;
- * for now an insufficient quantity blocks the whole save with no override,
- * which is still correct behavior for M4 — just not the final word on it.
+ * completed. An insufficient quantity blocks the save unless
+ * `overrideInsufficientStock` is set (§7.5's "dispense anyway" DECISION),
+ * in which case it dispenses the full requested amount anyway and the
+ * caller writes an audit entry naming who overrode it.
  */
 export async function saveConsultation(
   user: AbilitySubject,
@@ -179,7 +182,16 @@ export async function saveConsultation(
         })
       }
     }
-    if (shortfalls.length > 0) throw new InsufficientStockError(shortfalls)
+    if (shortfalls.length > 0 && !parsed.overrideInsufficientStock) {
+      throw new InsufficientStockError(shortfalls)
+    }
+    // §7.5 DECISION: overriding still dispenses the full requested amount
+    // (driving current_stock to whatever that leaves — negative if the
+    // shelf really was miscounted, which is itself the signal a physical
+    // count is due) rather than silently capping at what the system
+    // thought was available; the audit trail is what makes the override
+    // safe to allow, not a smaller effective quantity.
+    const overrodeShortfall = shortfalls.length > 0 && parsed.overrideInsufficientStock
 
     const consultation = await tx.consultation.create({
       data: {
@@ -266,6 +278,22 @@ export async function saveConsultation(
     await tx.auditLog.create({
       data: { clinicId, userId: user.id, action: "payment.create", entityType: "Payment", entityId: payment.id, changes: { amount: payment.amount } },
     })
+    if (overrodeShortfall) {
+      // §7.5 DECISION: the override "writes an audit log entry naming the
+      // user" — a separate, explicit entry from the dispense movements
+      // themselves, since this is the one that specifically flags *that a
+      // block was bypassed*, not just that stock changed.
+      await tx.auditLog.create({
+        data: {
+          clinicId,
+          userId: user.id,
+          action: "medicine.dispense_override",
+          entityType: "Consultation",
+          entityId: consultation.id,
+          changes: { shortfalls },
+        },
+      })
+    }
 
     return { consultationId: consultation.id }
   })
