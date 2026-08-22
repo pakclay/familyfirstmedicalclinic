@@ -53,30 +53,32 @@ export default async function ReportsPage({
         </div>
 
         <h2 className="mt-8 text-lg font-heading font-semibold">Clinics</h2>
-        <table className="mt-2 w-full text-sm">
-          <thead>
-            <tr className="border-b border-border text-left text-xs text-muted-foreground">
-              <th className="py-2">Clinic</th>
-              <th className="py-2 text-right">Visits</th>
-              <th className="py-2 text-right">Revenue</th>
-              <th className="py-2 text-right">Expenses</th>
-              <th className="py-2 text-right">Net</th>
-            </tr>
-          </thead>
-          <tbody>
-            {report.clinics.map((c) => (
-              <tr key={c.clinicId} className="border-b border-border">
-                <td className="py-2">{c.clinicName}</td>
-                <td className="py-2 text-right font-numeric">{c.visitCount}</td>
-                <td className="py-2 text-right font-numeric">{pesos(c.revenueTotal)}</td>
-                <td className="py-2 text-right font-numeric">{pesos(c.expensesTotal)}</td>
-                <td className="py-2 text-right font-numeric">{pesos(c.net)}</td>
+        <div className="overflow-x-auto">
+          <table className="mt-2 w-full min-w-[480px] text-sm">
+            <thead>
+              <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                <th className="py-2">Clinic</th>
+                <th className="py-2 text-right">Visits</th>
+                <th className="py-2 text-right">Revenue</th>
+                <th className="py-2 text-right">Expenses</th>
+                <th className="py-2 text-right">Net</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {report.clinics.map((c) => (
+                <tr key={c.clinicId} className="border-b border-border">
+                  <td className="py-2">{c.clinicName}</td>
+                  <td className="py-2 text-right font-numeric">{c.visitCount}</td>
+                  <td className="py-2 text-right font-numeric">{pesos(c.revenueTotal)}</td>
+                  <td className="py-2 text-right font-numeric">{pesos(c.expensesTotal)}</td>
+                  <td className="py-2 text-right font-numeric">{pesos(c.net)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
-        <div className="mt-8 grid grid-cols-2 gap-6">
+        <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2">
           <div>
             <h2 className="text-lg font-heading font-semibold">Ranked by revenue</h2>
             <ol className="mt-2 space-y-1 text-sm">
@@ -145,7 +147,7 @@ export default async function ReportsPage({
         <RevenueChart data={clinicReport.dailyRevenue} />
       </div>
 
-      <div className="mt-8 grid grid-cols-3 gap-6">
+      <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-3">
         <ListSection title="Revenue by doctor" items={clinicReport.revenueByDoctor.map((d) => ({ label: d.doctorName, value: pesos(d.amount) }))} />
         <ListSection title="Top diagnoses" items={clinicReport.topDiagnoses.map((d) => ({ label: d.diagnosis, value: String(d.count) }))} />
         <ListSection title="Top medicines" items={clinicReport.topMedicines.map((m) => ({ label: m.medicineName, value: String(m.quantity) }))} />
@@ -160,39 +162,41 @@ export default async function ReportsPage({
         {inventoryReport.panels.expiringSoon.length > 0 && <Badge variant="outline" className="border-signal text-signal">{inventoryReport.panels.expiringSoon.length} expiring soon</Badge>}
         {inventoryReport.panels.expired.length > 0 && <Badge variant="outline" className="border-destructive text-destructive">{inventoryReport.panels.expired.length} expired</Badge>}
       </div>
-      <table className="mt-3 w-full text-sm">
-        <thead>
-          <tr className="border-b border-border text-left text-xs text-muted-foreground">
-            <th className="py-2">Medicine</th>
-            <th className="py-2 text-right">Stock</th>
-            <th className="py-2 text-right">Received</th>
-            <th className="py-2 text-right">Dispensed</th>
-            <th className="py-2 text-right">Adjusted</th>
-            <th className="py-2 text-right">Returned</th>
-          </tr>
-        </thead>
-        <tbody>
-          {inventoryReport.rows.map((r) => (
-            <tr key={r.medicineId} className="border-b border-border">
-              <td className="py-2">
-                <Link href={`/staff/inventory/${r.medicineId}`} className="hover:underline">
-                  {r.medicineName}
-                </Link>
-              </td>
-              <td className="py-2 text-right font-numeric">{r.currentStock}</td>
-              <td className="py-2 text-right font-numeric">{r.receivedInRange || "—"}</td>
-              <td className="py-2 text-right font-numeric">{r.dispensedInRange || "—"}</td>
-              <td className="py-2 text-right font-numeric">{r.adjustedInRange || "—"}</td>
-              <td className="py-2 text-right font-numeric">{r.returnedInRange || "—"}</td>
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full min-w-[560px] text-sm">
+          <thead>
+            <tr className="border-b border-border text-left text-xs text-muted-foreground">
+              <th className="py-2">Medicine</th>
+              <th className="py-2 text-right">Stock</th>
+              <th className="py-2 text-right">Received</th>
+              <th className="py-2 text-right">Dispensed</th>
+              <th className="py-2 text-right">Adjusted</th>
+              <th className="py-2 text-right">Returned</th>
             </tr>
-          ))}
-          {inventoryReport.rows.length === 0 && (
-            <tr>
-              <td colSpan={6} className="py-6 text-center text-muted-foreground">No stock activity in this range.</td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {inventoryReport.rows.map((r) => (
+              <tr key={r.medicineId} className="border-b border-border">
+                <td className="py-2">
+                  <Link href={`/staff/inventory/${r.medicineId}`} className="hover:underline">
+                    {r.medicineName}
+                  </Link>
+                </td>
+                <td className="py-2 text-right font-numeric">{r.currentStock}</td>
+                <td className="py-2 text-right font-numeric">{r.receivedInRange || "—"}</td>
+                <td className="py-2 text-right font-numeric">{r.dispensedInRange || "—"}</td>
+                <td className="py-2 text-right font-numeric">{r.adjustedInRange || "—"}</td>
+                <td className="py-2 text-right font-numeric">{r.returnedInRange || "—"}</td>
+              </tr>
+            ))}
+            {inventoryReport.rows.length === 0 && (
+              <tr>
+                <td colSpan={6} className="py-6 text-center text-muted-foreground">No stock activity in this range.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

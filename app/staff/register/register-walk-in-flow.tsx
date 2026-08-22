@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -16,10 +16,41 @@ type Step =
   | { name: "new-form"; phone: string; reasonForVisit: string; priority: boolean }
   | { name: "done"; patientName: string; queueNumber: number }
 
+type NewPatientForm = {
+  firstName: string
+  lastName: string
+  middleName: string
+  birthdate: string
+  sex: string
+  email: string
+  address: string
+  emergencyContactName: string
+  emergencyContactPhone: string
+  guardianName: string
+  guardianPhone: string
+  consent: boolean
+}
+
+const EMPTY_NEW_PATIENT_FORM: NewPatientForm = {
+  firstName: "",
+  lastName: "",
+  middleName: "",
+  birthdate: "",
+  sex: "",
+  email: "",
+  address: "",
+  emergencyContactName: "",
+  emergencyContactPhone: "",
+  guardianName: "",
+  guardianPhone: "",
+  consent: false,
+}
+
 export function RegisterWalkInFlow() {
   const [step, setStep] = useState<Step>({ name: "start" })
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [newPatientForm, setNewPatientForm] = useState<NewPatientForm>(EMPTY_NEW_PATIENT_FORM)
   const router = useRouter()
 
   async function handleStart(formData: FormData) {
@@ -35,6 +66,7 @@ export function RegisterWalkInFlow() {
     }
     try {
       const candidates = await searchByPhoneAction(phone)
+      if (candidates.length === 0) setNewPatientForm(EMPTY_NEW_PATIENT_FORM)
       setStep(
         candidates.length > 0
           ? { name: "candidates", phone, reasonForVisit, priority, candidates }
@@ -65,26 +97,16 @@ export function RegisterWalkInFlow() {
     }
   }
 
-  async function handleNewPatientSubmit(formData: FormData) {
+  async function handleNewPatientSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
     if (step.name !== "new-form") return
     setPending(true)
     setError(null)
     const input = {
-      firstName: String(formData.get("firstName") ?? ""),
-      lastName: String(formData.get("lastName") ?? ""),
-      middleName: String(formData.get("middleName") ?? ""),
-      birthdate: String(formData.get("birthdate") ?? ""),
-      sex: String(formData.get("sex") ?? ""),
+      ...newPatientForm,
       phone: step.phone,
-      email: String(formData.get("email") ?? ""),
-      address: String(formData.get("address") ?? ""),
-      emergencyContactName: String(formData.get("emergencyContactName") ?? ""),
-      emergencyContactPhone: String(formData.get("emergencyContactPhone") ?? ""),
-      guardianName: String(formData.get("guardianName") ?? ""),
-      guardianPhone: String(formData.get("guardianPhone") ?? ""),
       reasonForVisit: step.reasonForVisit,
       priority: step.priority,
-      consent: formData.get("consent") === "on",
     }
     const res = await registerNewPatientAction(input)
     setPending(false)
@@ -102,6 +124,7 @@ export function RegisterWalkInFlow() {
   function reset() {
     setStep({ name: "start" })
     setError(null)
+    setNewPatientForm(EMPTY_NEW_PATIENT_FORM)
   }
 
   if (step.name === "done") {
@@ -148,7 +171,10 @@ export function RegisterWalkInFlow() {
             variant="outline"
             className="h-11"
             disabled={pending}
-            onClick={() => setStep({ name: "new-form", phone: step.phone, reasonForVisit: step.reasonForVisit, priority: step.priority })}
+            onClick={() => {
+              setNewPatientForm(EMPTY_NEW_PATIENT_FORM)
+              setStep({ name: "new-form", phone: step.phone, reasonForVisit: step.reasonForVisit, priority: step.priority })
+            }}
           >
             None of these — register a new patient
           </Button>
@@ -158,26 +184,31 @@ export function RegisterWalkInFlow() {
   }
 
   if (step.name === "new-form") {
+    const set = <K extends keyof NewPatientForm>(key: K, value: NewPatientForm[K]) =>
+      setNewPatientForm((prev) => ({ ...prev, [key]: value }))
+
     return (
       <Card>
         <CardContent className="py-6">
-          <form action={handleNewPatientSubmit} className="flex flex-col gap-4">
+          <form onSubmit={handleNewPatientSubmit} className="flex flex-col gap-4">
             <p className="text-sm text-muted-foreground">
               New patient · {step.phone} · {step.reasonForVisit}
             </p>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="First name" name="firstName" required autoFocus />
-              <Field label="Last name" name="lastName" required />
+              <Field label="First name" name="firstName" required autoFocus value={newPatientForm.firstName} onChange={(v) => set("firstName", v)} />
+              <Field label="Last name" name="lastName" required value={newPatientForm.lastName} onChange={(v) => set("lastName", v)} />
             </div>
-            <Field label="Middle name" name="middleName" />
+            <Field label="Middle name" name="middleName" value={newPatientForm.middleName} onChange={(v) => set("middleName", v)} />
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Birthdate" name="birthdate" type="date" required />
+              <Field label="Birthdate" name="birthdate" type="date" required value={newPatientForm.birthdate} onChange={(v) => set("birthdate", v)} />
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="sex">Sex</Label>
                 <select
                   id="sex"
                   name="sex"
                   required
+                  value={newPatientForm.sex}
+                  onChange={(e) => set("sex", e.target.value)}
                   className="h-10 rounded-md border border-input bg-transparent px-3 text-sm"
                 >
                   <option value="">Select…</option>
@@ -186,21 +217,26 @@ export function RegisterWalkInFlow() {
                 </select>
               </div>
             </div>
-            <Field label="Address" name="address" required />
-            <Field label="Email (optional)" name="email" type="email" />
+            <Field label="Address" name="address" required value={newPatientForm.address} onChange={(v) => set("address", v)} />
+            <Field label="Email (optional)" name="email" type="email" value={newPatientForm.email} onChange={(v) => set("email", v)} />
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Emergency contact name" name="emergencyContactName" required />
-              <Field label="Emergency contact phone" name="emergencyContactPhone" required />
+              <Field label="Emergency contact name" name="emergencyContactName" required value={newPatientForm.emergencyContactName} onChange={(v) => set("emergencyContactName", v)} />
+              <Field label="Emergency contact phone" name="emergencyContactPhone" required value={newPatientForm.emergencyContactPhone} onChange={(v) => set("emergencyContactPhone", v)} />
             </div>
             <div className="grid grid-cols-2 gap-3 rounded-md border border-border p-3">
               <div className="col-span-2 text-xs text-muted-foreground">
                 Guardian — required only if the patient is under 18
               </div>
-              <Field label="Guardian name" name="guardianName" />
-              <Field label="Guardian phone" name="guardianPhone" />
+              <Field label="Guardian name" name="guardianName" value={newPatientForm.guardianName} onChange={(v) => set("guardianName", v)} />
+              <Field label="Guardian phone" name="guardianPhone" value={newPatientForm.guardianPhone} onChange={(v) => set("guardianPhone", v)} />
             </div>
             <label className="flex items-start gap-2 text-sm">
-              <Checkbox name="consent" required className="mt-0.5" />
+              <Checkbox
+                required
+                className="mt-0.5"
+                checked={newPatientForm.consent}
+                onCheckedChange={(checked) => set("consent", checked === true)}
+              />
               I confirm the patient (or guardian) consents to the clinic collecting and using their health
               information for care and follow-up.
             </label>
@@ -251,17 +287,30 @@ function Field({
   type = "text",
   required,
   autoFocus,
+  value,
+  onChange,
 }: {
   label: string
   name: string
   type?: string
   required?: boolean
   autoFocus?: boolean
+  value?: string
+  onChange?: (value: string) => void
 }) {
   return (
     <div className="flex flex-col gap-1.5">
       <Label htmlFor={name}>{label}</Label>
-      <Input id={name} name={name} type={type} required={required} autoFocus={autoFocus} className="h-10" />
+      <Input
+        id={name}
+        name={name}
+        type={type}
+        required={required}
+        autoFocus={autoFocus}
+        value={value}
+        onChange={onChange ? (e) => onChange(e.target.value) : undefined}
+        className="h-10"
+      />
     </div>
   )
 }
