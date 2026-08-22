@@ -187,13 +187,16 @@ a remittance variance displays correctly.
 
 1. Log in as `owner@familyfirst.example` and open **Reports**. All three
    clinics are listed with visits/revenue/expenses/net, plus a combined
-   total. Cross-check one clinic's revenue figure directly:
+   total. Cross-check one clinic's revenue figure directly (the default
+   range covers the last 30 days, which comfortably covers everything a
+   fresh seed or this walkthrough produces):
    ```sql
    select sum(amount) from payments
-   where clinic_id = (select id from clinics where slug = 'quezon-city')
-     and received_at >= <range start> and received_at < <range end>;
+   where clinic_id = (select id from clinics where slug = 'quezon-city');
    ```
-   It matches the report exactly, in centavos → pesos.
+   It matches the report exactly, in centavos → pesos. If you've changed
+   the report's date filter, add `and received_at >= '<start>' and
+   received_at < '<end>'` matching the dates shown on screen.
 2. Download the CSV export from the same page and confirm it opens with
    the same summary numbers.
 3. Log in as the doctor from M4 and go to **Remittance**. Enter an amount
@@ -212,16 +215,25 @@ a remittance variance displays correctly.
 
 No separate accept line in §12 — verify by feel:
 
+- `/book/quezon-city` cold, logged out: a dark header band with a
+  brand-icon badge and the clinic's name/address, the form grouped into
+  labeled sections (Patient details / Contact / Visit) instead of one
+  long list, and a checkmark on the confirmation screen — this is the one
+  page real patients reach from a Facebook link, styled distinctly from
+  the internal staff/doctor/console shell rather than inheriting it.
 - Resize the browser (or use a phone) to 375px width and repeat the
   **consultation** (M4) and **queue board** (M3) steps above — every
   control stays reachable and legible one-handed, per §9's explicit
   requirement for those two screens.
 - `/book/quezon-city` on the same narrow width: fill the form, then
   deliberately submit with one field wrong (e.g. a too-short emergency
-  contact number) — the error shows and everything you already typed is
-  still there, not wiped.
+  contact number) — the error shows as a bordered, icon-marked banner,
+  and everything you already typed is still there, not wiped.
 - Visit a nonexistent URL (e.g. `/nope`) while logged in — a styled 404
-  page, not Next's default.
+  page with an icon, not Next's default. It, the 403 page from M1's step
+  4, and any thrown server error (`app/error.tsx`) all share the same
+  icon-badge treatment, so every "you ended up here" screen looks like
+  part of the same app.
 - Every list screen (queue, patients, inventory, notifications,
   follow-ups, remittance) shows a real "nothing here yet" message on a
   fresh clinic with no data, not a blank space.
