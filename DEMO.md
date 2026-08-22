@@ -56,8 +56,8 @@ Clinic B patient by direct URL, and the attempt is audit-logged.
    select action, user_id, entity_id from audit_logs
    order by created_at desc limit 1;
    ```
-   `action` reads `patient.read_denied` (or similar) against the Makati
-   user's id and the Quezon City patient's id.
+   `action` reads `patient.read.denied` against the Makati user's id and
+   the Quezon City patient's id.
 
 ---
 
