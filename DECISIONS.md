@@ -9,6 +9,93 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-08-23 — M7: polish
+
+Mobile pass across every authenticated shell and the public booking page,
+empty/error-state audit, `DEMO.md`, and this file's own entry.
+
+Verified live at a 375px viewport (§9's explicit "must work one-handed"
+bar for the consultation screen and queue board): a hamburger-triggered
+nav replacing three separate bespoke headers, the reports page's tables
+and stat grid, the consultation screen's vitals row, the queue board's
+per-row action buttons, and the public booking form all render without
+truncation, overflow, or unreachable controls. 56/56 tests still pass; no
+behavior changed in any of the fixes below, only layout and — in two
+cases — a real correctness bug the mobile pass happened to surface.
+
+- **Found and fixed the same bug twice, independently, in two different
+  forms**: the walk-in registration form (`/staff/register`) and the
+  public booking form (`/book/[slug]`) both used React 19's
+  `<form action={handleSubmit}>` pattern with uncontrolled inputs, where
+  `handleSubmit` catches its own error and returns `{ok: false, error}`
+  rather than throwing. React resets every uncontrolled field once an
+  `action` promise *resolves* — regardless of whether the resolved value
+  represents success or a caught application error — so a single mistyped
+  field (e.g. too-short emergency contact number) wiped the entire form
+  and forced a full retype. Converted both to controlled React state;
+  verified live on the booking form specifically, since it's the
+  higher-stakes case — a public patient typing their own information on
+  their own phone, not trained staff. Every other form in the app using
+  the same `<form action={...}>` shape (login, consultation, receive
+  stock, physical count) either doesn't catch its own errors internally
+  or doesn't have enough fields for a lost-form retype to be a real
+  burden, so those weren't touched.
+- **A shared `AppHeader` (`components/nav/app-header.tsx`) replaces three
+  separate bespoke headers** (staff, doctor, console — the last of which
+  was a permanent `w-56` sidebar consuming ~60% of a 375px screen) — the
+  staff nav alone has 7 destinations, which silently overflowed and hid
+  the last few links with no way to reach them below `sm`. Below `sm`,
+  all three shells now show a hamburger-triggered dropdown instead of
+  trying to fit a full link row.
+- **Both mobile-pass grid fixes follow the same shape**: a fixed
+  `grid-cols-N` that fit comfortably on desktop but squeezed every child
+  below a usable width at 375px (the reports page's 3-column revenue/
+  diagnoses/medicines section, truncating "Dr. Quezon City 1" to "D...";
+  the consultation screen's 5-column vitals row, truncating "Weight" to
+  "Wei"). Fixed by adding a responsive breakpoint (`grid-cols-1
+  sm:grid-cols-3`, `grid-cols-2 sm:grid-cols-5`) rather than redesigning
+  the desktop layout, since desktop was never broken.
+- **The queue board's "Called" row needed `flex-wrap` one level deeper
+  than the reports/vitals grids did.** Its action-button group (assign-
+  doctor select + Recall + No-show + Start consultation, ~460px of
+  `whitespace-nowrap` shadcn buttons) sat inside a `flex items-center
+  gap-2` div with no `flex-wrap` of its own — the *outer* row already had
+  `flex-wrap`, but that only lets the row break between the patient-info
+  block and the action-button group as a whole, not within the group.
+  Fixed by adding `flex-wrap` to that inner div too; the "Waiting" row's
+  equivalent group happened to fit in ~300px so never visibly broke, but
+  would have the same latent issue at a narrower viewport or a longer
+  doctor name in the select.
+- **Data tables (reports page's clinic table, inventory table) get their
+  own `overflow-x-auto` wrapper with a `min-w` on the table** rather than
+  cramming columns to fit — scrolling a data table horizontally on
+  mobile is a normal, expected pattern; shrinking six columns of numbers
+  to illegibility is not.
+- **Added `app/error.tsx` and `app/not-found.tsx`** — the app already had
+  `app/forbidden.tsx` for the explicit 403 case (M1) but nothing for an
+  uncaught render error or a bad URL, both of which fell through to
+  Next's default (blank/generic in production). Audited the rest of the
+  app's list screens for missing empty states while at it — all 16
+  found already had one from earlier milestones (`Panel`'s "All clear.",
+  the queue board's "Nobody waiting.", etc.); no gaps.
+- **The public display screen and the patient's own `/q/<token>` status
+  page were both left alone.** The display screen is a room-scale TV/
+  monitor view with huge fixed-size digits — not a phone screen, out of
+  the mobile pass's actual scope despite being public-facing. The status
+  page was already a single-column, `min-h-screen`, mobile-first card
+  from when M3 built it; nothing to fix.
+- **This session's browser-automation tooling was unreliable for most of
+  M7's live verification** — `computer` click/keyboard actions frequently
+  timed out regardless of viewport, tab, or retry count, while the
+  underlying app never errored (confirmed via console/network
+  inspection). Worked around it with `form_input` for filling fields
+  (a different delivery path that kept working) and, purely to observe
+  results after a genuine timeout, dispatching a click on an
+  already-implemented button via `javascript_tool` — never to implement
+  anything; every fix in this entry is a source diff, verified visually
+  and via `document.documentElement.scrollWidth`/state inspection
+  afterward, not "typed into the debug console and called done."
+
 ## 2026-08-22 — M6: reporting and reconciliation
 
 Clinic reports (visits, new-vs-returning, revenue total and by doctor,
