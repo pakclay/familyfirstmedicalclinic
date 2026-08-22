@@ -153,7 +153,7 @@ export function ConsultationForm({ data }: { data: ConsultationScreenData }) {
             </Field>
             <div>
               <Label className="mb-1.5 block text-xs text-muted-foreground">Vitals</Label>
-              <div className="grid grid-cols-5 gap-2">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
                 <Input placeholder="BP" value={vitals.bp} onChange={(e) => setVitals((v) => ({ ...v, bp: e.target.value }))} className="h-9" />
                 <Input placeholder="Temp" value={vitals.temp} onChange={(e) => setVitals((v) => ({ ...v, temp: e.target.value }))} className="h-9" />
                 <Input placeholder="Weight" value={vitals.weight} onChange={(e) => setVitals((v) => ({ ...v, weight: e.target.value }))} className="h-9" />
