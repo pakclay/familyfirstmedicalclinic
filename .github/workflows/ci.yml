@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+
+    # A real Postgres, not a mock — the RLS backstop (§5) and the
+    # superuser/webinar_app connection split it depends on can't be
+    # exercised against anything less. Ephemeral, torn down with the job,
+    # so the fixed password below being visible in this file is fine —
+    # nothing real ever touches it.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: familyfirst_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/familyfirst_ci
+      APP_DATABASE_URL: postgresql://webinar_app:ci-only-app-password@localhost:5432/familyfirst_ci
+      APP_DB_PASSWORD: ci-only-app-password
+      AUTH_SECRET: ci-only-secret-not-used-for-anything-real
+      NEXTAUTH_URL: http://localhost:3000
+      NOTIFICATION_CHANNEL: mock
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      # Superusers bypass RLS unconditionally — without this step every
+      # RLS-scoping test would pass for the wrong reason (there'd be no
+      # policy enforcement happening at all). See prisma/grant-app-role.sql.
+      - name: Create and grant the non-superuser app role
+        run: psql "$DATABASE_URL" -f prisma/grant-app-role.sql
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npx eslint .
+
+      - name: Test
+        run: npx vitest run

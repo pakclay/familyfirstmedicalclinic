@@ -54,6 +54,17 @@ patient data.
   implementations throw loudly if ever selected without being finished,
   rather than silently no-opping and giving a false sense that
   notifications are being delivered.
+- **`tsc`, `eslint`, and the test suite run automatically on every push
+  and PR** (`.github/workflows/ci.yml`), against a real Postgres service
+  container rather than a mock, so the RLS backstop and the superuser/
+  `webinar_app` connection split actually get exercised in CI the same
+  way they do locally — not stubbed out because a real database is
+  inconvenient in a CI environment. This exists precisely because its
+  absence let a real bug ship: a defect in the shared clinic-timezone
+  date logic (`todayAsQueueDate` and everything built on it — queue
+  numbering, report ranges, follow-up due dates, the expenses list) sat
+  wrong through five milestones, caught only by chance during a manual
+  walkthrough. See the gap below for what CI still doesn't cover.
 
 ## What must be hardened before real patient data goes in
 
@@ -103,22 +114,14 @@ patient data.
   session store to invalidate immediately. Acceptable for a prototype;
   a real incident (stolen device, terminated employee) needs faster
   revocation than "eventually, on their next click."
-- **No CI pipeline at all** — nothing runs `tsc`, `eslint`, the test
-  suite, or a dependency audit automatically on a push or PR; all of it
-  only runs when someone remembers to run it locally. This isn't
-  hypothetical: a real bug in the shared clinic-timezone date logic
-  (`todayAsQueueDate` and everything built on it — "today's" queue
-  numbering, report ranges, follow-up due dates, the expenses list) sat
-  wrong through five milestones because the specific host-timezone
-  condition needed to see it happen didn't come up until it was finally
-  caught by hand. A CI job running the existing test suite on every
-  change wouldn't have caught this one specifically without also fixing
-  the tests (they didn't pin a clock either, until this was found) — but
-  it's exactly the kind of check that's supposed to run every time, not
-  only when someone happens to test the right scenario by hand. Before
-  production: a CI pipeline running `tsc`, `eslint`, the test suite, and
-  `npm audit` (or equivalent) on every change, with a process for
-  actually acting on what it finds.
+- **CI runs on every push, but nothing yet stops a red run from merging,
+  and it doesn't scan for known-vulnerable dependencies.** No branch
+  protection requires `.github/workflows/ci.yml` to pass before a merge —
+  a red run today is a strong hint, not a gate. It also only runs the
+  checks this repo already had (`tsc`/`eslint`/tests); before real data,
+  add `npm audit` (or Dependabot/Renovate) on a schedule so a
+  newly-disclosed vulnerability in an existing, untouched dependency gets
+  noticed without anyone having to go looking for it.
 - **No PHI-specific access reviews.** Audit logs are written, but nothing
   reviews them — no alerting on unusual access patterns (e.g. one account
   reading an abnormal number of patient records in a short window), and

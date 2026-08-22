@@ -14,6 +14,7 @@ preserved in git history but is unrelated to what's here now.
 ```bash
 npm install
 npx prisma migrate dev
+APP_DB_PASSWORD='<match APP_DATABASE_URL below>' psql "$DATABASE_URL" -f prisma/grant-app-role.sql
 npm run db:seed
 npm run dev
 ```
@@ -23,7 +24,16 @@ holding admin, plus a clinic admin/2 front desk/3 doctors per clinic) are
 printed by `npm run db:seed`, all sharing one dev password.
 
 Copy `.env.example` to `.env` (Prisma reads `DATABASE_URL` from here) and
-`.env.local` (everything else) before running migrations.
+`.env.local` (everything else) before running migrations. `APP_DATABASE_URL`
+names a non-superuser Postgres role (`webinar_app`) that doesn't exist on a
+fresh Postgres install — the `prisma/grant-app-role.sql` step above creates
+it (or updates its password if it already exists) and grants it the table
+access the app needs; RLS depends on connecting as this role rather than a
+superuser (see "Authentication & authorization" below), so skipping this
+step doesn't break the app, it just silently stops enforcing clinic
+scoping at the database layer. Re-run it any time after
+`prisma migrate reset`, which recreates the schema from scratch and drops
+these grants with it.
 
 ## Authentication & authorization
 
@@ -53,6 +63,18 @@ clinic, backstopped by Postgres RLS (`lib/db/rls.ts`) so a bug in the app
 layer can't leak another clinic's rows. A forbidden read throws
 `ForbiddenError` (`lib/permissions/errors.ts`) rather than silently
 returning an empty list.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push/PR to `master`: spins up a
+disposable Postgres 17 service container, applies migrations, runs
+`prisma/grant-app-role.sql` against it (a fixed, clearly-fake password —
+the container and its data don't outlive the job), then `tsc --noEmit`,
+`eslint .`, and `vitest run`. The test suite talks to that real database
+rather than a mock — RLS and the superuser/`webinar_app` connection split
+it depends on can't be verified against anything less — but every test
+creates and tears down its own fixtures, so it never needs `npm run
+db:seed` first.
 
 ## Scripts
 
