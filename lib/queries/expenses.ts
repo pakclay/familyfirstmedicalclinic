@@ -2,6 +2,7 @@ import { runWithRls } from "@/lib/db/rls"
 import { requireClinicId, type AbilitySubject } from "@/lib/permissions/ability"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import { expenseSchema } from "@/lib/validation/expense"
+import { resolveReportInstantRange, type DateRangeParams } from "@/lib/utils/report-dates"
 
 export type ExpenseEntry = {
   id: string
@@ -12,23 +13,45 @@ export type ExpenseEntry = {
   recordedByName: string
 }
 
-/** §9 Clinic Admin screen "expenses" — the minimal ledger §8's P&L ("expenses, net") needs to mean anything. */
-export async function listExpenses(user: AbilitySubject, range: { start: Date; end: Date }): Promise<ExpenseEntry[]> {
+/**
+ * §9 Clinic Admin screen "expenses" — the minimal ledger §8's P&L
+ * ("expenses, net") needs to mean anything. Resolves the range from the
+ * clinic's own timezone the same way the reports queries do (§8's other
+ * screens) rather than accepting pre-resolved instants from the caller —
+ * `Expense.expenseDate` is a `@db.Date` column, and comparing it against a
+ * raw `new Date()` instant silently drops "today" for the 8-hour window
+ * every day where the clinic's calendar date has ticked over but UTC's
+ * hasn't yet (the same bug class `todayAsQueueDate` exists to prevent).
+ */
+export async function listExpenses(
+  user: AbilitySubject,
+  params: DateRangeParams
+): Promise<{ expenses: ExpenseEntry[]; startLabel: string; endLabel: string }> {
   const clinicId = requireClinicId(user)
   return runWithRls(user, async (tx) => {
-    const expenses = await tx.expense.findMany({
-      where: { clinicId, expenseDate: { gte: range.start, lte: range.end } },
+    const clinic = await tx.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { timezone: true } })
+    const { startLabel, endLabel } = resolveReportInstantRange(params, clinic.timezone)
+    const [sy, sm, sd] = startLabel.split("-").map(Number)
+    const [ey, em, ed] = endLabel.split("-").map(Number)
+    const start = new Date(Date.UTC(sy, sm - 1, sd))
+    const end = new Date(Date.UTC(ey, em - 1, ed))
+    const rows = await tx.expense.findMany({
+      where: { clinicId, expenseDate: { gte: start, lte: end } },
       include: { recordedByUser: { select: { name: true } } },
       orderBy: { expenseDate: "desc" },
     })
-    return expenses.map((e) => ({
-      id: e.id,
-      category: e.category,
-      description: e.description,
-      amount: e.amount,
-      expenseDate: e.expenseDate,
-      recordedByName: e.recordedByUser.name,
-    }))
+    return {
+      expenses: rows.map((e) => ({
+        id: e.id,
+        category: e.category,
+        description: e.description,
+        amount: e.amount,
+        expenseDate: e.expenseDate,
+        recordedByName: e.recordedByUser.name,
+      })),
+      startLabel,
+      endLabel,
+    }
   })
 }
 

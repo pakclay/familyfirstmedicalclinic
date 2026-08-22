@@ -23,9 +23,6 @@ export default async function ExpensesPage({
   }
 
   const { start, end } = await searchParams
-  const today = new Date()
-  const rangeEnd = end ? new Date(end) : today
-  const rangeStart = start ? new Date(start) : new Date(today.getTime() - 30 * 86_400_000)
 
   const user: AbilitySubject = {
     id: session.user.id,
@@ -33,7 +30,7 @@ export default async function ExpensesPage({
     clinicId: session.user.clinicId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
-  const expenses = await listExpenses(user, { start: rangeStart, end: rangeEnd })
+  const { expenses, startLabel, endLabel } = await listExpenses(user, { start, end })
   const total = expenses.reduce((sum, e) => sum + e.amount, 0)
 
   return (
@@ -47,11 +44,11 @@ export default async function ExpensesPage({
       <form className="mt-6 flex items-end gap-2" action="/console/expenses">
         <div className="flex flex-col gap-1.5">
           <label className="text-xs text-muted-foreground" htmlFor="start">From</label>
-          <Input id="start" name="start" type="date" defaultValue={rangeStart.toISOString().slice(0, 10)} className="h-9" />
+          <Input id="start" name="start" type="date" defaultValue={startLabel} className="h-9" />
         </div>
         <div className="flex flex-col gap-1.5">
           <label className="text-xs text-muted-foreground" htmlFor="end">To</label>
-          <Input id="end" name="end" type="date" defaultValue={rangeEnd.toISOString().slice(0, 10)} className="h-9" />
+          <Input id="end" name="end" type="date" defaultValue={endLabel} className="h-9" />
         </div>
         <Button type="submit" variant="outline" className="h-9">
           Filter

@@ -232,7 +232,7 @@ describe("reports and reconciliation", () => {
     await payment(clinic.id, patients[0][0], frontDeskUsers[0].id, 100000)
     await createExpense(clinicAdmins[0], { category: "Supplies", description: "Gloves", amount: 15000, expenseDate: new Date().toISOString() })
 
-    const expenses = await listExpenses(clinicAdmins[0], { start: new Date(Date.now() - 86_400_000), end: new Date(Date.now() + 86_400_000) })
+    const { expenses } = await listExpenses(clinicAdmins[0], {})
     expect(expenses.some((e) => e.category === "Supplies" && e.amount === 15000)).toBe(true)
 
     const report = await getClinicReport(clinicAdmins[0], {})
