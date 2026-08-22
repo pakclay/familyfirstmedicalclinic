@@ -60,6 +60,14 @@ jobs:
       - name: Create and grant the non-superuser app role
         run: psql "$DATABASE_URL" -f prisma/grant-app-role.sql
 
+      # tsc depends on Next's own generated route/layout types (e.g.
+      # LayoutProps<"/"> in app/layout.tsx) — .next/types/ is build output,
+      # correctly gitignored, and normally only appears as a side effect of
+      # `next dev`/`next build`. `next typegen` produces just that, without
+      # a full build (no DB/env dependency, unlike `next build`).
+      - name: Generate Next.js route types
+        run: npx next typegen
+
       - name: Type-check
         run: npx tsc --noEmit
 
