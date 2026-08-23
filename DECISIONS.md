@@ -9,6 +9,31 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-08-23 — Dependabot enabled
+
+Follow-up to `SECURITY.md`'s "must harden" list (specifically the gap
+tracked in GitHub issue #8): `npm audit` was a manual, point-in-time
+check with nothing re-running it. Enabled the full Dependabot stack:
+
+- **Repo settings** (`Settings → Code security`): dependency graph,
+  Dependabot alerts, Dependabot security updates, and grouped security
+  updates — all toggles, no code change, done directly rather than
+  through a PR since there's no file to review.
+- **`.github/dependabot.yml`** (this PR): version updates for both `npm`
+  (weekly, minor/patch grouped into one PR so a routine week doesn't
+  open a dozen separate ones — security-update grouping is handled
+  separately by the repo-setting toggle regardless of this file) and
+  `github-actions` (weekly) — the CI workflow's own `actions/checkout`/
+  `actions/setup-node` pins are a separate ecosystem from `npm` and easy
+  to forget.
+- Dependabot's own PRs go through the same `gate` CI check and branch
+  protection as any human-authored PR — no silent auto-merge of a
+  dependency bump without tests passing first.
+
+Moved the corresponding `SECURITY.md` bullet from "must harden" to
+"what's actually in place" now that it's true, rather than leaving a
+stale gap description next to a fixed gap.
+
 ## 2026-08-23 — `middleware.ts` → `proxy.ts` migration
 
 Follow-up to the Next.js 16 upgrade below, which left this as a deprecated-
