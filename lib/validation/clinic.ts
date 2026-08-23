@@ -93,3 +93,26 @@ export type CreateClinicInput = z.infer<typeof createClinicSchema>
 export const editClinicSchema = z.object(editableClinicFields)
 
 export type EditClinicInput = z.infer<typeof editClinicSchema>
+
+/**
+ * What a clinic admin may change about their *own* clinic — the day-to-day
+ * operational details (§4: "clinic hours, services and prices"). Notably
+ * absent: `name` (it's on the public booking page and in holding-level
+ * reports), `timezone` (queue numbering, report ranges and follow-up dates
+ * are all derived from it), and `slug` (immutable everywhere). Those stay
+ * holding-admin-only via the /console/clinics surface.
+ *
+ * Not built by subsetting editClinicSchema with `.omit()` — the omitted
+ * keys are exactly the privilege boundary, so listing what's allowed makes
+ * a later addition to editableClinicFields fail closed rather than
+ * silently widening what a clinic admin can edit.
+ */
+export const clinicSettingsSchema = z.object({
+  address: editableClinicFields.address,
+  city: editableClinicFields.city,
+  phone: editableClinicFields.phone,
+  facebookPageUrl: editableClinicFields.facebookPageUrl,
+  operatingHours: editableClinicFields.operatingHours,
+})
+
+export type ClinicSettingsInput = z.infer<typeof clinicSettingsSchema>
