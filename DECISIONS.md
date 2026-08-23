@@ -9,6 +9,43 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-08-23 — `middleware.ts` → `proxy.ts` migration
+
+Follow-up to the Next.js 16 upgrade below, which left this as a deprecated-
+but-working file convention rather than doing it inline. Renamed the file
+(`git mv` to preserve history) and updated every reference to it across the
+codebase (`README.md`, `SECURITY.md`, `auth.config.ts`, `auth.ts`,
+`lib/nav.ts`, `app/doctor/remittance/page.tsx`) — left the historical
+`DECISIONS.md` entries below untouched, since they describe what was true
+when they were written.
+
+- **Kept `proxy.ts` on the Prisma-free `auth.config.ts`, did not fold it
+  into the full `auth.ts`**, even though `proxy.ts` now runs on the Node.js
+  runtime (fixed, not configurable — unlike the old `middleware.ts`
+  convention, which always ran on Edge) and so technically *could* run
+  Prisma now. The split's original forcing reason (Prisma can't run on
+  Edge) is gone, but folding the two together would add a
+  `prisma.user.findUnique` DB read to `proxy.ts`'s matcher — which covers
+  nearly every route — on every single navigation, for a check
+  (`isActive`) that already runs at the real authorization boundary: every
+  query-layer call via `auth.ts`'s `auth()`. A deactivated user's stale
+  JWT would still clear `proxy.ts`'s gate either way, since it only reads
+  already-encoded claims; the actual block happens one layer deeper. Kept
+  the split for that performance/scope reason instead, and rewrote the
+  comments in `auth.config.ts`/`auth.ts`/`proxy.ts` to say so accurately
+  rather than leaving the now-outdated Edge-runtime justification in place.
+- **No named function to rename** — the Next.js 16 guide recommends
+  renaming an exported `middleware` function to `proxy`, but this file uses
+  `export default auth((req) => {...})` (Auth.js's HOC pattern around an
+  anonymous handler), so there's no named export to change; the file
+  rename alone satisfies the convention.
+- **Re-verified live** rather than trusting the rename alone: restarted the
+  dev server fresh, confirmed the "middleware file convention deprecated"
+  warning is gone from `next dev`'s startup log, and re-ran the same
+  cross-clinic `forbidden()` check from the upgrade entry below (real 403,
+  audit-logged) plus the unauthenticated-redirect and role-section-gating
+  paths — all still pass under `proxy.ts`.
+
 ## 2026-08-23 — Next.js 16.3.2 upgrade
 
 Follow-up to the `npm audit fix` pass: 3 high-severity findings (`postcss`,

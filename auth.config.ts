@@ -1,12 +1,17 @@
 import type { NextAuthConfig } from "next-auth"
 
 /**
- * Edge-safe base config, shared by middleware (which runs on Next.js's
- * Edge runtime, where Prisma Client can't run without Accelerate or
- * Driver Adapters) and the full config in auth.ts (Node.js runtime).
- * Providers and any Prisma-touching callback live only in auth.ts —
- * putting the isActive re-check's `prisma.user.findUnique` here breaks
- * middleware with a PrismaClientValidationError.
+ * Prisma-free base config, shared by proxy.ts (route gating) and the full
+ * config in auth.ts. Providers and any Prisma-touching callback live only
+ * in auth.ts — putting the isActive re-check's `prisma.user.findUnique`
+ * here would run a DB query on every request proxy.ts's matcher covers,
+ * for a check that already happens at the real authorization boundary
+ * (every query-layer call via auth.ts's auth()). Originally this split was
+ * forced by middleware.ts always running on Next.js's Edge runtime, where
+ * Prisma Client can't run without Accelerate or Driver Adapters; proxy.ts
+ * (the Next 16 replacement) runs on the Node.js runtime instead, so that
+ * constraint no longer applies — the split is kept anyway, now for the
+ * performance/scope reason above. See proxy.ts.
  */
 export const authConfig: NextAuthConfig = {
   session: { strategy: "jwt" },

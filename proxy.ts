@@ -2,9 +2,19 @@ import { NextResponse } from "next/server"
 import NextAuth from "next-auth"
 import { authConfig } from "@/auth.config"
 
-// Uses the edge-safe config directly (not auth.ts's full config) — Prisma
-// Client can't run on Next.js's Edge runtime, which is what middleware
-// always executes on. See auth.config.ts.
+// Uses the edge-safe config directly (not auth.ts's full config), even
+// though proxy.ts runs on the Node.js runtime (unlike the old middleware.ts
+// convention, proxy's runtime is fixed to nodejs and isn't configurable) —
+// so Prisma could run here now. Deliberately still doesn't: auth.config.ts's
+// session callback only reads already-encoded JWT claims, so this coarse
+// first gate (redirect signed-out/wrong-role requests) needs no DB round
+// trip. auth.ts's jwt callback re-checks isActive against Prisma, but that
+// only needs to run where it's the actual authorization boundary — every
+// query-layer call via auth.ts's auth() — not on every navigation here,
+// which would add a DB read to this matcher's near-universal route coverage
+// for no security benefit (a deactivated user's stale JWT would still pass
+// this gate either way; the real block happens at the query layer). See
+// auth.config.ts.
 const { auth } = NextAuth(authConfig)
 
 const ROLE_HOME: Record<string, string> = {
