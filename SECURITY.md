@@ -114,14 +114,15 @@ patient data.
   session store to invalidate immediately. Acceptable for a prototype;
   a real incident (stolen device, terminated employee) needs faster
   revocation than "eventually, on their next click."
-- **CI runs on every push, but nothing yet stops a red run from merging,
-  and it doesn't scan for known-vulnerable dependencies.** No branch
-  protection requires `.github/workflows/ci.yml` to pass before a merge —
-  a red run today is a strong hint, not a gate. It also only runs the
-  checks this repo already had (`tsc`/`eslint`/tests); before real data,
-  add `npm audit` (or Dependabot/Renovate) on a schedule so a
-  newly-disclosed vulnerability in an existing, untouched dependency gets
-  noticed without anyone having to go looking for it.
+- **Branch protection requires the `gate` CI check and a pull request
+  before a merge to `master`** — a red run or a direct push can no longer
+  land. But CI still doesn't scan for known-vulnerable dependencies on its
+  own schedule; `npm audit` currently reports 0 findings (as of the
+  `next@16.3.2` upgrade, which also happened to fix the last 3), but that's
+  a snapshot, not ongoing coverage — before real data, add `npm audit` (or
+  Dependabot/Renovate) on a schedule so a newly-disclosed vulnerability in
+  an existing, untouched dependency gets noticed without anyone having to
+  go looking for it.
 - **No PHI-specific access reviews.** Audit logs are written, but nothing
   reviews them — no alerting on unusual access patterns (e.g. one account
   reading an abnormal number of patient records in a short window), and

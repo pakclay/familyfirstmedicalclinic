@@ -9,6 +9,65 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-08-23 — Next.js 16.3.2 upgrade
+
+Follow-up to the `npm audit fix` pass: 3 high-severity findings (`postcss`,
+`sharp`) were left unresolved because both are bundled inside `next`
+itself, and Next's own declared ranges (`postcss` exact-pinned, `sharp`
+capped under `^0.34.3`) excluded the patched releases. Confirmed via
+`npm view next@16.3.2 dependencies/optionalDependencies` that `16.3.2`
+bundles the patched versions (`postcss@8.5.23`, `sharp@^0.35.3`) before
+touching anything.
+
+- **Read the actual v16 upgrade guide before changing code**, per
+  AGENTS.md's standing instruction that this Next.js version has
+  training-data-breaking changes. Checked every breaking change in it
+  against real usage (grep, not assumption) rather than assuming any of
+  them applied: no `next/image` usage anywhere in the app, no
+  `opengraph-image`/`icon`/`sitemap` generators, no parallel-route slots,
+  no `unstable_rootParams`/`cacheLife`/`cacheTag`/`revalidateTag`, no
+  `serverRuntimeConfig`/`publicRuntimeConfig`, no custom webpack config,
+  already on ESLint Flat Config and already running `eslint` directly
+  (not the now-removed `next lint`), and Request APIs (`cookies`/
+  `headers`/`params`/`searchParams`) were already fully async from the
+  M7 typegen work — so none of v16's breaking changes actually touched
+  this codebase.
+- **`middleware.ts` → `proxy.ts` is deprecated, not removed**, in 16.3.2 —
+  left `middleware.ts` as-is rather than renaming, since the app still
+  works and `proxy.ts` running on the `nodejs` runtime (not Edge, and not
+  configurable) is an unrelated, separate decision — it would lift the
+  exact Edge-runtime constraint that forced the `auth.config.ts`/`auth.ts`
+  split (see the M1 entry below), but that's a future cleanup, not part of
+  this upgrade.
+- **`experimental.authInterrupts` and `forbidden()`/`unauthorized()` are
+  unaffected** — not mentioned anywhere in the v16 removals list. Verified
+  live rather than trusting that: logged in as a front-desk user from one
+  clinic, requested another clinic's patient by direct id, got a real
+  `GET /staff/patients/[id] 403` (confirmed via network inspection, not
+  just the rendered page text) and a `patient.read.denied` row in
+  `audit_logs` with the correct `attemptedClinicId` — the exact same check
+  the M1 entry below describes, re-run against the new Next.js version.
+  Also re-verified the unauthenticated-redirect and role-section-gating
+  paths in `middleware.ts` (signed-out → `/login`, wrong-role → the
+  role's home page) against a fresh dev server.
+- **`next typegen` mandatorily changed `tsconfig.json`'s `jsx` from
+  `"preserve"` to `"react-jsx"`** (Next 16 requires the automatic JSX
+  runtime) — accepted as-is, not worked around; it's a framework
+  requirement, not a project choice to preserve.
+- **Package versions**: `next` bumped `15.5.23` → `16.3.2` (kept the
+  repo's exact-pin convention, matching `prisma`), `eslint-config-next`
+  `^16.3.1` → `^16.3.2`. `react`/`react-dom` stayed at `19.2.8` — already
+  the latest React release, no bump needed. `npm audit` now reports 0
+  vulnerabilities.
+- **A stale `next dev` process from before the upgrade produced misleading
+  errors** (`ENOENT ... action-utils.js`, 500s) when reused instead of
+  restarted — Next 16 changed the dev output directory (`.next/dev`), so
+  an old process still pointed at paths that no longer existed after the
+  package bump. Not a real regression; resolved by stopping the stale
+  server and clearing `.next` before restarting. Worth remembering for any
+  future upgrade: always restart `next dev` fresh, don't reuse a running
+  instance across a `next` version bump.
+
 ## 2026-08-23 — M7: polish
 
 Mobile pass across every authenticated shell and the public booking page,

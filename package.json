@@ -23,7 +23,7 @@
     "date-fns": "^4.4.0",
     "date-fns-tz": "^3.2.0",
     "lucide-react": "^1.33.0",
-    "next": "15.5.23",
+    "next": "16.3.2",
     "next-auth": "^5.0.0-beta.32",
     "next-themes": "^0.4.6",
     "papaparse": "^5.6.0",
@@ -50,7 +50,7 @@
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.1.0",
     "eslint": "^9",
-    "eslint-config-next": "16.3.1",
+    "eslint-config-next": "^16.3.2",
     "tailwindcss": "^4",
     "tsx": "^4.23.12",
     "typescript": "^5",
@@ -60,7 +60,7 @@
     "deepmerge-ts": "^8.0.2"
   },
   "allowScripts": {
-    "sharp@0.34.5": true,
+    "sharp@0.35.3": true,
     "unrs-resolver@1.12.2": true,
     "esbuild@0.28.2": true,
     "@prisma/client@6.19.3": true,
