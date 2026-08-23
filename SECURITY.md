@@ -120,6 +120,20 @@ patient data.
   after creation (it's already embedded in shared `/book/{slug}` links),
   and deactivating a clinic takes its public booking link offline rather
   than deleting any records.
+- **The audit trail is readable, and scoped to one holding company.**
+  `/console/audit-log` lets a holding admin browse and filter every
+  recorded action — by date, action, entity type, clinic, acting user, or
+  entity id — over the append-only `audit_logs` table. It is read-only:
+  no edit, no delete, no mutation of any kind. Access is holding-admin
+  only at both the page and the query layer, and a forbidden read throws
+  rather than returning an empty list, which matters especially here
+  because an empty list is also what a misconfigured RLS session
+  produces — a broken gate and an empty table must not look alike.
+  Postgres RLS is *not* the tenant boundary on this table: its
+  holding-admin branch is a blanket role check that says nothing about
+  which holding company the reader belongs to, so the query narrows to
+  the actor's own holding company itself, and the client-supplied filters
+  are AND-ed with that scope so none of them can widen it.
 - **A real data-retention job exists** (`lib/retention/`) — not just
   soft-delete flags that hide a row from the UI while it sits in the
   database indefinitely. `npm run db:retention` deletes patients,
@@ -190,10 +204,20 @@ patient data.
   session store to invalidate immediately. Acceptable for a prototype;
   a real incident (stolen device, terminated employee) needs faster
   revocation than "eventually, on their next click."
-- **No PHI-specific access reviews.** Audit logs are written, but nothing
-  reviews them — no alerting on unusual access patterns (e.g. one account
-  reading an abnormal number of patient records in a short window), and
-  no periodic access review of who still legitimately needs an account.
+- **No PHI-specific access *alerting*.** Audit logs are now readable — a
+  holding admin can browse and filter them at `/console/audit-log` (see
+  above) — but nothing watches them. There is no alerting on unusual
+  access patterns (e.g. one account reading an abnormal number of patient
+  records in a short window), and no periodic access review of who still
+  legitimately needs an account. Reading the trail is now possible;
+  noticing something in it still depends on a human going to look.
+- **Nothing audits the audit log.** Viewing `/console/audit-log` is
+  deliberately not itself recorded (the reasoning is in
+  `lib/queries/audit-log.ts`), so there is no record of who inspected the
+  trail or what they filtered for. If that becomes a compliance
+  requirement, it needs a separate access-log sink — writing it back into
+  `audit_logs` would fill the table with records of people reading the
+  table.
 - **Real notification providers are unvetted.** `SmsChannel`/
   `MessengerChannel` are stubs. Before switching a real provider on:
   confirm the provider's own data-handling terms are compatible with

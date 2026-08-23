@@ -9,6 +9,97 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-08-23 — Audit log viewer (holding admin only, read-only)
+
+The last unbuilt item in §9's Holding Admin route list. `lib/nav.ts`
+already linked to `/console/audit-log`, and that link 404'd until now.
+Read-only throughout: `audit_logs` is append-only, so there is no edit,
+no delete, and no mutation of any kind in this feature.
+
+- **Postgres RLS is NOT the tenant boundary on this table, and assuming
+  it was would have leaked every other owner's audit trail.** Unlike
+  `clinics`/`users`/`doctors`, `audit_logs` *does* carry an RLS policy —
+  but its holding-admin branch is a blanket
+  `current_setting('app.role') = 'HOLDING_ADMIN'` bypass that says nothing
+  about *which* holding company the reader belongs to. §4 scopes a Holding
+  Admin to "all clinics under the holding company", so the narrowing has
+  to happen in the query, exactly as `getHoldingConsolidatedReport`
+  already does for its clinic list. The first implementation left it out
+  and documented the omission as deliberate; review caught it. The test
+  databases already contain several holding companies, so this was live,
+  not theoretical.
+- **The scope spells out all three shapes a visible row can take** rather
+  than doing a plain join, because a join on `clinic.holdingCompanyId`
+  would erase every `clinic_id IS NULL` row — the holding-level actions
+  §10 most wants preserved. A row is visible if it belongs to one of the
+  owner's clinics, or is clinic-less but written by one of their own
+  people, or is clinic-less *and* user-less (a system/job row).
+- **System rows are shown to every holding admin — a deliberate
+  compromise.** `retention.purge` (`lib/retention/purge.ts`) runs from the
+  CLI with no session, so it has neither a `clinicId` nor a `userId` to
+  scope by. Excluding it would mean a background job that permanently
+  deletes patient records is auditable by nobody at all. With more than
+  one holding company this does reveal aggregate purge counts across
+  tenants; the right fix at that point is a separate system-activity log,
+  not dropping the rows.
+- **Filters are AND-ed with the holding scope, never merged into it**, so
+  no filter value can widen what it allows — a hand-edited
+  `?clinicId=<another owner's clinic>` intersects to nothing instead of
+  reaching across the boundary. The `clinics` and `users` dropdowns are
+  holding-scoped too: neither table has an RLS policy, so an unfiltered
+  read there would have listed every clinic and every account name in the
+  database even while the log itself behaved.
+- **Ordering is `[createdAt desc, id desc]`, not `createdAt` alone.**
+  Audit rows are routinely written several at a time inside one
+  transaction and share a timestamp to the microsecond. Postgres
+  guarantees no order among tied rows, so with `skip`/`take` the same row
+  can appear on two pages while another never appears at all. A test seeds
+  five rows in one transaction at one exact instant, walks them two at a
+  time, and asserts the union has no duplicates and no omissions.
+- **No default date window.** The reports helper defaults to the last 30
+  days, which is right for a report and wrong for an audit trail — one
+  that silently hides anything older than a month is worse than useless.
+  The timezone helper is still reused for the calendar-day arithmetic;
+  only the bound the caller actually supplied is applied.
+- **Page size is clamped, not trusted** (default 50, max 200). An
+  unclamped `take` off a query string is a one-request denial of service
+  against a table that grows forever.
+- **Viewing the audit log does not write to the audit log.** §10 requires
+  a row on access to patient clinical data and on financial record
+  changes; this screen reads *metadata about* those events, never their
+  content. Logging it would be uniquely self-amplifying — every page view
+  and filter tweak appending into the very table being paged — and would
+  turn a read-only route into a write path. The counter-argument (an
+  audit log nobody can audit is a gap) is real; the answer is a separate
+  access-log sink, not recursion into this table. Reasoning is recorded in
+  the query file so it reads as a decision rather than an oversight.
+- **Verified the RLS wrapping is actually load-bearing, twice.** A read
+  of this table through the bare `prisma` client returns zero rows
+  *silently* — no error — which is indistinguishable from an empty table,
+  so a test asserting only "an array came back" would pass against a
+  completely blind query. Temporarily swapping `runWithRls` for a plain
+  client made 19 of 29 tests fail; restoring it returned them to green.
+  The same technique confirmed the new tenant-scope tests: neutralising
+  the holding scope fails 7 tests, so they would have caught the original
+  bug.
+- **Verified live**, since the query tests can't prove the page renders:
+  created a user in the Makati clinic and confirmed the resulting
+  `user.created` row appeared attributed to that clinic with the actor's
+  name resolved, while a clinic-less `user.password_changed` row rendered
+  an em-dash; confirmed the action/entity dropdowns listed exactly the two
+  actions actually present (proving they come from a `DISTINCT`, not a
+  hardcoded list); confirmed the clinic filter narrowed 2 rows to 1;
+  confirmed `?pageSize=999999&page=9999` clamped instead of crashing or
+  serving a blank table; and confirmed a Clinic Admin gets a refusal with
+  zero rows and no nav link.
+- **Noted, not fixed:** every pre-existing audit row in the dev database
+  had a null `clinic_id`. `AuditLog.clinic` is an optional relation, so
+  Prisma's default `SetNull` blanks `clinic_id` when a clinic is deleted —
+  which is what test-suite teardown does. Harmless in production, where
+  clinics are deactivated rather than deleted, but it means orphaned audit
+  rows lose their clinic attribution permanently. Worth a look if audit
+  retention ever matters more than it does today.
+
 ## 2026-08-23 — Clinics management (holding admin only)
 
 Second of the four gaps found when asking why there was no Clinics input
