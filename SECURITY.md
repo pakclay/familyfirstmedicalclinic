@@ -108,6 +108,18 @@ patient data.
   `enable_rls_backstop`'s migration do) — this feature relies entirely on
   the application-layer scoping above, so a bug here isn't caught by a
   database backstop the way patient/queue/payment queries are.
+- **Clinic records are holding-admin-only, enforced at three layers.**
+  Creating, editing, and deactivating a clinic (`lib/queries/clinics.ts`)
+  is refused for every other role by the page gate, the server action's
+  actor check, and the query functions themselves — the last of these
+  matters because `clinics`, like `users` and `doctors`, has no Postgres
+  RLS policy, so application-layer checks *are* the enforcement. Forbidden
+  reads throw `ForbiddenError` rather than returning an empty list, so a
+  future caller wired up behind a weaker gate fails loudly instead of
+  rendering a plausible empty page. A clinic's public slug is immutable
+  after creation (it's already embedded in shared `/book/{slug}` links),
+  and deactivating a clinic takes its public booking link offline rather
+  than deleting any records.
 - **The audit trail is readable, and scoped to one holding company.**
   `/console/audit-log` lets a holding admin browse and filter every
   recorded action — by date, action, entity type, clinic, acting user, or
