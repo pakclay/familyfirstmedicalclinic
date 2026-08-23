@@ -9,6 +9,73 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-08-23 — Clinics management (holding admin only)
+
+Second of the four gaps found when asking why there was no Clinics input
+page (after Users management, same day). §4's role table gives Holding
+Admin "Create clinics" and gives Clinic Admin no say over clinics at all,
+so unlike Users — which both admin roles share, scoped differently —
+this surface is single-role throughout.
+
+- **A forbidden read throws, it does not return an empty list.** The
+  first pass had `listClinics` return `[]` for a non-holding-admin,
+  justified in a comment as "matching listUsers." That justification was
+  wrong on the facts: `listUsers` has no role gate at all — it
+  clinic-scopes its `where` via `requireClinicId`, so every caller
+  legitimately gets rows, and `[]` is never a permission outcome there.
+  `lib/permissions/errors.ts` states the actual rule ("§4.2 requires a
+  forbidden read to fail as a 403-equivalent, never silently degrade to
+  an empty list"), and every other role-gated read in `lib/queries`
+  throws — `reports/holding.ts`'s `getHoldingConsolidatedReport`, the
+  closest analogue since it's also holding-admin-only, throws
+  `ForbiddenError`. Fixed to throw. The failure this prevents is
+  specific: "clinic settings self-service" is a planned future page for
+  Clinic Admins, and a maintainer wiring it to `listClinics` behind a
+  looser gate would have gotten a plausible, successfully-rendered "No
+  clinics yet." screen instead of a 403 — a broken authorization check
+  rendering as ordinary empty state.
+- **`getClinicById` throws on the role check but still returns null for
+  an unknown id** — deliberately *not* `getManagedUserById`'s
+  null-for-both shape. There, both admin roles are legitimate callers and
+  null distinguishes "not one you manage" among them, which is real
+  non-enumeration. Here a non-holding-admin has no business calling it at
+  all: that's a role denial, not a missing row, and collapsing the two
+  would hide the same class of bug as the bullet above.
+- **The slug is immutable after creation.** It's the public identity of
+  the clinic — `/book/{slug}` gets pasted into Facebook chats and
+  `/display/{slug}` runs on a waiting-room screen — so a rename would
+  silently break links already in patients' hands. `editClinicSchema`
+  omits it entirely rather than validating it, and the edit form renders
+  it disabled with a note saying why.
+- **Deactivating a clinic is the closest thing to deleting one**, and it
+  correctly takes the public booking link offline: `lib/queries/booking.ts`
+  already resolves slugs with `where: { slug, isActive: true }`, so no new
+  code was needed for that. Verified live end-to-end (below). Inactive
+  clinics stay *visible* in the console list with a badge rather than
+  being filtered out — the deactivated one is exactly the one an admin
+  needs to find in order to reactivate it.
+- **`toClinicDTO` normalizes `operating_hours` rather than casting it.**
+  The column is untyped JSON and pre-existing rows can hold anything
+  (the seed's shape, other test suites' `{}` fixtures), so unrecognized
+  or missing weekdays become `null` instead of throwing mid-render.
+- **Built via a multi-agent workflow** (one implementer, three
+  independent reviewers — RLS/data-safety, permission scoping,
+  convention consistency — then adversarial verification of each
+  finding). Two dimensions came back clean; the one surviving finding was
+  the `return []` above, which was traceable to a wrong instruction in
+  the implementer's own brief rather than to the implementation.
+- **Verified live against the real dev database**, not just the 11-case
+  test suite: created a clinic through the actual form (including the
+  per-weekday "Closed" checkboxes), confirmed the hours round-tripped
+  exactly on reload (Mon closed, Tue–Fri 09:00–18:00, Sat 08:00–12:00,
+  Sun closed), confirmed the new clinic was immediately live at
+  `/book/davao` with the right name and address, deactivated it and
+  confirmed that link 404s, reactivated it and confirmed the link
+  returns. Then signed in as a Clinic Admin and confirmed all three
+  routes (list, `[id]`, `new`) refuse with no clinic data rendered and
+  no "Clinics" link in that role's nav. Dev database reseeded afterward
+  to drop the test clinic.
+
 ## 2026-08-23 — Users management (holding admin: any account, clinic admin: own clinic's front desk/doctor)
 
 Scoped from "why was there no Clinics input page?" — SPEC.md §4 gives
