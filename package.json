@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "db:seed": "tsx prisma/seed.ts",
+    "db:retention": "tsx prisma/retention.ts",
     "test": "vitest run"
   },
   "prisma": {
