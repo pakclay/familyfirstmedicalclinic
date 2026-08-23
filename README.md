@@ -1,7 +1,7 @@
 # Family First Medical Clinic
 
 Clinic console + public booking/queue site, replacing the notebook and the
-index-card cabinet with a paperless MVP. Next.js 15 (App Router) + TypeScript,
+index-card cabinet with a paperless MVP. Next.js 16 (App Router) + TypeScript,
 Prisma/PostgreSQL, Auth.js, Tailwind + shadcn/ui. See `SPEC.md` for the full
 product spec and `DECISIONS.md` for build-order progress and the assumptions
 made along the way.
