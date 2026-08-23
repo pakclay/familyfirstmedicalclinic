@@ -9,6 +9,70 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-08-23 — Forced password change and login lockout (issue #7)
+
+Two of `SECURITY.md`'s remaining "must harden" items. Built together
+since both touch the same login/auth surface.
+
+- **Sign out after a password change, rather than refreshing the live
+  session.** `proxy.ts` reads `mustChangePassword` off the JWT via
+  `auth.config.ts`'s Prisma-free callbacks (see the `middleware.ts` →
+  `proxy.ts` entry above), which only gets re-signed on a fresh sign-in —
+  not on a server action's response. Next-auth v5 has session-update
+  mechanisms for this, but they're beta-surface I hadn't verified against
+  this exact version, and "sign out, sign back in with the new password"
+  is simple, deterministic, sidesteps the whole question, and is a
+  perfectly normal UX after a password change anyway.
+- **`changeOwnPassword` takes no target-user-id parameter at all** — it
+  always operates on the calling `AbilitySubject`'s own id. The RLS
+  policy on `users` is clinic-scoped, not self-scoped (same as every
+  other clinic-wide table), so without an explicit `where: { id: user.id
+  }` in the query itself, any front-desk account could overwrite a
+  colleague's password in the same clinic. Structural self-scoping (no id
+  argument to pass a wrong value into) beats a runtime check that could
+  be gotten wrong later.
+- **Password policy: 10+ characters, at least one letter and one
+  number** (`lib/validation/password.ts`) — deliberately not requiring
+  symbols/mixed case on top of that. The realistic bar to clear here is
+  "meaningfully better than the shared dev password every seeded account
+  starts with," not a corporate-IT complexity rule nobody can remember
+  and everyone works around by appending "!1".
+- **Lockout: 5 consecutive failures → 15 minutes**, checked *before* the
+  bcrypt compare (so attempts made while already locked can't extend or
+  reset the window) and *before* recording anything (so the check itself
+  doesn't affect the count). The login form shows the same generic
+  "Incorrect email or password" whether the cause is a wrong password or
+  an active lockout — deliberately not distinguishing them, so a probing
+  attempt can't learn "this account is now locked" as a side channel.
+- **No per-IP throttling** — only per-account lockout. `SECURITY.md`
+  explains why: a real per-IP limiter needs to survive process restarts
+  and work across more than one instance, which means either new
+  infrastructure (Redis, or similar) this app doesn't have yet, or an
+  honest deployment-layer answer (reverse proxy / platform rate
+  limiting) once real hosting is chosen — not an in-process counter that
+  quietly stops working the moment there's a second instance. Same
+  reasoning already applied to TLS.
+- **Seeded demo accounts were *not* exempted from the forced flow.**
+  `prisma/seed.ts` already sets `mustChangePassword: true` on every
+  seeded user specifically so this flow would have something real to
+  exercise once built (see DEMO.md's setup section, written before this
+  existed). Weakening seed data to route around the feature being
+  demonstrated would have been backwards; updated DEMO.md's setup
+  section instead to explain what a reader will see on each account's
+  first login through the script.
+- **Verified live**, not just via the new test file
+  (`lib/queries/__tests__/users.test.ts`,
+  `lib/validation/__tests__/password.test.ts`): logged in as a seeded
+  account, confirmed the `/change-password` redirect and that it can't be
+  routed around, submitted a policy-violating password and got the exact
+  rejection reason, changed it successfully, confirmed the forced
+  sign-out and re-login with the new password landed past the gate this
+  time. Separately drove 5 wrong-password attempts against a second
+  account, confirmed the account locked (and that even the *correct*
+  password was then rejected with the same generic message), then
+  cleared the lockout fields directly and confirmed a normal login
+  resumed.
+
 ## 2026-08-23 — Dependabot enabled
 
 Follow-up to `SECURITY.md`'s "must harden" list (specifically the gap

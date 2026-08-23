@@ -150,20 +150,22 @@ model Clinic {
 // ─────────────────────────────────────────────────────────────────────────
 
 model User {
-  id                 String          @id @default(uuid())
-  clinicId           String?         @map("clinic_id")
-  clinic             Clinic?         @relation(fields: [clinicId], references: [id])
-  holdingCompanyId   String?         @map("holding_company_id")
-  holdingCompany     HoldingCompany? @relation(fields: [holdingCompanyId], references: [id])
-  name               String
-  email              String          @unique
-  phone              String?
-  passwordHash       String          @map("password_hash")
-  role               Role
-  isActive           Boolean         @default(true) @map("is_active")
-  mustChangePassword Boolean         @default(true) @map("must_change_password")
-  createdAt          DateTime        @default(now()) @map("created_at")
-  updatedAt          DateTime        @updatedAt @map("updated_at")
+  id                  String          @id @default(uuid())
+  clinicId            String?         @map("clinic_id")
+  clinic              Clinic?         @relation(fields: [clinicId], references: [id])
+  holdingCompanyId    String?         @map("holding_company_id")
+  holdingCompany      HoldingCompany? @relation(fields: [holdingCompanyId], references: [id])
+  name                String
+  email               String          @unique
+  phone               String?
+  passwordHash        String          @map("password_hash")
+  role                Role
+  isActive            Boolean         @default(true) @map("is_active")
+  mustChangePassword  Boolean         @default(true) @map("must_change_password")
+  failedLoginAttempts Int             @default(0) @map("failed_login_attempts")
+  lockedUntil         DateTime?       @map("locked_until")
+  createdAt           DateTime        @default(now()) @map("created_at")
+  updatedAt           DateTime        @updatedAt @map("updated_at")
 
   doctor               Doctor?
   paymentsCollected    Payment[]       @relation("PaymentCollectedBy")
@@ -249,7 +251,7 @@ model QueueEntry {
   doctorId       String?       @map("doctor_id")
   doctor         Doctor?       @relation(fields: [doctorId], references: [id])
   queueNumber    Int           @map("queue_number")
-  queueDate      DateTime      @db.Date @map("queue_date")
+  queueDate      DateTime      @map("queue_date") @db.Date
   status         QueueStatus   @default(BOOKED)
   priority       QueuePriority @default(NORMAL)
   source         QueueSource
@@ -291,7 +293,7 @@ model Consultation {
   findings       String?
   diagnosis      String?
   treatmentPlan  String?    @map("treatment_plan")
-  followUpDate   DateTime?  @db.Date @map("follow_up_date")
+  followUpDate   DateTime?  @map("follow_up_date") @db.Date
   // increments when an edit creates a new revision instead of overwriting
   revisionNumber Int        @default(1) @map("revision_number")
   createdAt      DateTime   @default(now()) @map("created_at")
@@ -324,7 +326,7 @@ model Medicine {
   // centavos
   unitCost     Int          @map("unit_cost")
   sellingPrice Int          @map("selling_price")
-  expiryDate   DateTime?    @db.Date @map("expiry_date")
+  expiryDate   DateTime?    @map("expiry_date") @db.Date
   isActive     Boolean      @default(true) @map("is_active")
   createdAt    DateTime     @default(now()) @map("created_at")
   updatedAt    DateTime     @updatedAt @map("updated_at")
@@ -413,21 +415,21 @@ model Payment {
 }
 
 model Remittance {
-  id                String    @id @default(uuid())
-  clinicId          String    @map("clinic_id")
-  clinic            Clinic    @relation(fields: [clinicId], references: [id])
-  userId            String    @map("user_id")
-  user              User      @relation("RemittanceUser", fields: [userId], references: [id])
-  shiftDate         DateTime  @db.Date @map("shift_date")
+  id                String   @id @default(uuid())
+  clinicId          String   @map("clinic_id")
+  clinic            Clinic   @relation(fields: [clinicId], references: [id])
+  userId            String   @map("user_id")
+  user              User     @relation("RemittanceUser", fields: [userId], references: [id])
+  shiftDate         DateTime @map("shift_date") @db.Date
   // centavos
-  expectedAmount    Int       @map("expected_amount")
-  actualAmount      Int       @map("actual_amount")
+  expectedAmount    Int      @map("expected_amount")
+  actualAmount      Int      @map("actual_amount")
   variance          Int
-  remittedAt        DateTime  @default(now()) @map("remitted_at")
-  confirmedByUserId String?   @map("confirmed_by_user_id")
-  confirmedByUser   User?     @relation("RemittanceConfirmedBy", fields: [confirmedByUserId], references: [id])
+  remittedAt        DateTime @default(now()) @map("remitted_at")
+  confirmedByUserId String?  @map("confirmed_by_user_id")
+  confirmedByUser   User?    @relation("RemittanceConfirmedBy", fields: [confirmedByUserId], references: [id])
   notes             String?
-  createdAt         DateTime  @default(now()) @map("created_at")
+  createdAt         DateTime @default(now()) @map("created_at")
 
   @@index([clinicId, shiftDate])
   @@map("remittances")
@@ -441,7 +443,7 @@ model Expense {
   description      String?
   // centavos
   amount           Int
-  expenseDate      DateTime @db.Date @map("expense_date")
+  expenseDate      DateTime @map("expense_date") @db.Date
   recordedByUserId String   @map("recorded_by_user_id")
   recordedByUser   User     @relation(fields: [recordedByUserId], references: [id])
   createdAt        DateTime @default(now()) @map("created_at")
