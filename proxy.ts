@@ -50,6 +50,14 @@ export default auth((req) => {
     return NextResponse.redirect(loginUrl)
   }
 
+  // Checked before the role/section gate below, and for every authenticated
+  // route except the change-password page itself — a user who still owes a
+  // password change shouldn't be able to route around this by hitting their
+  // role's home page directly.
+  if (session.user.mustChangePassword && pathname !== "/change-password") {
+    return NextResponse.redirect(new URL("/change-password", req.nextUrl.origin))
+  }
+
   const role = session.user.role
   const section = SECTION_ACCESS.find((s) => pathname.startsWith(s.prefix))
   if (section && !section.roles.includes(role)) {

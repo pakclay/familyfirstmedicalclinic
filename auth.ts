@@ -3,6 +3,7 @@ import Credentials from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { prisma } from "@/lib/db/prisma"
 import { authConfig } from "@/auth.config"
+import { isLockedOut, recordFailedLogin, recordSuccessfulLogin } from "@/lib/queries/users"
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
@@ -20,8 +21,24 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } })
         if (!user || !user.isActive) return null
 
+        // Checked before the password compare so a locked-out account can't
+        // be brute-forced by attempts that would otherwise still reach
+        // bcrypt.compare — and before recording anything, so a lockout
+        // doesn't get its own expiry pushed out by attempts made while
+        // already locked.
+        if (isLockedOut(user)) return null
+
         const valid = await bcrypt.compare(password, user.passwordHash)
-        if (!valid) return null
+        if (!valid) {
+          // Deliberately doesn't distinguish "wrong password" from "now
+          // locked out" in the response — same generic failure either way,
+          // both to authorize() callers and to the login form (see
+          // app/login/actions.ts). Revealing lockout state specifically
+          // would tell an attacker their attempts are being counted at all.
+          await recordFailedLogin(user.id, user.failedLoginAttempts)
+          return null
+        }
+        await recordSuccessfulLogin(user.id)
 
         return {
           id: user.id,

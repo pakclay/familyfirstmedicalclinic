@@ -75,6 +75,38 @@ patient data.
   opens a PR automatically instead of waiting for someone to run
   `npm audit` and go looking. Those PRs go through the same `gate` check
   and branch-protection rule as any other change before they can merge.
+- **A first-login (and voluntary) password change screen exists and is
+  enforced.** `/change-password` — reachable from every authenticated
+  shell's header — is where `proxy.ts` redirects any request whose
+  session has `mustChangePassword: true`, before the role/section gate
+  even runs; there's no route that bypasses it. The new password must be
+  10+ characters with at least one letter and one number
+  (`lib/validation/password.ts`), can't equal the current password, and
+  changing it clears `mustChangePassword` and signs the user out (the
+  simplest way to guarantee the session actually reflects the change,
+  given `proxy.ts`'s Prisma-free JWT only gets re-signed on a fresh
+  sign-in — see the `Dependabot enabled` entry's sibling in
+  `DECISIONS.md` for why that split exists at all).
+- **Per-account login lockout.** After 5 consecutive failed password
+  attempts, an account locks for 15 minutes (`lib/queries/users.ts`) —
+  checked *before* the password compare, so a locked account can't be
+  brute-forced by attempts made while already locked, and the login
+  form shows the same generic "Incorrect email or password" either way
+  rather than confirming a lockout is in effect. Per-IP throttling is
+  still not built — see below.
+- **A real data-retention job exists** (`lib/retention/`) — not just
+  soft-delete flags that hide a row from the UI while it sits in the
+  database indefinitely. `npm run db:retention` deletes patients,
+  consultations (and their dispensed-medicine rows), payments, queue
+  entries, and notifications once they're past their configured
+  retention window, respecting the schema's FK constraints and the
+  cascade this implies: a queue entry only becomes eligible once its
+  consultation is also expired, and a patient only becomes eligible once
+  nothing still-retained references it at all. Runs through the same
+  superuser connection as `prisma/seed.ts`, since the app's runtime role
+  has no `DELETE` grant at all — this can't run from inside the app
+  itself. Defaults to a dry-run report; needs `-- --execute` to actually
+  delete. Not yet running on a schedule anywhere — see below.
 
 ## What must be hardened before real patient data goes in
 
@@ -101,23 +133,31 @@ patient data.
   window), and a designated Data Protection Officer, per RA 10173's own
   requirement for any organization processing sensitive personal
   information at this scale.
-- **Retention policy.** Nothing in this codebase ever deletes old data —
-  patients, consultations, and payments accumulate forever. RA 10173's
-  proportionality principle expects data to be kept only as long as
-  necessary; before real use, decide an actual retention period per
-  record type and build the deletion/archival job, not just soft-delete
-  flags that hide a row from the UI while leaving it in the database
-  indefinitely.
-- **Forced password change is not built.** `mustChangePassword` is set to
-  `true` on every seeded user and the field exists on `User`, but no
-  screen actually enforces it — a staff member can keep using the
-  dev-shared password forever. Needed before real use: an actual
-  first-login change-password flow, plus a password policy (minimum
-  length/complexity) beyond "whatever bcrypt will hash."
-- **No rate limiting or brute-force protection on login.** The
-  Credentials provider has no attempt throttling, lockout, or CAPTCHA.
-  Add rate limiting (per-IP and per-account) before this is reachable
-  from the public internet.
+- **The retention job exists but isn't scheduled anywhere.**
+  `npm run db:retention` (dry-run by default, `-- --execute` to actually
+  delete — `lib/retention/`) purges patients/consultations/payments/
+  queue entries/notifications past their configured retention window
+  (`lib/retention/policy.ts`), with the deletion order and cascade logic
+  actually enforced rather than left to soft-delete flags nobody purges.
+  What's still missing is running it on an actual schedule (cron / a
+  hosting platform's scheduled jobs / a GitHub Actions cron once there's
+  a real `DATABASE_URL` to point it at) — deferred alongside TLS and
+  backups above until a hosting platform is chosen, since there's nothing
+  real to schedule it against yet. The retention *periods* themselves
+  (see `lib/retention/policy.ts`) are defensible defaults, not a legal
+  opinion — confirm them against actual PH medical-records and BIR
+  requirements before this runs against real patient data.
+- **No per-IP rate limiting on login.** Per-account lockout exists (see
+  above), which stops a brute-force pass against any one known account —
+  but nothing throttles login attempts by source IP, so a single account
+  could still be probed slowly (below the lockout threshold) or many
+  accounts probed a few times each without ever tripping it. This is
+  deliberately left to the deployment layer (reverse proxy / platform
+  rate limiting) rather than approximated with an in-process, per-instance
+  counter that wouldn't survive a restart or work once there's more than
+  one instance — same reasoning as TLS above. Decide alongside TLS when a
+  real host is chosen; add a CAPTCHA too if that host doesn't already
+  cover it.
 - **No session revocation beyond the next request.** The `isActive`
   re-check in the `jwt` callback deactivates a user on their *next*
   request, not mid-session on an already-open tab — there's no server-side
