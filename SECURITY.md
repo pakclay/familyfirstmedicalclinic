@@ -94,6 +94,20 @@ patient data.
   form shows the same generic "Incorrect email or password" either way
   rather than confirming a lockout is in effect. Per-IP throttling is
   still not built — see below.
+- **Admin-managed user accounts, scoped by role.** A Holding Admin can
+  create, edit, deactivate/reactivate, force a password reset on, or
+  unlock any account in any clinic; a Clinic Admin can do the same but
+  only for front desk/doctor accounts in their own clinic — enforced in
+  `lib/queries/users.ts`, not just hidden in the UI (a Clinic Admin's own
+  account and any other clinic's accounts return "not found," not a
+  filtered list, so there's nothing to enumerate). Admin-created accounts
+  get a random one-time temporary password shown once on screen, never
+  logged or emailed, and inherit the same forced-first-login-change flow
+  as any other account. `users`, `doctors`, and `clinics` have no
+  Postgres RLS policy at all (only the tables listed in
+  `enable_rls_backstop`'s migration do) — this feature relies entirely on
+  the application-layer scoping above, so a bug here isn't caught by a
+  database backstop the way patient/queue/payment queries are.
 - **A real data-retention job exists** (`lib/retention/`) — not just
   soft-delete flags that hide a row from the UI while it sits in the
   database indefinitely. `npm run db:retention` deletes patients,

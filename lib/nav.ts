@@ -9,6 +9,7 @@ const CLINIC_ADMIN_NAV: NavItem[] = [
   { label: "Patients", href: "/staff/patients" },
   { label: "Reports", href: "/console/reports" },
   { label: "Expenses", href: "/console/expenses" },
+  { label: "Users", href: "/console/users" },
 ]
 
 const HOLDING_ADMIN_NAV: NavItem[] = [

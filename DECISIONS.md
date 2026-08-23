@@ -9,6 +9,72 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-08-23 — Users management (holding admin: any account, clinic admin: own clinic's front desk/doctor)
+
+Scoped from "why was there no Clinics input page?" — SPEC.md §4 gives
+Holding Admin "manage all users" and Clinic Admin "manage doctors and
+staff," and `lib/nav.ts` already linked to `/console/users`, but no
+milestone ever had it as an accept-criterion, so it was never built.
+Built Users first of the four gaps found (Users, Clinics, clinic
+settings self-service, audit log viewer), since it extends the
+password/lockout work from issue #7 rather than starting cold.
+
+- **`users`, `doctors`, and `clinics` have no RLS policy at all** —
+  confirmed against `prisma/migrations/20260821145450_enable_rls_backstop/
+  migration.sql`, which only covers `patients`, `queue_entries`,
+  `consultations`, `medicines`, `stock_movements`,
+  `medicines_dispensed`, `payments`, `remittances`, `expenses`,
+  `notifications`, `audit_logs`. A prior code comment in
+  `lib/queries/users.ts` had this backwards (claimed the `users` policy
+  was "clinic-scoped, not self-scoped" — there is no policy at all) and
+  has been corrected. Every function in that file filters explicitly by
+  clinic/role in application code rather than leaning on a database
+  backstop the way patient/queue/payment queries can.
+- **`audit_logs` *does* have an RLS policy, though, and every mutating
+  function here writes one.** First pass used a plain
+  `prisma.$transaction(...)` for `createUser`/`updateUser`/
+  `setUserActive`/`forcePasswordReset`/`unlockAccount`, which meant the
+  `tx.auditLog.create(...)` inside each one failed with a real Postgres
+  `42501` RLS violation — the app's runtime connection never sets the
+  `app.role`/`app.clinic_id` session GUCs outside of `runWithRls()`, and
+  writing to `audit_logs` needs them even though the primary target
+  table (`users`) doesn't. Caught by the test suite, not by types or
+  lint. Fixed by wrapping each in `runWithRls(actor, ...)` instead.
+- **The self-deactivation check has to run before the manage-permission
+  check, not after.** `canManageTarget()` requires a non-holding-admin
+  actor's target to be `FRONT_DESK`/`DOCTOR` — a Clinic Admin's own row
+  is `CLINIC_ADMIN`, so that check fails first and returns a generic
+  "User not found," and the `id === actor.id` guard placed after it in
+  `setUserActive` was unreachable dead code for exactly the case it was
+  meant to catch. Moved the self-check to the top of the function, before
+  the permission-gated fetch.
+- **Admin-created accounts get a random one-time temp password
+  (`generateTempPassword()`), shown once on the creation success screen,
+  never emailed/logged.** Built from 6 letters + 4 digits (excluding
+  visually-confusing characters) so it satisfies the 10+/letter/digit
+  password policy by construction rather than by chance, and
+  `mustChangePassword: true` forces the existing issue #7 first-login
+  flow to run before the account can do anything else.
+- **A Clinic Admin can't see or reach their own row through this UI at
+  all** (`listUsers` filters it out for non-holding-admins, and
+  `getManagedUserById` returns null for it too) — self-service password
+  changes go through `/change-password`, not this admin surface. Verified
+  live: a Holding Admin's own row *is* reachable (holding admins bypass
+  the clinic/role restriction), and the Deactivate button is correctly
+  hidden for `isSelf` regardless.
+- **Verified live against the real dev database**, not just the 23-case
+  test suite: created a doctor (holding admin) and a front desk account
+  (clinic admin) through the actual forms, confirmed the temp password
+  triggers the forced first-login change flow end-to-end, edited a user,
+  forced a password reset, deactivated/reactivated, and drove an account
+  to lockout and back via "Unlock account." Along the way, found the dev
+  database's `owner@familyfirst.example` password no longer matched
+  `prisma/seed.ts`'s documented `FamilyFirst2026!` (left over from
+  earlier manual testing this same long-running session) — re-ran
+  `npx tsx prisma/seed.ts` (documented in the script itself as the
+  expected way to reset dev state) rather than guess at a forgotten
+  password.
+
 ## 2026-08-23 — Data retention job (issue #6, scoped to retention only)
 
 Issue #6 bundles TLS, backups, and retention policy. Asked the owner how
