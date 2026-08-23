@@ -41,6 +41,9 @@ async function main() {
   // script in dev, so clear anything the previous run created first
   // (FK-safe order) rather than failing on duplicate emails/slugs.
   await prisma.auditLog.deleteMany()
+  await prisma.notification.deleteMany()
+  await prisma.remittance.deleteMany()
+  await prisma.expense.deleteMany()
   await prisma.medicineDispensed.deleteMany()
   await prisma.stockMovement.deleteMany()
   await prisma.payment.deleteMany()
