@@ -12,7 +12,7 @@ patient data.
   seed time and at login. No plaintext credential is ever stored or
   logged — the seed script prints the one shared dev password
   (`FamilyFirst2026!`) to the console, not into a committed file.
-- **Every route is gated server-side twice.** `middleware.ts` redirects a
+- **Every route is gated server-side twice.** `proxy.ts` redirects a
   signed-out request to `/login` and bounces a signed-in role away from a
   section it can't enter (`/staff`, `/doctor`, `/console`); this is a
   coarse first gate, not the real boundary. The actual authorization is

@@ -56,9 +56,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       // equivalent to "revoke a session immediately" available here — it
       // takes effect on the next request, not necessarily mid-request on
       // an already-open tab. Only reachable from auth.ts's Node.js-runtime
-      // callers (route handlers, server components) — middleware uses
-      // auth.config.ts's edge-safe callbacks instead, which never touch
-      // Prisma.
+      // callers (route handlers, server components) — proxy.ts uses
+      // auth.config.ts's Prisma-free callbacks instead. See auth.config.ts.
       const current = await prisma.user.findUnique({ where: { id: token.id } })
       if (!current || !current.isActive) {
         return null

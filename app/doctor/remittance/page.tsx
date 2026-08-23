@@ -7,7 +7,7 @@ import { RemittanceForm } from "@/app/staff/remittance/remittance-form"
 // §1: "today doctors take cash directly" — a doctor is as much a
 // "collector" under §7.7 as front desk is, so this reuses the exact same
 // form/query as /staff/remittance rather than reimplementing it. It lives
-// under /doctor because middleware's /staff/* gate is otherwise reserved
+// under /doctor because proxy.ts's /staff/* gate is otherwise reserved
 // for front desk/clinic admin/holding admin screens.
 export default async function DoctorRemittancePage() {
   const session = await auth()
