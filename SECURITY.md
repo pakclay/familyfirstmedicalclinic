@@ -94,6 +94,19 @@ patient data.
   form shows the same generic "Incorrect email or password" either way
   rather than confirming a lockout is in effect. Per-IP throttling is
   still not built — see below.
+- **A real data-retention job exists** (`lib/retention/`) — not just
+  soft-delete flags that hide a row from the UI while it sits in the
+  database indefinitely. `npm run db:retention` deletes patients,
+  consultations (and their dispensed-medicine rows), payments, queue
+  entries, and notifications once they're past their configured
+  retention window, respecting the schema's FK constraints and the
+  cascade this implies: a queue entry only becomes eligible once its
+  consultation is also expired, and a patient only becomes eligible once
+  nothing still-retained references it at all. Runs through the same
+  superuser connection as `prisma/seed.ts`, since the app's runtime role
+  has no `DELETE` grant at all — this can't run from inside the app
+  itself. Defaults to a dry-run report; needs `-- --execute` to actually
+  delete. Not yet running on a schedule anywhere — see below.
 
 ## What must be hardened before real patient data goes in
 
@@ -120,13 +133,20 @@ patient data.
   window), and a designated Data Protection Officer, per RA 10173's own
   requirement for any organization processing sensitive personal
   information at this scale.
-- **Retention policy.** Nothing in this codebase ever deletes old data —
-  patients, consultations, and payments accumulate forever. RA 10173's
-  proportionality principle expects data to be kept only as long as
-  necessary; before real use, decide an actual retention period per
-  record type and build the deletion/archival job, not just soft-delete
-  flags that hide a row from the UI while leaving it in the database
-  indefinitely.
+- **The retention job exists but isn't scheduled anywhere.**
+  `npm run db:retention` (dry-run by default, `-- --execute` to actually
+  delete — `lib/retention/`) purges patients/consultations/payments/
+  queue entries/notifications past their configured retention window
+  (`lib/retention/policy.ts`), with the deletion order and cascade logic
+  actually enforced rather than left to soft-delete flags nobody purges.
+  What's still missing is running it on an actual schedule (cron / a
+  hosting platform's scheduled jobs / a GitHub Actions cron once there's
+  a real `DATABASE_URL` to point it at) — deferred alongside TLS and
+  backups above until a hosting platform is chosen, since there's nothing
+  real to schedule it against yet. The retention *periods* themselves
+  (see `lib/retention/policy.ts`) are defensible defaults, not a legal
+  opinion — confirm them against actual PH medical-records and BIR
+  requirements before this runs against real patient data.
 - **No per-IP rate limiting on login.** Per-account lockout exists (see
   above), which stops a brute-force pass against any one known account —
   but nothing throttles login attempts by source IP, so a single account

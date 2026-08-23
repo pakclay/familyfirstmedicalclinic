@@ -9,6 +9,74 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-08-23 — Data retention job (issue #6, scoped to retention only)
+
+Issue #6 bundles TLS, backups, and retention policy. Asked the owner how
+to scope it before starting: TLS and backups are deployment-infrastructure
+decisions with no hosting platform chosen yet in this repo (it only ever
+runs via `next dev`/`next start` locally) — there's nothing real to
+configure either against. Retention policy is pure application logic with
+no such dependency, so that's what got built; TLS and backups stay open
+on #6 until a hosting platform is chosen.
+
+- **Preview and purge share one id-computation function
+  (`computeExpiredIds` in `lib/retention/purge.ts`), not two similar
+  queries.** First attempt used a `where` clause per table, duplicated
+  between a count-only preview and a delete-for-real purge — caught by
+  its own test: the preview undercounted queue entries and patients,
+  because their eligibility *cascades* (a queue entry only becomes
+  purgeable once its consultation is also expired; a patient only once
+  nothing left standing references it), and the purge's sequential
+  `deleteMany` calls achieve that cascade for real within one
+  transaction while a static `where` clause computed against
+  never-mutated data can't. Rewrote around explicit id lists computed
+  once — `consultations: { none: { id: { notIn: consultationIds } } }`
+  reads as "no consultation survives that isn't already in our
+  to-delete set" — so preview and purge are structurally the same
+  computation and can't drift apart again the same way.
+- **Deletion order follows the schema's FK constraints exactly**
+  (all `RESTRICT` except where noted): medicinesDispensed →
+  consultations → payments → notifications → queueEntries → patients.
+  Payment.consultationId is `SET NULL` (not `RESTRICT`), so a payment
+  can outlive the consultation it was for — which matters here, since
+  `PAYMENT_RETENTION_DAYS` (10y, bookkeeping) is deliberately longer
+  than `CONSULTATION_RETENTION_DAYS` (7y, clinical) - a patient with an
+  old consultation but a not-yet-expired payment correctly stays
+  un-purgeable until the payment clears too, financial-recordkeeping law
+  taking precedence over the shorter clinical window without any special
+  case in the code for it.
+- **Retention periods are defaults, not a legal opinion** — see the
+  comment in `lib/retention/policy.ts`. 7 years for clinical records, 10
+  for payments, 90 days for notification send-logs are commonly-cited
+  minimums/ceilings, not a confirmed reading of RA 10173 (health data,
+  "no longer than necessary") or BIR bookkeeping requirements for this
+  specific business. Change the constants, not the purge logic, once
+  those are actually confirmed.
+- **Runs through the same superuser connection as `prisma/seed.ts`
+  (`DATABASE_URL`), never through the app.** `prisma/grant-app-role.sql`
+  deliberately grants the runtime `webinar_app` role `SELECT, INSERT,
+  UPDATE` and no `DELETE` at all — §11's "nothing hard-deletes from the
+  UI" decided at the RLS-migration level, not just as an app-code
+  convention. This job has to run outside that boundary entirely; it
+  can't be reached from any web request no matter what a bug in the app
+  layer does.
+- **Dry-run by default, `--execute` required to actually delete**
+  (`prisma/retention.ts`) — the same caution every other hard-to-reverse
+  operation in this build gets, applied at the tooling level rather than
+  left to "remember not to run this carelessly."
+- **Scheduling is explicitly out of scope here** — cron / a hosting
+  platform's scheduled jobs / a GitHub Actions cron are all real options
+  once there's an actual `DATABASE_URL` to point at, but wiring one up
+  against nothing would be pure theater. Tracked in `SECURITY.md`
+  alongside TLS and backups.
+- **Verified live against the real dev database**, not just the test
+  suite (`lib/retention/__tests__/purge.test.ts`): created a genuinely
+  old, disposable notification row directly, confirmed
+  `npm run db:retention`'s dry-run reported it and changed nothing, then
+  ran `-- --execute` and confirmed via a direct query that the row was
+  actually gone and a single `retention.purge` audit-log row was written
+  with the exact counts.
+
 ## 2026-08-23 — Forced password change and login lockout (issue #7)
 
 Two of `SECURITY.md`'s remaining "must harden" items. Built together
