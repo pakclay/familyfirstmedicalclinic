@@ -91,3 +91,9 @@ db:seed` first.
 - `npm run db:seed` — reseed the holding company, clinics, staff/doctor
   accounts, and a couple of demo patients per clinic (idempotent — safe to
   rerun)
+- `npm run db:retention` — reports what's past its retention window
+  (`lib/retention/policy.ts`) without deleting anything; add `-- --execute`
+  to actually purge. Connects via `DATABASE_URL` (the migration/superuser
+  role) since this needs `DELETE`, which the app's runtime
+  `APP_DATABASE_URL` role deliberately doesn't have. Not yet wired to run
+  on a schedule — see `SECURITY.md`.

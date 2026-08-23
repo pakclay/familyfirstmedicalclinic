@@ -15,9 +15,16 @@ npm run dev
 
 Open http://localhost:3000. `npm run db:seed` prints every seeded login;
 they're also listed below. Every seeded account shares one dev password:
-**`FamilyFirst2026!`**. Each seeded user has `mustChangePassword: true` —
-harmless for this walkthrough, since the forced-change flow isn't built
-(see DECISIONS.md); log in and proceed as normal.
+**`FamilyFirst2026!`**. Each seeded user has `mustChangePassword: true`,
+and that's now enforced (see DECISIONS.md): **the first time you sign in
+as any given account**, you land on `/change-password` instead of that
+role's home page, and stay routed there no matter what URL you try until
+you set a new one — 10+ characters, at least one letter and one number,
+different from the current password. After changing it you're signed out
+and asked to sign in again with the new password; from then on that
+specific account behaves normally for the rest of the walkthrough. This
+happens independently per account, so expect it again the first time you
+switch to a *different* seeded account below, not just once overall.
 
 **Seeded accounts** (one holding company, three clinics: `quezon-city`,
 `makati`, `cebu` — swap the slug to run the same steps against another

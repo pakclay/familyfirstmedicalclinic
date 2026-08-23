@@ -9,6 +9,138 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-08-23 — Data retention job (issue #6, scoped to retention only)
+
+Issue #6 bundles TLS, backups, and retention policy. Asked the owner how
+to scope it before starting: TLS and backups are deployment-infrastructure
+decisions with no hosting platform chosen yet in this repo (it only ever
+runs via `next dev`/`next start` locally) — there's nothing real to
+configure either against. Retention policy is pure application logic with
+no such dependency, so that's what got built; TLS and backups stay open
+on #6 until a hosting platform is chosen.
+
+- **Preview and purge share one id-computation function
+  (`computeExpiredIds` in `lib/retention/purge.ts`), not two similar
+  queries.** First attempt used a `where` clause per table, duplicated
+  between a count-only preview and a delete-for-real purge — caught by
+  its own test: the preview undercounted queue entries and patients,
+  because their eligibility *cascades* (a queue entry only becomes
+  purgeable once its consultation is also expired; a patient only once
+  nothing left standing references it), and the purge's sequential
+  `deleteMany` calls achieve that cascade for real within one
+  transaction while a static `where` clause computed against
+  never-mutated data can't. Rewrote around explicit id lists computed
+  once — `consultations: { none: { id: { notIn: consultationIds } } }`
+  reads as "no consultation survives that isn't already in our
+  to-delete set" — so preview and purge are structurally the same
+  computation and can't drift apart again the same way.
+- **Deletion order follows the schema's FK constraints exactly**
+  (all `RESTRICT` except where noted): medicinesDispensed →
+  consultations → payments → notifications → queueEntries → patients.
+  Payment.consultationId is `SET NULL` (not `RESTRICT`), so a payment
+  can outlive the consultation it was for — which matters here, since
+  `PAYMENT_RETENTION_DAYS` (10y, bookkeeping) is deliberately longer
+  than `CONSULTATION_RETENTION_DAYS` (7y, clinical) - a patient with an
+  old consultation but a not-yet-expired payment correctly stays
+  un-purgeable until the payment clears too, financial-recordkeeping law
+  taking precedence over the shorter clinical window without any special
+  case in the code for it.
+- **Retention periods are defaults, not a legal opinion** — see the
+  comment in `lib/retention/policy.ts`. 7 years for clinical records, 10
+  for payments, 90 days for notification send-logs are commonly-cited
+  minimums/ceilings, not a confirmed reading of RA 10173 (health data,
+  "no longer than necessary") or BIR bookkeeping requirements for this
+  specific business. Change the constants, not the purge logic, once
+  those are actually confirmed.
+- **Runs through the same superuser connection as `prisma/seed.ts`
+  (`DATABASE_URL`), never through the app.** `prisma/grant-app-role.sql`
+  deliberately grants the runtime `webinar_app` role `SELECT, INSERT,
+  UPDATE` and no `DELETE` at all — §11's "nothing hard-deletes from the
+  UI" decided at the RLS-migration level, not just as an app-code
+  convention. This job has to run outside that boundary entirely; it
+  can't be reached from any web request no matter what a bug in the app
+  layer does.
+- **Dry-run by default, `--execute` required to actually delete**
+  (`prisma/retention.ts`) — the same caution every other hard-to-reverse
+  operation in this build gets, applied at the tooling level rather than
+  left to "remember not to run this carelessly."
+- **Scheduling is explicitly out of scope here** — cron / a hosting
+  platform's scheduled jobs / a GitHub Actions cron are all real options
+  once there's an actual `DATABASE_URL` to point at, but wiring one up
+  against nothing would be pure theater. Tracked in `SECURITY.md`
+  alongside TLS and backups.
+- **Verified live against the real dev database**, not just the test
+  suite (`lib/retention/__tests__/purge.test.ts`): created a genuinely
+  old, disposable notification row directly, confirmed
+  `npm run db:retention`'s dry-run reported it and changed nothing, then
+  ran `-- --execute` and confirmed via a direct query that the row was
+  actually gone and a single `retention.purge` audit-log row was written
+  with the exact counts.
+
+## 2026-08-23 — Forced password change and login lockout (issue #7)
+
+Two of `SECURITY.md`'s remaining "must harden" items. Built together
+since both touch the same login/auth surface.
+
+- **Sign out after a password change, rather than refreshing the live
+  session.** `proxy.ts` reads `mustChangePassword` off the JWT via
+  `auth.config.ts`'s Prisma-free callbacks (see the `middleware.ts` →
+  `proxy.ts` entry above), which only gets re-signed on a fresh sign-in —
+  not on a server action's response. Next-auth v5 has session-update
+  mechanisms for this, but they're beta-surface I hadn't verified against
+  this exact version, and "sign out, sign back in with the new password"
+  is simple, deterministic, sidesteps the whole question, and is a
+  perfectly normal UX after a password change anyway.
+- **`changeOwnPassword` takes no target-user-id parameter at all** — it
+  always operates on the calling `AbilitySubject`'s own id. The RLS
+  policy on `users` is clinic-scoped, not self-scoped (same as every
+  other clinic-wide table), so without an explicit `where: { id: user.id
+  }` in the query itself, any front-desk account could overwrite a
+  colleague's password in the same clinic. Structural self-scoping (no id
+  argument to pass a wrong value into) beats a runtime check that could
+  be gotten wrong later.
+- **Password policy: 10+ characters, at least one letter and one
+  number** (`lib/validation/password.ts`) — deliberately not requiring
+  symbols/mixed case on top of that. The realistic bar to clear here is
+  "meaningfully better than the shared dev password every seeded account
+  starts with," not a corporate-IT complexity rule nobody can remember
+  and everyone works around by appending "!1".
+- **Lockout: 5 consecutive failures → 15 minutes**, checked *before* the
+  bcrypt compare (so attempts made while already locked can't extend or
+  reset the window) and *before* recording anything (so the check itself
+  doesn't affect the count). The login form shows the same generic
+  "Incorrect email or password" whether the cause is a wrong password or
+  an active lockout — deliberately not distinguishing them, so a probing
+  attempt can't learn "this account is now locked" as a side channel.
+- **No per-IP throttling** — only per-account lockout. `SECURITY.md`
+  explains why: a real per-IP limiter needs to survive process restarts
+  and work across more than one instance, which means either new
+  infrastructure (Redis, or similar) this app doesn't have yet, or an
+  honest deployment-layer answer (reverse proxy / platform rate
+  limiting) once real hosting is chosen — not an in-process counter that
+  quietly stops working the moment there's a second instance. Same
+  reasoning already applied to TLS.
+- **Seeded demo accounts were *not* exempted from the forced flow.**
+  `prisma/seed.ts` already sets `mustChangePassword: true` on every
+  seeded user specifically so this flow would have something real to
+  exercise once built (see DEMO.md's setup section, written before this
+  existed). Weakening seed data to route around the feature being
+  demonstrated would have been backwards; updated DEMO.md's setup
+  section instead to explain what a reader will see on each account's
+  first login through the script.
+- **Verified live**, not just via the new test file
+  (`lib/queries/__tests__/users.test.ts`,
+  `lib/validation/__tests__/password.test.ts`): logged in as a seeded
+  account, confirmed the `/change-password` redirect and that it can't be
+  routed around, submitted a policy-violating password and got the exact
+  rejection reason, changed it successfully, confirmed the forced
+  sign-out and re-login with the new password landed past the gate this
+  time. Separately drove 5 wrong-password attempts against a second
+  account, confirmed the account locked (and that even the *correct*
+  password was then rejected with the same generic message), then
+  cleared the lockout fields directly and confirmed a normal login
+  resumed.
+
 ## 2026-08-23 — Dependabot enabled
 
 Follow-up to `SECURITY.md`'s "must harden" list (specifically the gap
