@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # npm dependencies — grouped so a routine week doesn't open a dozen
+  # separate PRs for a small dependency set (see SECURITY.md and #8).
+  # Security updates group separately regardless of this config, per
+  # the "Grouped security updates" repo setting.
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # Actions used by .github/workflows/ci.yml (actions/checkout,
+  # actions/setup-node) — a separate ecosystem from npm, easy to miss.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

@@ -64,7 +64,17 @@ patient data.
   date logic (`todayAsQueueDate` and everything built on it — queue
   numbering, report ranges, follow-up due dates, the expenses list) sat
   wrong through five milestones, caught only by chance during a manual
-  walkthrough. See the gap below for what CI still doesn't cover.
+  walkthrough.
+- **Branch protection requires the `gate` CI check and a pull request
+  before a merge to `master`** — a red run or a direct push can no
+  longer land.
+- **Dependency vulnerabilities are scanned continuously, not just at
+  audit time.** Dependabot alerts, security updates, grouped security
+  updates, and version updates (`.github/dependabot.yml`) are all
+  enabled — a newly-disclosed CVE in an existing, untouched dependency
+  opens a PR automatically instead of waiting for someone to run
+  `npm audit` and go looking. Those PRs go through the same `gate` check
+  and branch-protection rule as any other change before they can merge.
 
 ## What must be hardened before real patient data goes in
 
@@ -114,15 +124,6 @@ patient data.
   session store to invalidate immediately. Acceptable for a prototype;
   a real incident (stolen device, terminated employee) needs faster
   revocation than "eventually, on their next click."
-- **Branch protection requires the `gate` CI check and a pull request
-  before a merge to `master`** — a red run or a direct push can no longer
-  land. But CI still doesn't scan for known-vulnerable dependencies on its
-  own schedule; `npm audit` currently reports 0 findings (as of the
-  `next@16.3.2` upgrade, which also happened to fix the last 3), but that's
-  a snapshot, not ongoing coverage — before real data, add `npm audit` (or
-  Dependabot/Renovate) on a schedule so a newly-disclosed vulnerability in
-  an existing, untouched dependency gets noticed without anyone having to
-  go looking for it.
 - **No PHI-specific access reviews.** Audit logs are written, but nothing
   reviews them — no alerting on unusual access patterns (e.g. one account
   reading an abnormal number of patient records in a short window), and
