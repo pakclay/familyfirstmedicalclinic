@@ -33,3 +33,21 @@ export function requireClinicId(user: AbilitySubject): string {
   }
   return user.clinicId
 }
+
+/**
+ * Which roles `actor` is allowed to create or edit — §4's role table:
+ * holding admin manages all users, clinic admin manages "doctors and
+ * staff" in their own clinic only (not other admins). Deliberately a
+ * fixed list per role rather than a general permission check, since
+ * user-management is the one place a wrong answer here lets someone
+ * mint an account with more access than they have themselves.
+ */
+export function assignableRoles(actor: AbilitySubject): Role[] {
+  if (actor.role === "HOLDING_ADMIN") return ["FRONT_DESK", "DOCTOR", "CLINIC_ADMIN", "HOLDING_ADMIN"]
+  if (actor.role === "CLINIC_ADMIN") return ["FRONT_DESK", "DOCTOR"]
+  return []
+}
+
+export function canManageRole(actor: AbilitySubject, targetRole: Role): boolean {
+  return assignableRoles(actor).includes(targetRole)
+}
