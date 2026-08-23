@@ -2,10 +2,23 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { Role } from "@prisma/client"
 import { superuserPrisma } from "@/lib/test/superuser-prisma"
 import { prisma } from "@/lib/db/prisma"
-import { listClinics, getClinicById, createClinic, updateClinic, setClinicActive } from "@/lib/queries/clinics"
+import {
+  listClinics,
+  getClinicById,
+  createClinic,
+  updateClinic,
+  setClinicActive,
+  getOwnClinic,
+  updateOwnClinicSettings,
+} from "@/lib/queries/clinics"
 import type { AbilitySubject } from "@/lib/permissions/ability"
 import { ForbiddenError } from "@/lib/permissions/errors"
-import type { CreateClinicInput, EditClinicInput, OperatingHours } from "@/lib/validation/clinic"
+import type {
+  ClinicSettingsInput,
+  CreateClinicInput,
+  EditClinicInput,
+  OperatingHours,
+} from "@/lib/validation/clinic"
 
 const STANDARD_HOURS: OperatingHours = {
   mon: { open: "09:00", close: "18:00" },
@@ -254,5 +267,80 @@ describe("clinic management", () => {
       where: { entityId: id, action: { in: ["clinic.deactivated", "clinic.reactivated"] } },
     })
     expect(logs.length).toBe(2)
+  })
+
+  describe("own-clinic settings (clinic admin self-service)", () => {
+    const settings: ClinicSettingsInput = {
+      address: "99 Moved Here St",
+      city: "Relocated City",
+      phone: "+63 900 111 2222",
+      facebookPageUrl: "",
+      operatingHours: { ...STANDARD_HOURS, sat: null },
+    }
+
+    it("returns the actor's own clinic, resolved from the session and not a parameter", async () => {
+      const clinic = await getOwnClinic(clinicAdmin)
+      expect(clinic.id).toBe(existingClinic.id)
+    })
+
+    it("throws for a holding admin, who has no single clinic of their own", async () => {
+      await expect(getOwnClinic(holdingAdmin)).rejects.toBeInstanceOf(ForbiddenError)
+    })
+
+    it("updates the clinic admin's own clinic and audit-logs it in the same transaction", async () => {
+      expect(await updateOwnClinicSettings(clinicAdmin, settings)).toEqual({ ok: true })
+
+      const row = await superuserPrisma.clinic.findUniqueOrThrow({ where: { id: existingClinic.id } })
+      expect(row.address).toBe("99 Moved Here St")
+      expect(row.city).toBe("Relocated City")
+      expect(row.phone).toBe("+63 900 111 2222")
+      expect(row.facebookPageUrl).toBeNull()
+      expect(row.operatingHours).toEqual({ ...STANDARD_HOURS, sat: null })
+
+      // Only exists if the transaction ran through runWithRls — audit_logs
+      // has an RLS policy even though clinics doesn't.
+      const log = await superuserPrisma.auditLog.findFirst({
+        where: { entityType: "Clinic", entityId: existingClinic.id, action: "clinic.settings_updated" },
+      })
+      expect(log).toBeTruthy()
+      expect(log!.userId).toBe(clinicAdmin.id)
+    })
+
+    it("cannot touch the privileged fields, even indirectly", async () => {
+      const before = await superuserPrisma.clinic.findUniqueOrThrow({ where: { id: existingClinic.id } })
+      expect(await updateOwnClinicSettings(clinicAdmin, settings)).toEqual({ ok: true })
+      const after = await superuserPrisma.clinic.findUniqueOrThrow({ where: { id: existingClinic.id } })
+
+      expect(after.name).toBe(before.name)
+      expect(after.slug).toBe(before.slug)
+      expect(after.timezone).toBe(before.timezone)
+      expect(after.isActive).toBe(before.isActive)
+      expect(after.holdingCompanyId).toBe(before.holdingCompanyId)
+    })
+
+    it("writes only to the actor's own clinic, leaving every other clinic untouched", async () => {
+      const other = await createClinic(holdingAdmin, clinicInput({ name: "Untouched Branch" }))
+      expect(other.ok).toBe(true)
+      if (!other.ok) return
+      const before = await superuserPrisma.clinic.findUniqueOrThrow({ where: { id: other.clinic.id } })
+
+      // There is no id parameter to point elsewhere — that's the point.
+      expect(await updateOwnClinicSettings(clinicAdmin, settings)).toEqual({ ok: true })
+
+      const after = await superuserPrisma.clinic.findUniqueOrThrow({ where: { id: other.clinic.id } })
+      expect(after.address).toBe(before.address)
+      expect(after.phone).toBe(before.phone)
+      expect(after.operatingHours).toEqual(before.operatingHours)
+    })
+
+    it("refuses a holding admin, a front desk user, and a doctor", async () => {
+      const denied = { ok: false, error: "Only a clinic admin manages their clinic's settings." }
+      expect(await updateOwnClinicSettings(holdingAdmin, settings)).toEqual(denied)
+
+      const frontDesk: AbilitySubject = { ...clinicAdmin, role: Role.FRONT_DESK }
+      const doctor: AbilitySubject = { ...clinicAdmin, role: Role.DOCTOR }
+      expect(await updateOwnClinicSettings(frontDesk, settings)).toEqual(denied)
+      expect(await updateOwnClinicSettings(doctor, settings)).toEqual(denied)
+    })
   })
 })

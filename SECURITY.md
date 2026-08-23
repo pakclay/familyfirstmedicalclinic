@@ -134,6 +134,17 @@ patient data.
   which holding company the reader belongs to, so the query narrows to
   the actor's own holding company itself, and the client-supplied filters
   are AND-ed with that scope so none of them can widen it.
+- **Clinic self-service is scoped by construction, not by a check.** The
+  clinic-settings functions a clinic admin uses to edit their own clinic
+  (`getOwnClinic`, `updateOwnClinicSettings`) take no clinic id parameter
+  at all — the clinic is resolved from the session via `requireClinicId`,
+  so there is nothing a caller could point at another clinic, which is
+  §5's "never from a client-supplied parameter" rule enforced by the
+  function signature rather than by a validation step that could be
+  skipped. The set of editable fields is an explicit allowlist and each
+  column is written by name rather than spreading the request payload, so
+  a clinic admin cannot reach `name`, `slug`, `timezone`, `isActive`, or
+  `holdingCompanyId` even indirectly.
 - **A real data-retention job exists** (`lib/retention/`) — not just
   soft-delete flags that hide a row from the UI while it sits in the
   database indefinitely. `npm run db:retention` deletes patients,

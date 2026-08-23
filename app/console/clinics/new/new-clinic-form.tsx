@@ -6,24 +6,14 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent } from "@/components/ui/card"
-import { WEEKDAYS, WEEKDAY_LABEL, type Weekday } from "@/lib/validation/clinic"
+import type { Weekday } from "@/lib/validation/clinic"
+import {
+  OperatingHoursFields,
+  defaultDayForms,
+  toOperatingHours,
+  type DayForm,
+} from "../operating-hours-fields"
 import { createClinicAction } from "../actions"
-
-type DayForm = { open: string; close: string; closed: boolean }
-
-const DEFAULT_OPEN = "09:00"
-const DEFAULT_CLOSE = "18:00"
-
-/** Mon–Sat open, Sunday closed — the shape the existing clinics were seeded with. */
-const initialHours: Record<Weekday, DayForm> = {
-  mon: { open: DEFAULT_OPEN, close: DEFAULT_CLOSE, closed: false },
-  tue: { open: DEFAULT_OPEN, close: DEFAULT_CLOSE, closed: false },
-  wed: { open: DEFAULT_OPEN, close: DEFAULT_CLOSE, closed: false },
-  thu: { open: DEFAULT_OPEN, close: DEFAULT_CLOSE, closed: false },
-  fri: { open: DEFAULT_OPEN, close: DEFAULT_CLOSE, closed: false },
-  sat: { open: "08:00", close: "12:00", closed: false },
-  sun: { open: DEFAULT_OPEN, close: DEFAULT_CLOSE, closed: true },
-}
 
 type Form = {
   name: string
@@ -49,7 +39,7 @@ const initial: Form = {
 
 export function NewClinicForm() {
   const [form, setForm] = useState<Form>(initial)
-  const [hours, setHours] = useState<Record<Weekday, DayForm>>(initialHours)
+  const [hours, setHours] = useState<Record<Weekday, DayForm>>(defaultDayForms)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [created, setCreated] = useState<{ name: string; slug: string } | null>(null)
@@ -58,18 +48,11 @@ export function NewClinicForm() {
     setForm((f) => ({ ...f, [key]: value }))
   }
 
-  function setDay(day: Weekday, patch: Partial<DayForm>) {
-    setHours((h) => ({ ...h, [day]: { ...h[day], ...patch } }))
-  }
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setPending(true)
     setError(null)
-    const operatingHours = Object.fromEntries(
-      WEEKDAYS.map((d) => [d, hours[d].closed ? null : { open: hours[d].open, close: hours[d].close }])
-    )
-    const res = await createClinicAction({ ...form, operatingHours })
+    const res = await createClinicAction({ ...form, operatingHours: toOperatingHours(hours) })
     setPending(false)
     if (!res.ok) {
       setError(res.error)
@@ -154,39 +137,7 @@ export function NewClinicForm() {
         <Input id="timezone" name="timezone" required value={form.timezone} onChange={(e) => set("timezone", e.target.value)} className="h-10" />
       </div>
 
-      <fieldset className="flex flex-col gap-2 rounded-md border border-border p-3">
-        <legend className="px-1 text-sm font-medium">Operating hours</legend>
-        {WEEKDAYS.map((day) => (
-          <div key={day} className="flex flex-wrap items-center gap-2">
-            <span className="w-24 text-sm">{WEEKDAY_LABEL[day]}</span>
-            <Input
-              aria-label={`${WEEKDAY_LABEL[day]} opening time`}
-              type="time"
-              className="h-9 w-32"
-              disabled={hours[day].closed}
-              value={hours[day].closed ? "" : hours[day].open}
-              onChange={(e) => setDay(day, { open: e.target.value })}
-            />
-            <span className="text-sm text-muted-foreground">to</span>
-            <Input
-              aria-label={`${WEEKDAY_LABEL[day]} closing time`}
-              type="time"
-              className="h-9 w-32"
-              disabled={hours[day].closed}
-              value={hours[day].closed ? "" : hours[day].close}
-              onChange={(e) => setDay(day, { close: e.target.value })}
-            />
-            <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={hours[day].closed}
-                onChange={(e) => setDay(day, { closed: e.target.checked })}
-              />
-              Closed
-            </label>
-          </div>
-        ))}
-      </fieldset>
+      <OperatingHoursFields value={hours} onChange={setHours} />
 
       {error && <p className="text-sm text-destructive">{error}</p>}
       <Button type="submit" disabled={pending} className="mt-2 h-11 text-base">

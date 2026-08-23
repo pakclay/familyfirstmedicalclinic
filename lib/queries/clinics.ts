@@ -1,10 +1,10 @@
 import type { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/db/prisma"
 import { runWithRls } from "@/lib/db/rls"
-import { isHoldingAdmin, type AbilitySubject } from "@/lib/permissions/ability"
+import { isHoldingAdmin, requireClinicId, type AbilitySubject } from "@/lib/permissions/ability"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import { toClinicDTO, type ClinicDTO } from "@/lib/dto/clinic"
-import type { CreateClinicInput, EditClinicInput, OperatingHours } from "@/lib/validation/clinic"
+import type { ClinicSettingsInput, CreateClinicInput, EditClinicInput, OperatingHours } from "@/lib/validation/clinic"
 
 /**
  * Clinic management is holding-admin-only (§4's role table) — a clinic
@@ -138,6 +138,80 @@ export async function updateClinic(
         entityType: "Clinic",
         entityId: id,
         changes: { name: input.name.trim() },
+      },
+    })
+  })
+
+  return { ok: true }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Own-clinic self-service (clinic admin) — §4's "clinic hours" row
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Neither function below takes a clinic id, by design. §5's hard rule is
+ * that clinic scoping comes from the authenticated user's assignment and
+ * "never from a client-supplied parameter" — with no id in the signature
+ * there is nothing for a caller to pass, so a clinic admin cannot reach
+ * another clinic's row even if the action layer were bypassed entirely.
+ *
+ * Deliberately separate from listClinics/getClinicById rather than
+ * relaxing those: both of them throw for a non-holding-admin, and a
+ * clinic-settings page wired to them was the exact regression a review of
+ * the clinics feature warned about.
+ */
+const NOT_A_CLINIC_ADMIN = "Only a clinic admin manages their clinic's settings."
+
+/**
+ * Gated on *having* an own clinic rather than on being a clinic admin:
+ * everything here (name, address, phone, hours) is already on the clinic's
+ * public `/book/{slug}` page, so it's not privileged reading for anyone
+ * assigned to it. Writing it is — that's `updateOwnClinicSettings`, which
+ * is clinic-admin only.
+ *
+ * A holding admin is refused explicitly rather than falling through to
+ * `requireClinicId`, whose null-clinicId throw is a plain Error meaning
+ * "the programmer forgot to branch on isHoldingAdmin" — that would surface
+ * as a 500. This is a role boundary, so it gets the 403-equivalent.
+ */
+export async function getOwnClinic(actor: AbilitySubject): Promise<ClinicDTO> {
+  if (isHoldingAdmin(actor)) {
+    throw new ForbiddenError("A holding admin has no single clinic — use the clinics list instead.")
+  }
+  const clinicId = requireClinicId(actor)
+  const row = await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId } })
+  return toClinicDTO(row)
+}
+
+export async function updateOwnClinicSettings(
+  actor: AbilitySubject,
+  input: ClinicSettingsInput
+): Promise<ManageClinicResult> {
+  if (actor.role !== "CLINIC_ADMIN") return { ok: false, error: NOT_A_CLINIC_ADMIN }
+  const clinicId = requireClinicId(actor)
+
+  await runWithRls(actor, async (tx) => {
+    // Fields listed one by one rather than spreading `input`: this is the
+    // privilege boundary, and a spread would quietly start writing any
+    // field a future edit adds to the settings schema.
+    await tx.clinic.update({
+      where: { id: clinicId },
+      data: {
+        address: input.address.trim(),
+        city: input.city.trim(),
+        phone: input.phone.trim(),
+        facebookPageUrl: input.facebookPageUrl?.trim() || null,
+        operatingHours: toJsonHours(input.operatingHours),
+      },
+    })
+    await tx.auditLog.create({
+      data: {
+        clinicId,
+        userId: actor.id,
+        action: "clinic.settings_updated",
+        entityType: "Clinic",
+        entityId: clinicId,
       },
     })
   })

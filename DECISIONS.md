@@ -100,6 +100,78 @@ no delete, and no mutation of any kind in this feature.
   rows lose their clinic attribution permanently. Worth a look if audit
   retention ever matters more than it does today.
 
+## 2026-08-23 — Clinic settings self-service (clinic admin edits their own clinic)
+
+Third of the four gaps. §4 gives Clinic Admin "clinic hours, services and
+prices"; §11 lists "clinic settings (hours, services, prices)" as one of
+their routes. What that actually decomposes to, once checked against the
+schema, is much smaller than it reads:
+
+- **"Services" does not exist and was not invented.** The word appears
+  exactly twice in SPEC.md, both times in a role/route list, and never in
+  §6 where every other entity gets a defined table — no `services` table,
+  no column, no relation. Rather than design a schema for a concept the
+  spec never specified, this is recorded as an open question for the
+  owner. Decide what a service *is* (a name and a price? something a
+  patient picks at booking? something a consultation records?) before any
+  table gets added, because each answer implies a different shape and the
+  wrong guess would be embedded in a migration.
+- **"Prices" needed nothing here.** Per-doctor consultation fees are
+  already editable through Users management (`Doctor.consultationFee`),
+  and medicine prices through the existing inventory catalog — which §11
+  itself lists as a *separate* clinic-admin capability. So the only real
+  gap was hours plus the clinic's own contact details.
+- **The new query functions take no clinic id at all.** §5's hard rule is
+  that clinic scoping comes from the authenticated user's assignment and
+  "never from a client-supplied parameter." `getOwnClinic(actor)` and
+  `updateOwnClinicSettings(actor, input)` resolve the clinic internally via
+  `requireClinicId`, so there is no parameter for a caller to point
+  elsewhere — a clinic admin cannot reach another clinic's row even if the
+  action layer were bypassed entirely. The form payload carries no id
+  either.
+- **Deliberately separate functions rather than relaxing
+  `listClinics`/`getClinicById`.** Both of those throw for a
+  non-holding-admin, and the review of the clinics feature specifically
+  predicted that a future clinic-settings page wired to them would be the
+  regression to avoid. It was: this is that page.
+- **`clinicSettingsSchema` lists its allowed fields rather than
+  `.omit()`-ing from `editClinicSchema`.** The omitted keys (`name`,
+  `slug`, `timezone`) are exactly the privilege boundary, so an allowlist
+  makes a future addition to `editableClinicFields` fail closed instead of
+  silently widening what a clinic admin can edit. The query layer likewise
+  writes each column by name instead of spreading the validated input.
+- **Name, slug and timezone stay holding-admin-only.** The name is on the
+  public booking page and in holding-level reports; the timezone drives
+  queue numbering, report ranges and follow-up dates; the slug is
+  immutable everywhere. A clinic admin sees all three on the page as
+  read-only context with a note saying who manages them.
+- **`getOwnClinic` refuses a holding admin with `ForbiddenError` rather
+  than letting `requireClinicId` throw.** That function's null-clinicId
+  throw is a plain `Error` meaning "the programmer forgot to branch on
+  `isHoldingAdmin`" — it would surface as a 500. This is a role boundary,
+  so it gets the 403-equivalent. It gates on *having* an own clinic rather
+  than on being a clinic admin, because everything it returns is already
+  public on `/book/{slug}`; the write path carries the strict role check.
+- **The weekday-hours editor was extracted before its third copy.** It was
+  already duplicated across the create and edit clinic forms — noted at
+  the time as "the first thing to extract if that editor grows." It grew.
+  `app/console/clinics/operating-hours-fields.tsx` now owns the markup,
+  the Closed-checkbox behaviour, and the hydrate/serialize helpers, and
+  all three forms use it.
+- **Verified live**, including that the extraction did not regress the two
+  existing forms: the create form still defaults to Mon–Sat open/Sunday
+  closed; typing a custom Monday time, ticking Closed, then unticking it
+  restores that custom time rather than the default (the behaviour the
+  shared component exists to preserve) and leaves other days untouched;
+  the edit form still hydrates seeded hours correctly. Then as a clinic
+  admin: changed the phone and Monday opening time and closed Saturday,
+  confirmed all three persisted, confirmed `clinic.settings_updated` was
+  audit-logged (which is also the proof `runWithRls` was used, since
+  `audit_logs` has an RLS policy and `clinics` does not), and confirmed
+  name/slug/timezone/isActive were unchanged. A holding admin visiting the
+  page gets a pointer to /console/clinics rather than a crash. Dev
+  database reseeded afterward.
+
 ## 2026-08-23 — Clinics management (holding admin only)
 
 Second of the four gaps found when asking why there was no Clinics input
