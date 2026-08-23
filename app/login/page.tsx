@@ -4,9 +4,9 @@ import { LoginForm } from "./login-form"
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string }>
+  searchParams: Promise<{ next?: string; passwordChanged?: string }>
 }) {
-  const { next } = await searchParams
+  const { next, passwordChanged } = await searchParams
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-muted p-4">
@@ -16,6 +16,11 @@ export default async function LoginPage({
           <CardDescription>Staff and doctor sign-in.</CardDescription>
         </CardHeader>
         <CardContent>
+          {passwordChanged && (
+            <p className="mb-4 rounded-md border border-border bg-muted px-3 py-2 text-sm">
+              Password changed. Sign in with your new password.
+            </p>
+          )}
           <LoginForm next={next ?? "/"} />
         </CardContent>
       </Card>

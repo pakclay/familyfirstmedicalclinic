@@ -75,6 +75,25 @@ patient data.
   opens a PR automatically instead of waiting for someone to run
   `npm audit` and go looking. Those PRs go through the same `gate` check
   and branch-protection rule as any other change before they can merge.
+- **A first-login (and voluntary) password change screen exists and is
+  enforced.** `/change-password` — reachable from every authenticated
+  shell's header — is where `proxy.ts` redirects any request whose
+  session has `mustChangePassword: true`, before the role/section gate
+  even runs; there's no route that bypasses it. The new password must be
+  10+ characters with at least one letter and one number
+  (`lib/validation/password.ts`), can't equal the current password, and
+  changing it clears `mustChangePassword` and signs the user out (the
+  simplest way to guarantee the session actually reflects the change,
+  given `proxy.ts`'s Prisma-free JWT only gets re-signed on a fresh
+  sign-in — see the `Dependabot enabled` entry's sibling in
+  `DECISIONS.md` for why that split exists at all).
+- **Per-account login lockout.** After 5 consecutive failed password
+  attempts, an account locks for 15 minutes (`lib/queries/users.ts`) —
+  checked *before* the password compare, so a locked account can't be
+  brute-forced by attempts made while already locked, and the login
+  form shows the same generic "Incorrect email or password" either way
+  rather than confirming a lockout is in effect. Per-IP throttling is
+  still not built — see below.
 
 ## What must be hardened before real patient data goes in
 
@@ -108,16 +127,17 @@ patient data.
   record type and build the deletion/archival job, not just soft-delete
   flags that hide a row from the UI while leaving it in the database
   indefinitely.
-- **Forced password change is not built.** `mustChangePassword` is set to
-  `true` on every seeded user and the field exists on `User`, but no
-  screen actually enforces it — a staff member can keep using the
-  dev-shared password forever. Needed before real use: an actual
-  first-login change-password flow, plus a password policy (minimum
-  length/complexity) beyond "whatever bcrypt will hash."
-- **No rate limiting or brute-force protection on login.** The
-  Credentials provider has no attempt throttling, lockout, or CAPTCHA.
-  Add rate limiting (per-IP and per-account) before this is reachable
-  from the public internet.
+- **No per-IP rate limiting on login.** Per-account lockout exists (see
+  above), which stops a brute-force pass against any one known account —
+  but nothing throttles login attempts by source IP, so a single account
+  could still be probed slowly (below the lockout threshold) or many
+  accounts probed a few times each without ever tripping it. This is
+  deliberately left to the deployment layer (reverse proxy / platform
+  rate limiting) rather than approximated with an in-process, per-instance
+  counter that wouldn't survive a restart or work once there's more than
+  one instance — same reasoning as TLS above. Decide alongside TLS when a
+  real host is chosen; add a CAPTCHA too if that host doesn't already
+  cover it.
 - **No session revocation beyond the next request.** The `isActive`
   re-check in the `jwt` callback deactivates a user on their *next*
   request, not mid-session on an already-open tab — there's no server-side

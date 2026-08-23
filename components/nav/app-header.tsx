@@ -42,6 +42,11 @@ export function AppHeader({
                 </Link>
               </DropdownMenuItem>
             ))}
+            <DropdownMenuItem asChild>
+              <Link href="/change-password" className="py-2 text-base">
+                Change password
+              </Link>
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -58,6 +63,9 @@ export function AppHeader({
 
       <div className="flex shrink-0 items-center gap-2 sm:gap-3">
         <span className="hidden truncate text-sm text-muted-foreground sm:inline">{userLabel}</span>
+        <Button variant="ghost" size="sm" className="hidden sm:inline-flex" asChild>
+          <Link href="/change-password">Change password</Link>
+        </Button>
         <SignOutButton />
       </div>
     </header>
