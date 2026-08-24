@@ -26,7 +26,7 @@ import type { AbilitySubject } from "@/lib/permissions/ability"
  * ledger for every medicine after a mixed sequence of operations.
  */
 describe("inventory", () => {
-  let clinic: { id: string; timezone: string }
+  let branch: { id: string; timezone: string }
   let clinicAdmin: AbilitySubject
   let frontDesk: AbilitySubject
   let doctorUser: AbilitySubject
@@ -41,7 +41,7 @@ describe("inventory", () => {
   }) {
     return superuserPrisma.medicine.create({
       data: {
-        clinicId: clinic.id,
+        branchId: branch.id,
         name: overrides.name,
         form: MedicineForm.TABLET,
         strength: "500mg",
@@ -58,11 +58,11 @@ describe("inventory", () => {
   async function createQueueEntry() {
     return superuserPrisma.queueEntry.create({
       data: {
-        clinicId: clinic.id,
+        branchId: branch.id,
         patientId: patient.id,
         doctorId,
         queueNumber: Math.floor(Math.random() * 1_000_000) + 1,
-        queueDate: todayAsQueueDate(clinic.timezone),
+        queueDate: todayAsQueueDate(branch.timezone),
         status: "CALLED",
         source: "WALK_IN",
         checkedInAt: new Date(),
@@ -75,9 +75,12 @@ describe("inventory", () => {
   beforeAll(async () => {
     const holding = await superuserPrisma.holdingCompany.create({ data: { name: "Inventory Test Holding" } })
     const clinicRow = await superuserPrisma.clinic.create({
+      data: { holdingCompanyId: holding.id, name: "Inventory Test Clinic" },
+    })
+    const branchRow = await superuserPrisma.branch.create({
       data: {
-        holdingCompanyId: holding.id,
-        name: "Inventory Test Clinic",
+        clinicId: clinicRow.id,
+        name: "Inventory Test Branch",
         slug: `inventory-test-${Date.now()}`,
         address: "1 Test St",
         city: "Test City",
@@ -86,30 +89,30 @@ describe("inventory", () => {
         operatingHours: {},
       },
     })
-    clinic = { id: clinicRow.id, timezone: clinicRow.timezone }
+    branch = { id: branchRow.id, timezone: branchRow.timezone }
 
     const adminUser = await superuserPrisma.user.create({
-      data: { clinicId: clinic.id, name: "Admin", email: `admin-inv-${Date.now()}@test.local`, passwordHash: "x", role: Role.CLINIC_ADMIN },
+      data: { branchId: branch.id, name: "Admin", email: `admin-inv-${Date.now()}@test.local`, passwordHash: "x", role: Role.CLINIC_ADMIN },
     })
-    clinicAdmin = { id: adminUser.id, role: Role.CLINIC_ADMIN, clinicId: clinic.id, holdingCompanyId: null }
+    clinicAdmin = { id: adminUser.id, role: Role.CLINIC_ADMIN, branchId: branch.id, holdingCompanyId: null }
 
     const fdUser = await superuserPrisma.user.create({
-      data: { clinicId: clinic.id, name: "Front Desk", email: `fd-inv-${Date.now()}@test.local`, passwordHash: "x", role: Role.FRONT_DESK },
+      data: { branchId: branch.id, name: "Front Desk", email: `fd-inv-${Date.now()}@test.local`, passwordHash: "x", role: Role.FRONT_DESK },
     })
-    frontDesk = { id: fdUser.id, role: Role.FRONT_DESK, clinicId: clinic.id, holdingCompanyId: null }
+    frontDesk = { id: fdUser.id, role: Role.FRONT_DESK, branchId: branch.id, holdingCompanyId: null }
 
     const docUser = await superuserPrisma.user.create({
-      data: { clinicId: clinic.id, name: "Dr. Inventory", email: `dr-inv-${Date.now()}@test.local`, passwordHash: "x", role: Role.DOCTOR },
+      data: { branchId: branch.id, name: "Dr. Inventory", email: `dr-inv-${Date.now()}@test.local`, passwordHash: "x", role: Role.DOCTOR },
     })
     const doctor = await superuserPrisma.doctor.create({
-      data: { userId: docUser.id, clinicId: clinic.id, licenseNumber: "I1", consultationFee: 50000 },
+      data: { userId: docUser.id, branchId: branch.id, licenseNumber: "I1", consultationFee: 50000 },
     })
     doctorId = doctor.id
-    doctorUser = { id: docUser.id, role: Role.DOCTOR, clinicId: clinic.id, holdingCompanyId: null }
+    doctorUser = { id: docUser.id, role: Role.DOCTOR, branchId: branch.id, holdingCompanyId: null }
 
     patient = await superuserPrisma.patient.create({
       data: {
-        clinicId: clinic.id,
+        branchId: branch.id,
         firstName: "Inventory",
         lastName: "Patient",
         birthdate: new Date("1990-01-01"),
@@ -123,20 +126,22 @@ describe("inventory", () => {
   })
 
   afterEach(async () => {
-    await superuserPrisma.auditLog.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.medicineDispensed.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.payment.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.consultation.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.stockMovement.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.queueEntry.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.medicine.deleteMany({ where: { clinicId: clinic.id } })
+    await superuserPrisma.auditLog.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.medicineDispensed.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.payment.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.consultation.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.stockMovement.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.queueEntry.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.medicine.deleteMany({ where: { branchId: branch.id } })
   })
 
   afterAll(async () => {
-    await superuserPrisma.patient.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.doctor.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.user.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.clinic.delete({ where: { id: clinic.id } })
+    await superuserPrisma.patient.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.doctor.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.user.deleteMany({ where: { branchId: branch.id } })
+    const { clinicId } = await superuserPrisma.branch.findUniqueOrThrow({ where: { id: branch.id }, select: { clinicId: true } })
+    await superuserPrisma.branch.delete({ where: { id: branch.id } })
+    await superuserPrisma.clinic.delete({ where: { id: clinicId } })
     await superuserPrisma.holdingCompany.deleteMany({ where: { name: "Inventory Test Holding" } })
     await superuserPrisma.$disconnect()
     await prisma.$disconnect()
@@ -235,7 +240,7 @@ describe("inventory", () => {
     const medicineAfter = await superuserPrisma.medicine.findUniqueOrThrow({ where: { id: medicine.id } })
     expect(medicineAfter.currentStock).toBe(-7) // 3 - 10, driven to the true (negative) figure
 
-    const log = await superuserPrisma.auditLog.findFirst({ where: { clinicId: clinic.id, action: "medicine.dispense_override", userId: doctorUser.id } })
+    const log = await superuserPrisma.auditLog.findFirst({ where: { branchId: branch.id, action: "medicine.dispense_override", userId: doctorUser.id } })
     expect(log).toBeTruthy()
   })
 
@@ -365,18 +370,20 @@ describe("inventory", () => {
     expect(panels.expired.map((m) => m.id)).toContain(expired.id)
   })
 
-  it("scopes the medicine ledger to the caller's own clinic", async () => {
-    const otherClinic = await superuserPrisma.clinic.create({
-      data: { name: "Other", slug: `other-inv-${Date.now()}`, address: "x", city: "x", phone: "0", timezone: "Asia/Manila", operatingHours: {} },
+  it("scopes the medicine ledger to the caller's own branch", async () => {
+    const otherClinic = await superuserPrisma.clinic.create({ data: { name: "Other" } })
+    const otherBranch = await superuserPrisma.branch.create({
+      data: { clinicId: otherClinic.id, name: "Other", slug: `other-inv-${Date.now()}`, address: "x", city: "x", phone: "0", timezone: "Asia/Manila", operatingHours: {} },
     })
     const otherMedicine = await superuserPrisma.medicine.create({
-      data: { clinicId: otherClinic.id, name: "Other Clinic Med", form: MedicineForm.TABLET, unit: MedicineUnit.PIECE, currentStock: 10, reorderLevel: 5, unitCost: 100, sellingPrice: 200 },
+      data: { branchId: otherBranch.id, name: "Other Branch Med", form: MedicineForm.TABLET, unit: MedicineUnit.PIECE, currentStock: 10, reorderLevel: 5, unitCost: 100, sellingPrice: 200 },
     })
 
     const result = await getMedicineWithLedger(clinicAdmin, otherMedicine.id)
     expect(result).toBeNull()
 
     await superuserPrisma.medicine.delete({ where: { id: otherMedicine.id } })
+    await superuserPrisma.branch.delete({ where: { id: otherBranch.id } })
     await superuserPrisma.clinic.delete({ where: { id: otherClinic.id } })
   })
 })

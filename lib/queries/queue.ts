@@ -1,44 +1,44 @@
 import type { Prisma, QueueEntry, QueueStatus } from "@prisma/client"
 import { toZonedTime, fromZonedTime } from "date-fns-tz"
 import { runWithRls } from "@/lib/db/rls"
-import { isHoldingAdmin, requireClinicId, type AbilitySubject } from "@/lib/permissions/ability"
+import { isHoldingAdmin, requireBranchId, type AbilitySubject } from "@/lib/permissions/ability"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import { toQueueEntryDTO, type QueueEntryDTO } from "@/lib/dto/queue-entry"
 import { compareQueueOrder } from "@/lib/utils/queue-order"
 import { sendNotification } from "@/lib/queries/notifications"
 
 /**
- * Allocates the next queue number for a clinic/day inside an existing
- * transaction. §7.1: "queue_number resets daily per clinic. Generate it
- * inside a transaction so two simultaneous bookings can't collide."
+ * Allocates the next queue number for a branch/day inside an existing
+ * transaction. §7.1: "queue_number resets daily per clinic" — now per
+ * branch, the physical location whose front desk actually calls numbers.
  *
  * A plain `max(queueNumber) + 1` read-then-write inside a transaction isn't
  * actually safe under Postgres's default READ COMMITTED isolation — two
  * concurrent transactions can both read the same max before either commits
  * and then both try to insert the same number, colliding against the
- * `@@unique([clinicId, queueDate, queueNumber])` constraint. A
- * transaction-scoped advisory lock keyed on clinic+day serializes number
+ * `@@unique([branchId, queueDate, queueNumber])` constraint. A
+ * transaction-scoped advisory lock keyed on branch+day serializes number
  * allocation for that key without taking a table-level lock or needing a
  * retry loop: the second transaction simply blocks here until the first
  * commits (releasing the lock automatically at commit/rollback).
  */
 export async function nextQueueNumber(
   tx: Prisma.TransactionClient,
-  clinicId: string,
+  branchId: string,
   queueDate: Date
 ): Promise<number> {
   const dayKey = queueDate.toISOString().slice(0, 10)
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${clinicId + dayKey}))`
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${branchId + dayKey}))`
 
   const last = await tx.queueEntry.aggregate({
-    where: { clinicId, queueDate },
+    where: { branchId, queueDate },
     _max: { queueNumber: true },
   })
   return (last._max.queueNumber ?? 0) + 1
 }
 
 /**
- * Midnight UTC representing "today" in the *clinic's own* calendar day
+ * Midnight UTC representing "today" in the *branch's own* calendar day
  * (stored as a plain `@db.Date`) — not the server's or host machine's.
  * Manila is UTC+8, so naively using the server's UTC calendar date would
  * be a whole day behind Manila's actual date for the 16:00–23:59 UTC
@@ -62,14 +62,14 @@ export function todayAsQueueDate(timezone: string): Date {
   return new Date(Date.UTC(zoned.getFullYear(), zoned.getMonth(), zoned.getDate()))
 }
 
-/** `queueDate` for "tomorrow" in the clinic's own calendar day — §7.1's same-day/next-day booking window. */
+/** `queueDate` for "tomorrow" in the branch's own calendar day — §7.1's same-day/next-day booking window. */
 export function tomorrowAsQueueDate(timezone: string): Date {
   const today = todayAsQueueDate(timezone)
   return new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 1))
 }
 
 /**
- * The real UTC instants bounding "today" in the clinic's own timezone —
+ * The real UTC instants bounding "today" in the branch's own timezone —
  * for filtering actual timestamps (e.g. `Payment.receivedAt`), which is
  * a different problem from `todayAsQueueDate`'s calendar-*label* (a
  * `@db.Date` column only ever stores Y-M-D, so a UTC-midnight stand-in for
@@ -97,9 +97,9 @@ export function todayInstantRange(timezone: string): { start: Date; end: Date } 
   return { start, end }
 }
 
-export async function clinicTimezone(tx: Prisma.TransactionClient, clinicId: string): Promise<string> {
-  const clinic = await tx.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { timezone: true } })
-  return clinic.timezone
+export async function branchTimezone(tx: Prisma.TransactionClient, branchId: string): Promise<string> {
+  const branch = await tx.branch.findUniqueOrThrow({ where: { id: branchId }, select: { timezone: true } })
+  return branch.timezone
 }
 
 /** §7.3: entries physically present and eligible to be called next. */
@@ -130,15 +130,15 @@ function toStaffQueueEntryDTO(
 /** Today's full queue for the staff board — every status, so the UI can group upcoming/active/done. */
 export async function listTodayQueue(user: AbilitySubject): Promise<StaffQueueEntryDTO[]> {
   if (isHoldingAdmin(user)) {
-    throw new Error("listTodayQueue requires a clinic-scoped user")
+    throw new Error("listTodayQueue requires a branch-scoped user")
   }
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
 
   return runWithRls(user, async (tx) => {
-    const timezone = await clinicTimezone(tx, clinicId)
+    const timezone = await branchTimezone(tx, branchId)
     const queueDate = todayAsQueueDate(timezone)
     const entries = await tx.queueEntry.findMany({
-      where: { clinicId, queueDate },
+      where: { branchId, queueDate },
       include: { patient: { select: { firstName: true, lastName: true, birthdate: true } }, doctor: { include: { user: { select: { name: true } } } } },
       orderBy: { queueNumber: "asc" },
     })
@@ -151,24 +151,24 @@ export async function listDoctorQueue(user: AbilitySubject): Promise<StaffQueueE
   if (user.role !== "DOCTOR") {
     throw new ForbiddenError("Only doctors have a doctor queue")
   }
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
 
   return runWithRls(user, async (tx) => {
     const doctor = await tx.doctor.findUnique({ where: { userId: user.id }, select: { id: true } })
     if (!doctor) return []
-    const timezone = await clinicTimezone(tx, clinicId)
+    const timezone = await branchTimezone(tx, branchId)
     const queueDate = todayAsQueueDate(timezone)
     const entries = await tx.queueEntry.findMany({
-      where: { clinicId, queueDate, doctorId: doctor.id, status: { in: ["WAITING", "CALLED", "IN_CONSULTATION"] } },
+      where: { branchId, queueDate, doctorId: doctor.id, status: { in: ["WAITING", "CALLED", "IN_CONSULTATION"] } },
       include: { patient: { select: { firstName: true, lastName: true, birthdate: true } }, doctor: { include: { user: { select: { name: true } } } } },
     })
     return entries.map(toStaffQueueEntryDTO).sort(compareQueueOrder)
   })
 }
 
-async function findClinicEntry(tx: Prisma.TransactionClient, clinicId: string, queueEntryId: string) {
-  const entry = await tx.queueEntry.findFirst({ where: { id: queueEntryId, clinicId } })
-  if (!entry) throw new ForbiddenError("Queue entry not found in your clinic")
+async function findBranchEntry(tx: Prisma.TransactionClient, branchId: string, queueEntryId: string) {
+  const entry = await tx.queueEntry.findFirst({ where: { id: queueEntryId, branchId } })
+  if (!entry) throw new ForbiddenError("Queue entry not found in your branch")
   return entry
 }
 
@@ -182,16 +182,16 @@ async function findClinicEntry(tx: Prisma.TransactionClient, clinicId: string, q
  * already sent this for the same queue entry, so re-running it after every
  * queue change doesn't re-notify the same patient each time.
  */
-async function notifyAlmostYourTurn(tx: Prisma.TransactionClient, clinicId: string, queueDate: Date): Promise<void> {
+async function notifyAlmostYourTurn(tx: Prisma.TransactionClient, branchId: string, queueDate: Date): Promise<void> {
   const active = await tx.queueEntry.findMany({
-    where: { clinicId, queueDate, status: { in: ACTIVE_STATUSES } },
+    where: { branchId, queueDate, status: { in: ACTIVE_STATUSES } },
     include: { patient: { select: { id: true, firstName: true, phone: true } } },
   })
   active.sort(compareQueueOrder)
   const targets = active.slice(1, 4)
   if (targets.length === 0) return
 
-  const clinic = await tx.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { name: true } })
+  const branch = await tx.branch.findUniqueOrThrow({ where: { id: branchId }, select: { name: true } })
   for (const entry of targets) {
     const alreadySent = await tx.notification.findFirst({
       where: { queueEntryId: entry.id, templateKey: "almost_your_turn" },
@@ -199,22 +199,22 @@ async function notifyAlmostYourTurn(tx: Prisma.TransactionClient, clinicId: stri
     })
     if (alreadySent) continue
     await sendNotification(tx, {
-      clinicId,
+      branchId,
       patientId: entry.patient.id,
       queueEntryId: entry.id,
       to: entry.patient.phone,
       channel: "SMS",
       templateKey: "almost_your_turn",
-      payload: { patientName: entry.patient.firstName, clinicName: clinic.name, queueNumber: entry.queueNumber },
+      payload: { patientName: entry.patient.firstName, clinicName: branch.name, queueNumber: entry.queueNumber },
     })
   }
 }
 
 /** A booked (online/Facebook) patient has physically arrived — §7.1's booked → checked_in transition. */
 export async function checkInBookedEntry(user: AbilitySubject, queueEntryId: string): Promise<QueueEntryDTO> {
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   return runWithRls(user, async (tx) => {
-    const entry = await findClinicEntry(tx, clinicId, queueEntryId)
+    const entry = await findBranchEntry(tx, branchId, queueEntryId)
     if (entry.status !== "BOOKED") {
       throw new Error(`Cannot check in a queue entry with status ${entry.status}`)
     }
@@ -223,7 +223,7 @@ export async function checkInBookedEntry(user: AbilitySubject, queueEntryId: str
       data: { status: "CHECKED_IN", checkedInAt: new Date() },
     })
     await tx.auditLog.create({
-      data: { clinicId, userId: user.id, action: "queue_entry.check_in", entityType: "QueueEntry", entityId: queueEntryId },
+      data: { branchId, userId: user.id, action: "queue_entry.check_in", entityType: "QueueEntry", entityId: queueEntryId },
     })
     return toQueueEntryDTO(updated)
   })
@@ -231,9 +231,9 @@ export async function checkInBookedEntry(user: AbilitySubject, queueEntryId: str
 
 /** Assigns (or reassigns) the doctor who'll see this patient; CHECKED_IN entries become WAITING once assigned. */
 export async function assignDoctor(user: AbilitySubject, queueEntryId: string, doctorId: string): Promise<QueueEntryDTO> {
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   return runWithRls(user, async (tx) => {
-    const entry = await findClinicEntry(tx, clinicId, queueEntryId)
+    const entry = await findBranchEntry(tx, branchId, queueEntryId)
     // Assignable any time before the consultation actually starts — a
     // patient can be called before staff has settled which doctor sees
     // them, so CALLED must stay assignable too. Only a CHECKED_IN entry's
@@ -243,8 +243,8 @@ export async function assignDoctor(user: AbilitySubject, queueEntryId: string, d
     if (!ACTIVE_STATUSES.includes(entry.status) && entry.status !== "CALLED") {
       throw new Error(`Cannot assign a doctor to a queue entry with status ${entry.status}`)
     }
-    const doctor = await tx.doctor.findFirst({ where: { id: doctorId, clinicId } })
-    if (!doctor) throw new ForbiddenError("Doctor not found in your clinic")
+    const doctor = await tx.doctor.findFirst({ where: { id: doctorId, branchId } })
+    if (!doctor) throw new ForbiddenError("Doctor not found in your branch")
 
     const updated = await tx.queueEntry.update({
       where: { id: queueEntryId },
@@ -252,7 +252,7 @@ export async function assignDoctor(user: AbilitySubject, queueEntryId: string, d
     })
     await tx.auditLog.create({
       data: {
-        clinicId,
+        branchId,
         userId: user.id,
         action: "queue_entry.assign_doctor",
         entityType: "QueueEntry",
@@ -272,15 +272,15 @@ export async function assignDoctor(user: AbilitySubject, queueEntryId: string, d
  * same patient. Returns null when there's nobody left to call.
  */
 export async function callNextEntry(user: AbilitySubject): Promise<StaffQueueEntryDTO | null> {
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   return runWithRls(user, async (tx) => {
-    const timezone = await clinicTimezone(tx, clinicId)
+    const timezone = await branchTimezone(tx, branchId)
     const queueDate = todayAsQueueDate(timezone)
     const dayKey = queueDate.toISOString().slice(0, 10)
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${clinicId + dayKey + ":call"}))`
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${branchId + dayKey + ":call"}))`
 
     const candidates = await tx.queueEntry.findMany({
-      where: { clinicId, queueDate, status: { in: ACTIVE_STATUSES } },
+      where: { branchId, queueDate, status: { in: ACTIVE_STATUSES } },
       include: { patient: { select: { firstName: true, lastName: true, birthdate: true } }, doctor: { include: { user: { select: { name: true } } } } },
     })
     if (candidates.length === 0) return null
@@ -293,22 +293,22 @@ export async function callNextEntry(user: AbilitySubject): Promise<StaffQueueEnt
       include: { patient: true, doctor: { include: { user: { select: { name: true } } } } },
     })
     await tx.auditLog.create({
-      data: { clinicId, userId: user.id, action: "queue_entry.call_next", entityType: "QueueEntry", entityId: updated.id },
+      data: { branchId, userId: user.id, action: "queue_entry.call_next", entityType: "QueueEntry", entityId: updated.id },
     })
 
     // §7.6 "Number called."
-    const clinic = await tx.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { name: true } })
+    const branch = await tx.branch.findUniqueOrThrow({ where: { id: branchId }, select: { name: true } })
     await sendNotification(tx, {
-      clinicId,
+      branchId,
       patientId: updated.patientId,
       queueEntryId: updated.id,
       to: updated.patient.phone,
       channel: "SMS",
       templateKey: "now_serving",
-      payload: { patientName: updated.patient.firstName, clinicName: clinic.name, queueNumber: updated.queueNumber },
+      payload: { patientName: updated.patient.firstName, clinicName: branch.name, queueNumber: updated.queueNumber },
     })
     // Calling someone moves everyone behind them one place closer.
-    await notifyAlmostYourTurn(tx, clinicId, queueDate)
+    await notifyAlmostYourTurn(tx, branchId, queueDate)
 
     return toStaffQueueEntryDTO(updated)
   })
@@ -316,15 +316,15 @@ export async function callNextEntry(user: AbilitySubject): Promise<StaffQueueEnt
 
 /** Re-announces an already-called patient (e.g. they didn't hear it the first time) without changing their place in line. */
 export async function recallEntry(user: AbilitySubject, queueEntryId: string): Promise<QueueEntryDTO> {
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   return runWithRls(user, async (tx) => {
-    const entry = await findClinicEntry(tx, clinicId, queueEntryId)
+    const entry = await findBranchEntry(tx, branchId, queueEntryId)
     if (entry.status !== "CALLED") {
       throw new Error(`Cannot recall a queue entry with status ${entry.status}`)
     }
     const updated = await tx.queueEntry.update({ where: { id: queueEntryId }, data: { calledAt: new Date() } })
     await tx.auditLog.create({
-      data: { clinicId, userId: user.id, action: "queue_entry.recall", entityType: "QueueEntry", entityId: queueEntryId },
+      data: { branchId, userId: user.id, action: "queue_entry.recall", entityType: "QueueEntry", entityId: queueEntryId },
     })
     return toQueueEntryDTO(updated)
   })
@@ -332,9 +332,9 @@ export async function recallEntry(user: AbilitySubject, queueEntryId: string): P
 
 /** Marks a called (or still-waiting) patient as a no-show. */
 export async function markNoShow(user: AbilitySubject, queueEntryId: string): Promise<QueueEntryDTO> {
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   return runWithRls(user, async (tx) => {
-    const entry = await findClinicEntry(tx, clinicId, queueEntryId)
+    const entry = await findBranchEntry(tx, branchId, queueEntryId)
     if (![...ACTIVE_STATUSES, "CALLED"].includes(entry.status)) {
       throw new Error(`Cannot mark a queue entry with status ${entry.status} as no-show`)
     }
@@ -344,21 +344,21 @@ export async function markNoShow(user: AbilitySubject, queueEntryId: string): Pr
       include: { patient: true },
     })
     await tx.auditLog.create({
-      data: { clinicId, userId: user.id, action: "queue_entry.no_show", entityType: "QueueEntry", entityId: queueEntryId },
+      data: { branchId, userId: user.id, action: "queue_entry.no_show", entityType: "QueueEntry", entityId: queueEntryId },
     })
 
-    const clinic = await tx.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { name: true, phone: true } })
+    const branch = await tx.branch.findUniqueOrThrow({ where: { id: branchId }, select: { name: true, phone: true } })
     await sendNotification(tx, {
-      clinicId,
+      branchId,
       patientId: updated.patientId,
       queueEntryId: updated.id,
       to: updated.patient.phone,
       channel: "SMS",
       templateKey: "no_show",
-      payload: { patientName: updated.patient.firstName, clinicName: clinic.name, clinicPhone: clinic.phone },
+      payload: { patientName: updated.patient.firstName, clinicName: branch.name, clinicPhone: branch.phone },
     })
     // A no-show frees up the position everyone behind them was counting.
-    await notifyAlmostYourTurn(tx, clinicId, entry.queueDate)
+    await notifyAlmostYourTurn(tx, branchId, entry.queueDate)
 
     return toQueueEntryDTO(updated)
   })
@@ -366,9 +366,9 @@ export async function markNoShow(user: AbilitySubject, queueEntryId: string): Pr
 
 /** §7.4: doctor opens the patient and begins the consultation — requires a doctor already assigned. */
 export async function startConsultationForQueueEntry(user: AbilitySubject, queueEntryId: string): Promise<QueueEntryDTO> {
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   return runWithRls(user, async (tx) => {
-    const entry = await findClinicEntry(tx, clinicId, queueEntryId)
+    const entry = await findBranchEntry(tx, branchId, queueEntryId)
     if (entry.status !== "CALLED") {
       throw new Error(`Cannot start a consultation for a queue entry with status ${entry.status}`)
     }
@@ -380,7 +380,7 @@ export async function startConsultationForQueueEntry(user: AbilitySubject, queue
       data: { status: "IN_CONSULTATION", startedAt: new Date() },
     })
     await tx.auditLog.create({
-      data: { clinicId, userId: user.id, action: "queue_entry.start_consultation", entityType: "QueueEntry", entityId: queueEntryId },
+      data: { branchId, userId: user.id, action: "queue_entry.start_consultation", entityType: "QueueEntry", entityId: queueEntryId },
     })
     return toQueueEntryDTO(updated)
   })
@@ -399,14 +399,14 @@ export async function moveQueueEntryOrder(
   queueEntryId: string,
   direction: "up" | "down"
 ): Promise<void> {
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   await runWithRls(user, async (tx) => {
-    const entry = await findClinicEntry(tx, clinicId, queueEntryId)
+    const entry = await findBranchEntry(tx, branchId, queueEntryId)
     if (!ACTIVE_STATUSES.includes(entry.status)) {
       throw new Error(`Cannot reorder a queue entry with status ${entry.status}`)
     }
     const tierMates = await tx.queueEntry.findMany({
-      where: { clinicId, queueDate: entry.queueDate, status: { in: ACTIVE_STATUSES }, priority: entry.priority },
+      where: { branchId, queueDate: entry.queueDate, status: { in: ACTIVE_STATUSES }, priority: entry.priority },
     })
     tierMates.sort(compareQueueOrder)
     const index = tierMates.findIndex((e) => e.id === entry.id)
@@ -418,7 +418,7 @@ export async function moveQueueEntryOrder(
     await tx.queueEntry.update({ where: { id: neighbor.id }, data: { checkedInAt: entry.checkedInAt } })
     await tx.auditLog.create({
       data: {
-        clinicId,
+        branchId,
         userId: user.id,
         action: "queue_entry.reorder",
         entityType: "QueueEntry",
@@ -426,6 +426,6 @@ export async function moveQueueEntryOrder(
         changes: { direction, swappedWith: neighbor.id },
       },
     })
-    await notifyAlmostYourTurn(tx, clinicId, entry.queueDate)
+    await notifyAlmostYourTurn(tx, branchId, entry.queueDate)
   })
 }

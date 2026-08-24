@@ -28,7 +28,7 @@ export default async function UsersPage() {
   const user: AbilitySubject = {
     id: session.user.id,
     role: session.user.role,
-    clinicId: session.user.clinicId,
+    branchId: session.user.branchId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const users = await listUsers(user)
@@ -53,7 +53,7 @@ export default async function UsersPage() {
               {u.isLockedOut && <span className="ml-2 text-xs text-destructive">Locked out</span>}
               <p className="truncate text-xs text-muted-foreground">
                 {u.email} · {ROLE_LABEL[u.role]}
-                {u.clinicName ? ` · ${u.clinicName}` : ""}
+                {u.branchName ? ` · ${u.branchName}` : ""}
               </p>
             </div>
             <UserRowActions userId={u.id} isActive={u.isActive} isLockedOut={u.isLockedOut} />

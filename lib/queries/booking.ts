@@ -1,36 +1,46 @@
 import { prisma } from "@/lib/db/prisma"
-import { runWithClinicScope } from "@/lib/db/rls"
+import { runWithBranchScope } from "@/lib/db/rls"
 import { toPatientDTO, type PatientDTO } from "@/lib/dto/patient"
 import { toQueueEntryDTO, type QueueEntryDTO } from "@/lib/dto/queue-entry"
 import { bookingIntakeSchema } from "@/lib/validation/patient"
 import { nextQueueNumber, todayAsQueueDate, tomorrowAsQueueDate } from "@/lib/queries/queue"
 import { generateAccessToken } from "@/lib/utils/token"
 import { sendNotification } from "@/lib/queries/notifications"
+import { publicBranchName } from "@/lib/queries/public-branch-name"
 
-export class ClinicNotFoundError extends Error {}
+export class BranchNotFoundError extends Error {}
 
 /**
- * §7.1 public booking. No authenticated user — `clinics` carries no RLS
- * (M1 decision: RLS covers patient/queue/money tables, not the directory
- * tables), so resolving the slug needs no special scoping, but every
- * Patient/QueueEntry write after that runs under `runWithClinicScope`
- * (§5: clinic_id derived from the resolved clinic, never a client-supplied
- * id — the slug only ever selects *which* clinic, the write itself is
- * still RLS-checked against that clinic).
+ * §7.1 public booking. No authenticated user — `branches` carries no RLS
+ * (same M1-era decision as `clinics` before it: RLS covers patient/queue/
+ * money tables, not the directory tables), so resolving the slug needs no
+ * special scoping, but every Patient/QueueEntry write after that runs
+ * under `runWithBranchScope` (§5: branch_id derived from the resolved
+ * branch, never a client-supplied id — the slug only ever selects *which*
+ * branch, the write itself is still RLS-checked against that branch).
+ *
+ * The `clinicName`/`clinicAddress` fields below are patient-facing copy,
+ * not code identifiers — a patient booking a visit calls the physical
+ * location "the clinic" regardless of the internal Clinic/Branch org
+ * chart, so this keeps that wording even though the data now comes from
+ * Branch. See DECISIONS.md.
  */
 export async function createPublicBooking(
-  clinicSlug: string,
+  branchSlug: string,
   input: unknown
 ): Promise<{ patient: PatientDTO; queueEntry: QueueEntryDTO; clinicName: string; accessToken: string }> {
-  const clinic = await prisma.clinic.findUnique({ where: { slug: clinicSlug, isActive: true } })
-  if (!clinic) throw new ClinicNotFoundError(`No active clinic at slug "${clinicSlug}"`)
+  const branch = await prisma.branch.findUnique({
+    where: { slug: branchSlug, isActive: true },
+    include: { clinic: { select: { name: true } } },
+  })
+  if (!branch) throw new BranchNotFoundError(`No active branch at slug "${branchSlug}"`)
 
   const parsed = bookingIntakeSchema.parse(input)
   const digits = parsed.phone.replace(/\D/g, "").slice(-10)
 
-  return runWithClinicScope(clinic.id, async (tx) => {
+  return runWithBranchScope(branch.id, async (tx) => {
     const queueDate =
-      parsed.preferredDate === "today" ? todayAsQueueDate(clinic.timezone) : tomorrowAsQueueDate(clinic.timezone)
+      parsed.preferredDate === "today" ? todayAsQueueDate(branch.timezone) : tomorrowAsQueueDate(branch.timezone)
 
     // §7.1: "match to an existing patient by phone + last name +
     // birthdate. If matched, attach to that record; if not, create a new
@@ -39,7 +49,7 @@ export async function createPublicBooking(
     // DB `contains`/`equals` would miss a stored number whose punctuation
     // doesn't line up with the caller's formatting.
     const candidates = await tx.patient.findMany({
-      where: { clinicId: clinic.id, deletedAt: null, lastName: { equals: parsed.lastName, mode: "insensitive" } },
+      where: { branchId: branch.id, deletedAt: null, lastName: { equals: parsed.lastName, mode: "insensitive" } },
     })
     const match = candidates.find(
       (p) =>
@@ -51,7 +61,7 @@ export async function createPublicBooking(
       ? match
       : await tx.patient.create({
           data: {
-            clinicId: clinic.id,
+            branchId: branch.id,
             firstName: parsed.firstName,
             lastName: parsed.lastName,
             middleName: parsed.middleName || null,
@@ -68,10 +78,10 @@ export async function createPublicBooking(
           },
         })
 
-    const queueNumber = await nextQueueNumber(tx, clinic.id, queueDate)
+    const queueNumber = await nextQueueNumber(tx, branch.id, queueDate)
     const queueEntry = await tx.queueEntry.create({
       data: {
-        clinicId: clinic.id,
+        branchId: branch.id,
         patientId: patient.id,
         queueNumber,
         queueDate,
@@ -85,12 +95,12 @@ export async function createPublicBooking(
 
     if (!match) {
       await tx.auditLog.create({
-        data: { clinicId: clinic.id, userId: null, action: "patient.create", entityType: "Patient", entityId: patient.id },
+        data: { branchId: branch.id, userId: null, action: "patient.create", entityType: "Patient", entityId: patient.id },
       })
     }
     await tx.auditLog.create({
       data: {
-        clinicId: clinic.id,
+        branchId: branch.id,
         userId: null,
         action: "queue_entry.create",
         entityType: "QueueEntry",
@@ -105,7 +115,7 @@ export async function createPublicBooking(
     // Facebook — Messenger can't be the sole channel for this).
     const statusUrl = `${process.env.NEXTAUTH_URL ?? "http://localhost:3000"}/q/${queueEntry.accessToken}`
     await sendNotification(tx, {
-      clinicId: clinic.id,
+      branchId: branch.id,
       patientId: patient.id,
       queueEntryId: queueEntry.id,
       to: patient.phone,
@@ -113,8 +123,8 @@ export async function createPublicBooking(
       templateKey: "booking_confirmed",
       payload: {
         patientName: patient.firstName,
-        clinicName: clinic.name,
-        clinicAddress: clinic.address,
+        clinicName: publicBranchName(branch),
+        clinicAddress: branch.address,
         queueNumber: queueEntry.queueNumber,
         statusUrl,
       },
@@ -123,7 +133,7 @@ export async function createPublicBooking(
     return {
       patient: toPatientDTO(patient),
       queueEntry: toQueueEntryDTO(queueEntry),
-      clinicName: clinic.name,
+      clinicName: publicBranchName(branch),
       // The one legitimate place this ever leaves the server: straight
       // back to the patient who just created this exact booking, so they
       // can reach their own status page (§7.1 step 5). QueueEntryDTO

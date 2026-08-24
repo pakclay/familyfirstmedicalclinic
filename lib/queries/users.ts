@@ -3,7 +3,7 @@ import { randomBytes } from "crypto"
 import type { Role, Prisma } from "@prisma/client"
 import { prisma } from "@/lib/db/prisma"
 import { runWithRls } from "@/lib/db/rls"
-import { isHoldingAdmin, requireClinicId, canManageRole, type AbilitySubject } from "@/lib/permissions/ability"
+import { isHoldingAdmin, requireBranchId, canManageRole, type AbilitySubject } from "@/lib/permissions/ability"
 import { toUserDTO, type UserDTO } from "@/lib/dto/user"
 import type { CreateUserInput, EditUserInput } from "@/lib/validation/user"
 
@@ -96,7 +96,7 @@ export async function changeOwnPassword(
     })
     await tx.auditLog.create({
       data: {
-        clinicId: user.clinicId,
+        branchId: user.branchId,
         userId: user.id,
         action: "user.password_changed",
         entityType: "User",
@@ -110,7 +110,7 @@ export async function changeOwnPassword(
 
 // ─────────────────────────────────────────────────────────────────────────
 // User management (holding admin: any account · clinic admin: their own
-// clinic's front desk/doctor accounts only — §4's role table)
+// branch's front desk/doctor accounts only — §4's role table)
 // ─────────────────────────────────────────────────────────────────────────
 
 /**
@@ -134,17 +134,17 @@ export function generateTempPassword(): string {
   return chars.join("")
 }
 
-function canManageTarget(actor: AbilitySubject, target: { role: Role; clinicId: string | null }): boolean {
+function canManageTarget(actor: AbilitySubject, target: { role: Role; branchId: string | null }): boolean {
   if (isHoldingAdmin(actor)) return true
-  return target.clinicId === actor.clinicId && (target.role === "FRONT_DESK" || target.role === "DOCTOR")
+  return target.branchId === actor.branchId && (target.role === "FRONT_DESK" || target.role === "DOCTOR")
 }
 
-const userInclude = { clinic: { select: { name: true } }, doctor: true } as const
+const userInclude = { branch: { select: { name: true } }, doctor: true } as const
 
 export async function listUsers(actor: AbilitySubject): Promise<UserDTO[]> {
   const where: Prisma.UserWhereInput = isHoldingAdmin(actor)
     ? {}
-    : { clinicId: requireClinicId(actor), role: { in: ["FRONT_DESK", "DOCTOR"] } }
+    : { branchId: requireBranchId(actor), role: { in: ["FRONT_DESK", "DOCTOR"] } }
   const rows = await prisma.user.findMany({ where, include: userInclude, orderBy: [{ role: "asc" }, { name: "asc" }] })
   return rows.map(toUserDTO)
 }
@@ -163,18 +163,18 @@ export async function createUser(actor: AbilitySubject, input: CreateUserInput):
     return { ok: false, error: "You can't create an account with that role." }
   }
 
-  let clinicId: string | null
+  let branchId: string | null
   if (input.role === "HOLDING_ADMIN") {
-    clinicId = null
+    branchId = null
   } else if (isHoldingAdmin(actor)) {
-    if (!input.clinicId) return { ok: false, error: "Select a clinic." }
-    clinicId = input.clinicId
+    if (!input.branchId) return { ok: false, error: "Select a branch." }
+    branchId = input.branchId
   } else {
-    // Clinic admin: ignore any clinicId the form sent — they can only ever
-    // create within their own clinic, and trusting a client-supplied value
+    // Clinic admin: ignore any branchId the form sent — they can only ever
+    // create within their own branch, and trusting a client-supplied value
     // here would be exactly the kind of hole §5's "never from a
     // client-supplied parameter" rule exists to close.
-    clinicId = requireClinicId(actor)
+    branchId = requireBranchId(actor)
   }
 
   const email = input.email.trim().toLowerCase()
@@ -189,7 +189,7 @@ export async function createUser(actor: AbilitySubject, input: CreateUserInput):
   const createdId = await runWithRls(actor, async (tx) => {
     const user = await tx.user.create({
       data: {
-        clinicId,
+        branchId,
         holdingCompanyId: input.role === "HOLDING_ADMIN" ? actor.holdingCompanyId : null,
         name: input.name.trim(),
         email,
@@ -203,7 +203,7 @@ export async function createUser(actor: AbilitySubject, input: CreateUserInput):
       await tx.doctor.create({
         data: {
           userId: user.id,
-          clinicId: clinicId!,
+          branchId: branchId!,
           licenseNumber: input.licenseNumber!.trim(),
           specialization: input.specialization?.trim() || "General Practitioner",
           consultationFee: Math.round(Number(input.consultationFeePesos) * 100),
@@ -212,12 +212,12 @@ export async function createUser(actor: AbilitySubject, input: CreateUserInput):
     }
     await tx.auditLog.create({
       data: {
-        clinicId,
+        branchId,
         userId: actor.id,
         action: "user.created",
         entityType: "User",
         entityId: user.id,
-        changes: { role: input.role, clinicId },
+        changes: { role: input.role, branchId },
       },
     })
     return user.id
@@ -248,7 +248,7 @@ export async function updateUser(actor: AbilitySubject, id: string, input: EditU
       })
     }
     await tx.auditLog.create({
-      data: { clinicId: target.clinicId, userId: actor.id, action: "user.updated", entityType: "User", entityId: id },
+      data: { branchId: target.branchId, userId: actor.id, action: "user.updated", entityType: "User", entityId: id },
     })
   })
   return { ok: true }
@@ -269,7 +269,7 @@ export async function setUserActive(actor: AbilitySubject, id: string, isActive:
     await tx.user.update({ where: { id }, data: { isActive } })
     await tx.auditLog.create({
       data: {
-        clinicId: target.clinicId,
+        branchId: target.branchId,
         userId: actor.id,
         action: isActive ? "user.reactivated" : "user.deactivated",
         entityType: "User",
@@ -288,7 +288,7 @@ export async function forcePasswordReset(actor: AbilitySubject, id: string): Pro
     await tx.user.update({ where: { id }, data: { mustChangePassword: true } })
     await tx.auditLog.create({
       data: {
-        clinicId: target.clinicId,
+        branchId: target.branchId,
         userId: actor.id,
         action: "user.password_reset_forced",
         entityType: "User",
@@ -306,7 +306,7 @@ export async function unlockAccount(actor: AbilitySubject, id: string): Promise<
   await runWithRls(actor, async (tx) => {
     await tx.user.update({ where: { id }, data: { failedLoginAttempts: 0, lockedUntil: null } })
     await tx.auditLog.create({
-      data: { clinicId: target.clinicId, userId: actor.id, action: "user.unlocked", entityType: "User", entityId: id },
+      data: { branchId: target.branchId, userId: actor.id, action: "user.unlocked", entityType: "User", entityId: id },
     })
   })
   return { ok: true }

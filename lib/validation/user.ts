@@ -5,10 +5,10 @@ const baseUserFields = {
   email: z.string().trim().min(1, "Email is required").email("Enter a valid email"),
   phone: z.string().trim().optional(),
   role: z.enum(["FRONT_DESK", "DOCTOR", "CLINIC_ADMIN", "HOLDING_ADMIN"]),
-  // Empty string for a clinic admin creating within their own clinic — the
+  // Empty string for a clinic admin creating within their own branch — the
   // query layer fills that in; a holding admin must pick one explicitly
-  // unless the role is HOLDING_ADMIN, which has no clinic at all.
-  clinicId: z.string().optional(),
+  // unless the role is HOLDING_ADMIN, which has no branch at all.
+  branchId: z.string().optional(),
 }
 
 /**

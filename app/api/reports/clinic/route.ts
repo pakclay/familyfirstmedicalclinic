@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
-import { getClinicReport } from "@/lib/queries/reports/clinic"
+import { getBranchReport } from "@/lib/queries/reports/clinic"
 import { toCsv } from "@/lib/utils/csv"
 import type { AbilitySubject } from "@/lib/permissions/ability"
 
@@ -12,14 +12,14 @@ export async function GET(req: NextRequest) {
   const user: AbilitySubject = {
     id: session.user.id,
     role: session.user.role,
-    clinicId: session.user.clinicId,
+    branchId: session.user.branchId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const params = Object.fromEntries(req.nextUrl.searchParams)
-  const report = await getClinicReport(user, params)
+  const report = await getBranchReport(user, params)
 
   const rows = [
-    { metric: "Clinic", value: report.clinicName },
+    { metric: "Branch", value: report.branchName },
     { metric: "Date range", value: `${report.startLabel} to ${report.endLabel}` },
     { metric: "Visits", value: report.visitCount },
     { metric: "New patients", value: report.newPatientCount },

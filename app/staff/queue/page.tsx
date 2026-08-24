@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import { listTodayQueue } from "@/lib/queries/queue"
-import { listClinicDoctors } from "@/lib/queries/doctors"
+import { listBranchDoctors } from "@/lib/queries/doctors"
 import type { AbilitySubject } from "@/lib/permissions/ability"
 import { QueueBoard } from "./queue-board"
 
@@ -22,10 +22,10 @@ export default async function StaffQueuePage() {
   const user: AbilitySubject = {
     id: session.user.id,
     role: session.user.role,
-    clinicId: session.user.clinicId,
+    branchId: session.user.branchId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
-  const [entries, doctors] = await Promise.all([listTodayQueue(user), listClinicDoctors(user)])
+  const [entries, doctors] = await Promise.all([listTodayQueue(user), listBranchDoctors(user)])
 
   return <QueueBoard initialEntries={entries} doctors={doctors} />
 }

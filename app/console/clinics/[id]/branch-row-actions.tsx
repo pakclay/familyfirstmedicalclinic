@@ -2,9 +2,17 @@
 
 import { useState, useTransition } from "react"
 import { Button } from "@/components/ui/button"
-import { setClinicActiveAction } from "./actions"
+import { setBranchActiveAction } from "../actions"
 
-export function ClinicRowActions({ clinicId, isActive }: { clinicId: string; isActive: boolean }) {
+export function BranchRowActions({
+  clinicId,
+  branchId,
+  isActive,
+}: {
+  clinicId: string
+  branchId: string
+  isActive: boolean
+}) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
@@ -24,7 +32,7 @@ export function ClinicRowActions({ clinicId, isActive }: { clinicId: string; isA
         variant="outline"
         size="sm"
         disabled={pending}
-        onClick={() => run(() => setClinicActiveAction(clinicId, !isActive))}
+        onClick={() => run(() => setBranchActiveAction(clinicId, branchId, !isActive))}
       >
         {isActive ? "Deactivate" : "Reactivate"}
       </Button>

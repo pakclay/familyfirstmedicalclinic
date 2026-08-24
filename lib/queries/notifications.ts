@@ -1,10 +1,10 @@
 import type { Prisma, NotificationChannel as ChannelEnum } from "@prisma/client"
 import { runWithRls } from "@/lib/db/rls"
-import { requireClinicId, type AbilitySubject } from "@/lib/permissions/ability"
+import { requireBranchId, type AbilitySubject } from "@/lib/permissions/ability"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import { getNotificationChannel } from "@/lib/notifications/channel"
 import { renderTemplate, type TemplateKey, type TemplatePayloads } from "@/lib/notifications/templates"
-import { clinicTimezone, todayAsQueueDate } from "@/lib/queries/queue"
+import { branchTimezone, todayAsQueueDate } from "@/lib/queries/queue"
 
 /**
  * Renders the template, sends through whichever channel driver
@@ -17,7 +17,7 @@ import { clinicTimezone, todayAsQueueDate } from "@/lib/queries/queue"
 export async function sendNotification<K extends TemplateKey>(
   tx: Prisma.TransactionClient,
   params: {
-    clinicId: string
+    branchId: string
     patientId: string
     queueEntryId?: string
     to: string
@@ -38,7 +38,7 @@ export async function sendNotification<K extends TemplateKey>(
 
   await tx.notification.create({
     data: {
-      clinicId: params.clinicId,
+      branchId: params.branchId,
       patientId: params.patientId,
       queueEntryId: params.queueEntryId ?? null,
       channel: params.channel,
@@ -69,10 +69,10 @@ export type NotificationLogEntry = {
 
 /** M5's "notification log viewer" — every send attempt, mocked or otherwise, newest first. */
 export async function listNotifications(user: AbilitySubject, opts: { limit?: number } = {}): Promise<NotificationLogEntry[]> {
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   return runWithRls(user, async (tx) => {
     const notifications = await tx.notification.findMany({
-      where: { clinicId },
+      where: { branchId },
       include: { patient: { select: { firstName: true, lastName: true } } },
       orderBy: { createdAt: "desc" },
       take: opts.limit ?? 50,
@@ -102,21 +102,21 @@ export type FollowUpDue = {
 
 /** §9 Staff screen "follow-up list" — consultations with a due-or-overdue follow-up date. */
 export async function listDueFollowUps(user: AbilitySubject): Promise<FollowUpDue[]> {
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   return runWithRls(user, async (tx) => {
     // followUpDate is a `@db.Date` column, so "today" must be built the
     // same UTC-midnight-as-calendar-label way todayAsQueueDate builds
     // queueDate — not `new Date(new Date().toDateString())`, which
     // reinterprets the local calendar date as a real local-midnight
     // instant. Those two "midnights" only coincide when the server's own
-    // timezone happens to match the clinic's, and even then are 0-23h
+    // timezone happens to match the branch's, and even then are 0-23h
     // apart depending on the server's UTC offset — so a same-day
     // follow-up could silently fail to show as due for hours after local
     // midnight. Same bug class as M4's payment instant-range fix.
-    const timezone = await clinicTimezone(tx, clinicId)
+    const timezone = await branchTimezone(tx, branchId)
     const today = todayAsQueueDate(timezone)
     const consultations = await tx.consultation.findMany({
-      where: { clinicId, deletedAt: null, followUpDate: { not: null, lte: today } },
+      where: { branchId, deletedAt: null, followUpDate: { not: null, lte: today } },
       include: {
         patient: { select: { firstName: true, lastName: true } },
         doctor: { include: { user: { select: { name: true } } } },
@@ -127,7 +127,7 @@ export async function listDueFollowUps(user: AbilitySubject): Promise<FollowUpDu
     const consultationIds = consultations.map((c) => c.id)
     const sentReminders = consultationIds.length
       ? await tx.notification.findMany({
-          where: { clinicId, templateKey: "follow_up_due", queueEntryId: { in: consultations.map((c) => c.queueEntryId) } },
+          where: { branchId, templateKey: "follow_up_due", queueEntryId: { in: consultations.map((c) => c.queueEntryId) } },
           select: { queueEntryId: true },
         })
       : []
@@ -147,22 +147,22 @@ export async function listDueFollowUps(user: AbilitySubject): Promise<FollowUpDu
 
 /** One-tap send from the follow-up list — can be sent again even if already sent once (a patient may need a nudge). */
 export async function sendFollowUpReminder(user: AbilitySubject, consultationId: string): Promise<void> {
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   await runWithRls(user, async (tx) => {
     const consultation = await tx.consultation.findFirst({
-      where: { id: consultationId, clinicId, deletedAt: null },
+      where: { id: consultationId, branchId, deletedAt: null },
       include: {
         patient: true,
         doctor: { include: { user: { select: { name: true } } } },
-        clinic: { select: { name: true } },
+        branch: { select: { name: true } },
       },
     })
     if (!consultation || !consultation.followUpDate) {
-      throw new ForbiddenError("Consultation not found in your clinic, or has no follow-up date")
+      throw new ForbiddenError("Consultation not found in your branch, or has no follow-up date")
     }
 
     await sendNotification(tx, {
-      clinicId,
+      branchId,
       patientId: consultation.patientId,
       queueEntryId: consultation.queueEntryId,
       to: consultation.patient.phone,
@@ -170,13 +170,13 @@ export async function sendFollowUpReminder(user: AbilitySubject, consultationId:
       templateKey: "follow_up_due",
       payload: {
         patientName: consultation.patient.firstName,
-        clinicName: consultation.clinic.name,
+        clinicName: consultation.branch.name,
         doctorName: consultation.doctor.user.name,
         followUpDate: consultation.followUpDate.toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric" }),
       },
     })
     await tx.auditLog.create({
-      data: { clinicId, userId: user.id, action: "notification.follow_up_reminder", entityType: "Consultation", entityId: consultationId },
+      data: { branchId, userId: user.id, action: "notification.follow_up_reminder", entityType: "Consultation", entityId: consultationId },
     })
   })
 }

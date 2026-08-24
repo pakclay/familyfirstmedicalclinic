@@ -4,7 +4,6 @@ import { auth } from "@/auth"
 import { listClinics } from "@/lib/queries/clinics"
 import type { AbilitySubject } from "@/lib/permissions/ability"
 import { Button } from "@/components/ui/button"
-import { ClinicRowActions } from "./clinic-row-actions"
 
 export default async function ClinicsPage() {
   const session = await auth()
@@ -24,7 +23,7 @@ export default async function ClinicsPage() {
   const user: AbilitySubject = {
     id: session.user.id,
     role: session.user.role,
-    clinicId: session.user.clinicId,
+    branchId: session.user.branchId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const clinics = await listClinics(user)
@@ -37,20 +36,17 @@ export default async function ClinicsPage() {
           <Link href="/console/clinics/new">Add clinic</Link>
         </Button>
       </div>
+      <p className="mt-1 text-sm text-muted-foreground">
+        A clinic is the organization; each clinic can have multiple branches, the physical locations patients book
+        into. Open a clinic to add or manage its branches.
+      </p>
 
       <ul className="mt-4 divide-y divide-border rounded-md border border-border">
         {clinics.map((c) => (
-          <li key={c.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
-              <Link href={`/console/clinics/${c.id}`} className="font-medium hover:underline">
-                {c.name}
-              </Link>
-              {!c.isActive && <span className="ml-2 text-xs text-destructive">Inactive</span>}
-              <p className="truncate text-xs text-muted-foreground">
-                /{c.slug} · {c.city} · {c.phone}
-              </p>
-            </div>
-            <ClinicRowActions clinicId={c.id} isActive={c.isActive} />
+          <li key={c.id} className="flex items-center justify-between px-4 py-3">
+            <Link href={`/console/clinics/${c.id}`} className="font-medium hover:underline">
+              {c.name}
+            </Link>
           </li>
         ))}
         {clinics.length === 0 && (

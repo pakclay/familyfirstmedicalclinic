@@ -1,26 +1,27 @@
 import { runWithRls } from "@/lib/db/rls"
-import { isHoldingAdmin, requireClinicId, type AbilitySubject } from "@/lib/permissions/ability"
+import { isHoldingAdmin, requireBranchId, type AbilitySubject } from "@/lib/permissions/ability"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import { toPatientDTO, type PatientDTO } from "@/lib/dto/patient"
 import { toQueueEntryDTO, type QueueEntryDTO } from "@/lib/dto/queue-entry"
 import { patientIntakeSchema } from "@/lib/validation/patient"
-import { nextQueueNumber, todayAsQueueDate, clinicTimezone } from "@/lib/queries/queue"
+import { nextQueueNumber, todayAsQueueDate, branchTimezone } from "@/lib/queries/queue"
 import { generateAccessToken } from "@/lib/utils/token"
 
 /**
- * Fetches one patient, scoped to the acting user's clinic. Returns:
- *  - the patient, if they belong to the user's clinic (or the user is a
- *    holding admin, who can see any clinic)
+ * Fetches one patient, scoped to the acting user's branch. Returns:
+ *  - the patient, if they belong to the user's branch (or the user is a
+ *    holding admin, who can see any branch)
  *  - null, if no patient with that id exists at all
- *  - throws ForbiddenError, if the patient exists in a *different* clinic
+ *  - throws ForbiddenError, if the patient exists in a *different* branch
  *
  * The last case is §12/M1's explicit bar: a direct-URL cross-clinic read
  * must 403, not silently 404 — so a broken scoping check is impossible to
- * miss. Postgres RLS (enable_rls_backstop migration) independently blocks
- * the underlying row from this connection regardless of this check, which
- * is why distinguishing "forbidden" from "genuinely missing" needs a
- * second, deliberately widened read (see inline comment below) rather than
- * just inspecting the first query's result.
+ * miss. Postgres RLS (enable_rls_backstop/branch_rewrite_rls_policies
+ * migrations) independently blocks the underlying row from this
+ * connection regardless of this check, which is why distinguishing
+ * "forbidden" from "genuinely missing" needs a second, deliberately
+ * widened read (see inline comment below) rather than just inspecting the
+ * first query's result.
  */
 export async function getPatientById(
   user: AbilitySubject,
@@ -36,31 +37,31 @@ export async function getPatientById(
     const patient = await tx.patient.findFirst({
       where: isHoldingAdmin(user)
         ? { id: patientId, deletedAt: null }
-        : { id: patientId, clinicId: user.clinicId!, deletedAt: null },
+        : { id: patientId, branchId: user.branchId!, deletedAt: null },
     })
     if (patient) return { kind: "found" as const, patient }
     if (isHoldingAdmin(user)) return { kind: "not_found" as const }
 
-    // Not visible under the user's own clinic scope. Widen RLS visibility
+    // Not visible under the user's own branch scope. Widen RLS visibility
     // for this one lookup only, to tell "doesn't exist anywhere" apart from
-    // "exists in a different clinic" — the same targeted, transaction-local
+    // "exists in a different branch" — the same targeted, transaction-local
     // re-presentation pattern used for the completion write in the prior
     // build's scheduling layer. Never used to serve data back to the user,
-    // only to log and 403 a genuine cross-clinic attempt per §10.
+    // only to log and 403 a genuine cross-branch attempt per §10.
     await tx.$executeRaw`SELECT set_config('app.role', 'HOLDING_ADMIN', true)`
     const existsElsewhere = await tx.patient.findFirst({
       where: { id: patientId, deletedAt: null },
-      select: { clinicId: true },
+      select: { branchId: true },
     })
     if (!existsElsewhere) return { kind: "not_found" as const }
-    return { kind: "denied" as const, attemptedClinicId: existsElsewhere.clinicId }
+    return { kind: "denied" as const, attemptedBranchId: existsElsewhere.branchId }
   })
 
   if (result.kind === "found") {
     await runWithRls(user, (tx) =>
       tx.auditLog.create({
         data: {
-          clinicId: result.patient.clinicId,
+          branchId: result.patient.branchId,
           userId: user.id,
           action: "patient.read",
           entityType: "Patient",
@@ -76,32 +77,32 @@ export async function getPatientById(
   await runWithRls(user, (tx) =>
     tx.auditLog.create({
       data: {
-        clinicId: user.clinicId,
+        branchId: user.branchId,
         userId: user.id,
         action: "patient.read.denied",
         entityType: "Patient",
         entityId: patientId,
-        changes: { attemptedClinicId: result.attemptedClinicId },
+        changes: { attemptedBranchId: result.attemptedBranchId },
       },
     })
   )
-  throw new ForbiddenError("Cannot access a patient outside your clinic")
+  throw new ForbiddenError("Cannot access a patient outside your branch")
 }
 
-/** Lists patients in the acting user's own clinic (holding admins pass an explicit clinicId). */
+/** Lists patients in the acting user's own branch (holding admins pass an explicit branchId). */
 export async function listPatients(
   user: AbilitySubject,
-  opts: { clinicId?: string; search?: string } = {}
+  opts: { branchId?: string; search?: string } = {}
 ): Promise<PatientDTO[]> {
-  const clinicId = isHoldingAdmin(user) ? opts.clinicId : user.clinicId!
-  if (isHoldingAdmin(user) && !clinicId) {
-    throw new Error("listPatients requires an explicit clinicId for a holding admin")
+  const branchId = isHoldingAdmin(user) ? opts.branchId : user.branchId!
+  if (isHoldingAdmin(user) && !branchId) {
+    throw new Error("listPatients requires an explicit branchId for a holding admin")
   }
 
   return runWithRls(user, async (tx) => {
     const patients = await tx.patient.findMany({
       where: {
-        clinicId: clinicId!,
+        branchId: branchId!,
         deletedAt: null,
         ...(opts.search
           ? {
@@ -130,21 +131,21 @@ export async function listPatients(
  * "+63 917 555 0001" has a space inside almost any fixed-width digit
  * window, so a `contains` filter built from *normalized* digits routinely
  * misses rows whose *raw* text just happens to have punctuation in that
- * span. Filtering in JS after fetching the clinic's patients avoids that
- * false-negative class entirely; an MVP clinic's own patient roster (§13:
+ * span. Filtering in JS after fetching the branch's patients avoids that
+ * false-negative class entirely; an MVP branch's own patient roster (§13:
  * dozens to a few hundred) is small enough that this is a real query, not
  * a performance problem masquerading as a design choice.
  */
 export async function searchPatientsByPhone(user: AbilitySubject, phone: string): Promise<PatientDTO[]> {
   if (isHoldingAdmin(user)) {
-    throw new Error("searchPatientsByPhone requires a clinic-scoped user")
+    throw new Error("searchPatientsByPhone requires a branch-scoped user")
   }
   const digits = phone.replace(/\D/g, "").slice(-10)
   if (digits.length < 7) return []
 
   return runWithRls(user, async (tx) => {
     const patients = await tx.patient.findMany({
-      where: { clinicId: user.clinicId!, deletedAt: null },
+      where: { branchId: user.branchId!, deletedAt: null },
       orderBy: { lastName: "asc" },
     })
     return patients
@@ -168,18 +169,18 @@ export async function registerWalkIn(
   input: unknown
 ): Promise<{ patient: PatientDTO; queueEntry: QueueEntryDTO }> {
   if (isHoldingAdmin(user)) {
-    throw new Error("Holding admins don't register walk-ins directly — pick a clinic first")
+    throw new Error("Holding admins don't register walk-ins directly — pick a branch first")
   }
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   const parsed = patientIntakeSchema.parse(input)
 
   return runWithRls(user, async (tx) => {
-    const timezone = await clinicTimezone(tx, clinicId)
+    const timezone = await branchTimezone(tx, branchId)
     const queueDate = todayAsQueueDate(timezone)
 
     const patient = await tx.patient.create({
       data: {
-        clinicId,
+        branchId,
         firstName: parsed.firstName,
         lastName: parsed.lastName,
         middleName: parsed.middleName || null,
@@ -197,10 +198,10 @@ export async function registerWalkIn(
       },
     })
 
-    const queueNumber = await nextQueueNumber(tx, clinicId, queueDate)
+    const queueNumber = await nextQueueNumber(tx, branchId, queueDate)
     const queueEntry = await tx.queueEntry.create({
       data: {
-        clinicId,
+        branchId,
         patientId: patient.id,
         queueNumber,
         queueDate,
@@ -214,11 +215,11 @@ export async function registerWalkIn(
     })
 
     await tx.auditLog.create({
-      data: { clinicId, userId: user.id, action: "patient.create", entityType: "Patient", entityId: patient.id },
+      data: { branchId, userId: user.id, action: "patient.create", entityType: "Patient", entityId: patient.id },
     })
     await tx.auditLog.create({
       data: {
-        clinicId,
+        branchId,
         userId: user.id,
         action: "queue_entry.create",
         entityType: "QueueEntry",
@@ -238,23 +239,23 @@ export async function checkInExistingPatient(
   input: { reasonForVisit: string; priority: boolean }
 ): Promise<QueueEntryDTO> {
   if (isHoldingAdmin(user)) {
-    throw new Error("Holding admins don't check in walk-ins directly — pick a clinic first")
+    throw new Error("Holding admins don't check in walk-ins directly — pick a branch first")
   }
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
 
   return runWithRls(user, async (tx) => {
-    const patient = await tx.patient.findFirst({ where: { id: patientId, clinicId, deletedAt: null } })
+    const patient = await tx.patient.findFirst({ where: { id: patientId, branchId, deletedAt: null } })
     if (!patient) {
-      throw new ForbiddenError("Patient not found in your clinic")
+      throw new ForbiddenError("Patient not found in your branch")
     }
 
-    const timezone = await clinicTimezone(tx, clinicId)
+    const timezone = await branchTimezone(tx, branchId)
     const queueDate = todayAsQueueDate(timezone)
-    const queueNumber = await nextQueueNumber(tx, clinicId, queueDate)
+    const queueNumber = await nextQueueNumber(tx, branchId, queueDate)
 
     const queueEntry = await tx.queueEntry.create({
       data: {
-        clinicId,
+        branchId,
         patientId,
         queueNumber,
         queueDate,
@@ -269,7 +270,7 @@ export async function checkInExistingPatient(
 
     await tx.auditLog.create({
       data: {
-        clinicId,
+        branchId,
         userId: user.id,
         action: "queue_entry.create",
         entityType: "QueueEntry",
@@ -286,7 +287,7 @@ export async function checkInExistingPatient(
 export async function listPatientVisits(user: AbilitySubject, patientId: string): Promise<QueueEntryDTO[]> {
   return runWithRls(user, async (tx) => {
     const entries = await tx.queueEntry.findMany({
-      where: isHoldingAdmin(user) ? { patientId } : { patientId, clinicId: user.clinicId! },
+      where: isHoldingAdmin(user) ? { patientId } : { patientId, branchId: user.branchId! },
       orderBy: [{ queueDate: "desc" }, { queueNumber: "desc" }],
       take: 25,
     })

@@ -15,7 +15,7 @@ import type { AbilitySubject } from "@/lib/permissions/ability"
  * one-tap send, since both reuse the same `sendNotification` core.
  */
 describe("notifications", () => {
-  let clinic: { id: string; slug: string; timezone: string; name: string }
+  let branch: { id: string; slug: string; timezone: string; name: string }
   let frontDesk: AbilitySubject
   let doctorUser: AbilitySubject
   let doctorId: string
@@ -23,7 +23,7 @@ describe("notifications", () => {
   async function createPatient(overrides: { firstName?: string; lastName?: string; phone?: string } = {}) {
     return superuserPrisma.patient.create({
       data: {
-        clinicId: clinic.id,
+        branchId: branch.id,
         firstName: overrides.firstName ?? "Test",
         lastName: overrides.lastName ?? `Patient${Math.random().toString(36).slice(2, 8)}`,
         birthdate: new Date("1990-01-01"),
@@ -41,10 +41,10 @@ describe("notifications", () => {
     entryCounter += 1
     return superuserPrisma.queueEntry.create({
       data: {
-        clinicId: clinic.id,
+        branchId: branch.id,
         patientId,
         queueNumber: 2000 + entryCounter,
-        queueDate: todayAsQueueDate(clinic.timezone),
+        queueDate: todayAsQueueDate(branch.timezone),
         status: "CHECKED_IN",
         source: "WALK_IN",
         checkedInAt: opts.checkedInAt ?? new Date(),
@@ -56,9 +56,12 @@ describe("notifications", () => {
   beforeAll(async () => {
     const holding = await superuserPrisma.holdingCompany.create({ data: { name: "Notification Test Holding" } })
     const clinicRow = await superuserPrisma.clinic.create({
+      data: { holdingCompanyId: holding.id, name: "Notification Test Clinic" },
+    })
+    const branchRow = await superuserPrisma.branch.create({
       data: {
-        holdingCompanyId: holding.id,
-        name: "Notification Test Clinic",
+        clinicId: clinicRow.id,
+        name: "Notification Test Branch",
         slug: `notif-test-${Date.now()}`,
         address: "1 Test St",
         city: "Test City",
@@ -67,43 +70,45 @@ describe("notifications", () => {
         operatingHours: {},
       },
     })
-    clinic = { id: clinicRow.id, slug: clinicRow.slug, timezone: clinicRow.timezone, name: clinicRow.name }
+    branch = { id: branchRow.id, slug: branchRow.slug, timezone: branchRow.timezone, name: branchRow.name }
 
     const fdUser = await superuserPrisma.user.create({
-      data: { clinicId: clinic.id, name: "Front Desk", email: `fd-notif-${Date.now()}@test.local`, passwordHash: "x", role: Role.FRONT_DESK },
+      data: { branchId: branch.id, name: "Front Desk", email: `fd-notif-${Date.now()}@test.local`, passwordHash: "x", role: Role.FRONT_DESK },
     })
-    frontDesk = { id: fdUser.id, role: Role.FRONT_DESK, clinicId: clinic.id, holdingCompanyId: null }
+    frontDesk = { id: fdUser.id, role: Role.FRONT_DESK, branchId: branch.id, holdingCompanyId: null }
 
     const docUser = await superuserPrisma.user.create({
-      data: { clinicId: clinic.id, name: "Dr. Notify", email: `dr-notif-${Date.now()}@test.local`, passwordHash: "x", role: Role.DOCTOR },
+      data: { branchId: branch.id, name: "Dr. Notify", email: `dr-notif-${Date.now()}@test.local`, passwordHash: "x", role: Role.DOCTOR },
     })
     const doctor = await superuserPrisma.doctor.create({
-      data: { userId: docUser.id, clinicId: clinic.id, licenseNumber: "N1", consultationFee: 50000 },
+      data: { userId: docUser.id, branchId: branch.id, licenseNumber: "N1", consultationFee: 50000 },
     })
     doctorId = doctor.id
-    doctorUser = { id: docUser.id, role: Role.DOCTOR, clinicId: clinic.id, holdingCompanyId: null }
+    doctorUser = { id: docUser.id, role: Role.DOCTOR, branchId: branch.id, holdingCompanyId: null }
   })
 
   afterEach(async () => {
-    await superuserPrisma.notification.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.medicineDispensed.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.payment.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.consultation.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.queueEntry.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.patient.deleteMany({ where: { clinicId: clinic.id } })
+    await superuserPrisma.notification.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.medicineDispensed.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.payment.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.consultation.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.queueEntry.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.patient.deleteMany({ where: { branchId: branch.id } })
   })
 
   afterAll(async () => {
-    await superuserPrisma.doctor.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.user.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.clinic.delete({ where: { id: clinic.id } })
+    await superuserPrisma.doctor.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.user.deleteMany({ where: { branchId: branch.id } })
+    const { clinicId } = await superuserPrisma.branch.findUniqueOrThrow({ where: { id: branch.id }, select: { clinicId: true } })
+    await superuserPrisma.branch.delete({ where: { id: branch.id } })
+    await superuserPrisma.clinic.delete({ where: { id: clinicId } })
     await superuserPrisma.holdingCompany.deleteMany({ where: { name: "Notification Test Holding" } })
     await superuserPrisma.$disconnect()
     await prisma.$disconnect()
   })
 
   it("public booking writes a booking_confirmed notification with fully rendered text", async () => {
-    const result = await createPublicBooking(clinic.slug, {
+    const result = await createPublicBooking(branch.slug, {
       firstName: "Ana",
       lastName: "Reyes",
       birthdate: "1992-05-10",
@@ -126,7 +131,7 @@ describe("notifications", () => {
     const payload = notification.payload as { renderedMessage?: string }
     expect(payload.renderedMessage).toContain(String(result.queueEntry.queueNumber))
     expect(payload.renderedMessage).toContain(result.accessToken)
-    expect(payload.renderedMessage).toContain(clinic.name)
+    expect(payload.renderedMessage).toContain(branch.name)
   })
 
   it("calling the next patient writes a now_serving notification with the queue number in the text", async () => {
@@ -155,12 +160,12 @@ describe("notifications", () => {
     // same "position 0 gets `now_serving` instead" rule, so positions 1-3
     // of the remaining pool — entries[2], entries[3], entries[4] — get
     // almost_your_turn.
-    const notified = await superuserPrisma.notification.findMany({ where: { clinicId: clinic.id, templateKey: "almost_your_turn" } })
+    const notified = await superuserPrisma.notification.findMany({ where: { branchId: branch.id, templateKey: "almost_your_turn" } })
     expect(notified.map((n) => n.queueEntryId).sort()).toEqual([entries[2].id, entries[3].id, entries[4].id].sort())
 
     // calling again must not re-notify anyone already sent one
     await callNextEntry(frontDesk) // calls entries[1]; remaining pool [2,3,4] all already notified from round 1
-    const notifiedAfter = await superuserPrisma.notification.findMany({ where: { clinicId: clinic.id, templateKey: "almost_your_turn" } })
+    const notifiedAfter = await superuserPrisma.notification.findMany({ where: { branchId: branch.id, templateKey: "almost_your_turn" } })
     const uniqueQueueEntryIds = new Set(notifiedAfter.map((n) => n.queueEntryId))
     expect(uniqueQueueEntryIds.size).toBe(notifiedAfter.length) // no duplicates
     expect(notifiedAfter.length).toBe(3) // nothing new — everyone in range was already notified
@@ -178,7 +183,7 @@ describe("notifications", () => {
     expect(payload.renderedMessage).toContain("missed you")
   })
 
-  it("lists notifications scoped to the clinic, newest first", async () => {
+  it("lists notifications scoped to the branch, newest first", async () => {
     const patient = await createPatient()
     const entry = await createActiveEntry(patient.id)
     await callNextEntry(frontDesk)

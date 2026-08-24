@@ -53,8 +53,8 @@ function sorted(ids: string[]): string[] {
 
 describe("listAuditLog", () => {
   let holding: { id: string }
-  let clinicA: { id: string; name: string }
-  let clinicB: { id: string; name: string }
+  let branchA: { id: string; name: string }
+  let branchB: { id: string; name: string }
   let holdingAdmin: AbilitySubject
   let clinicAdmin: AbilitySubject
   let frontDesk: AbilitySubject
@@ -63,27 +63,27 @@ describe("listAuditLog", () => {
   let clinicAdminName: string
 
   // TYPE_ALPHA fixtures, oldest first.
-  let a1: string // clinic A · front desk · ACTION_ALPHA · Jan 10
-  let a2: string // clinic A · front desk · ACTION_BETA  · Mar 15
-  let a3: string // clinic B · clinic admin · ACTION_ALPHA · Mar 16
-  let a4: string // NO clinic · NO user · ACTION_ALPHA · Mar 17
-  let b1: string // TYPE_BETA · clinic A · front desk · Mar 18
+  let a1: string // branch A · front desk · ACTION_ALPHA · Jan 10
+  let a2: string // branch A · front desk · ACTION_BETA  · Mar 15
+  let a3: string // branch B · clinic admin · ACTION_ALPHA · Mar 16
+  let a4: string // NO branch · NO user · ACTION_ALPHA · Mar 17
+  let b1: string // TYPE_BETA · branch A · front desk · Mar 18
   let pagedIds: string[] = []
 
   // A second, unrelated holding company. Nothing below belongs to our
   // holdingAdmin, and none of it may ever surface in their results.
   let otherHolding: { id: string }
-  let otherClinic: { id: string; name: string }
-  let otherClinicUserName: string
+  let otherBranch: { id: string; name: string }
+  let otherBranchUserName: string
   let otherHoldingAdminName: string
-  let f1: string // foreign clinic row
-  let f2: string // foreign holding-level row (no clinic, foreign owner)
+  let f1: string // foreign branch row
+  let f2: string // foreign holding-level row (no branch, foreign owner)
 
   beforeAll(async () => {
     holding = await superuserPrisma.holdingCompany.create({ data: { name: `Test Holding — audit ${RUN}` } })
 
-    const clinicData = (name: string, slug: string) => ({
-      holdingCompanyId: holding.id,
+    const branchData = (clinicId: string, name: string, slug: string) => ({
+      clinicId,
       name,
       slug,
       address: "1 Test St",
@@ -91,11 +91,17 @@ describe("listAuditLog", () => {
       phone: "0000",
       operatingHours: {},
     })
-    clinicA = await superuserPrisma.clinic.create({
-      data: clinicData(`Audit Clinic A ${RUN}`, `audit-clinic-a-${RUN}`),
+    const clinicA = await superuserPrisma.clinic.create({
+      data: { holdingCompanyId: holding.id, name: `Audit Clinic A ${RUN}` },
     })
-    clinicB = await superuserPrisma.clinic.create({
-      data: clinicData(`Audit Clinic B ${RUN}`, `audit-clinic-b-${RUN}`),
+    const clinicB = await superuserPrisma.clinic.create({
+      data: { holdingCompanyId: holding.id, name: `Audit Clinic B ${RUN}` },
+    })
+    branchA = await superuserPrisma.branch.create({
+      data: branchData(clinicA.id, `Audit Branch A ${RUN}`, `audit-branch-a-${RUN}`),
+    })
+    branchB = await superuserPrisma.branch.create({
+      data: branchData(clinicB.id, `Audit Branch B ${RUN}`, `audit-branch-b-${RUN}`),
     })
 
     frontDeskName = `Audit Front Desk ${RUN}`
@@ -112,7 +118,7 @@ describe("listAuditLog", () => {
     })
     const adminUser = await superuserPrisma.user.create({
       data: {
-        clinicId: clinicA.id,
+        branchId: branchA.id,
         name: clinicAdminName,
         email: `audit-admin-${RUN}@test.local`,
         passwordHash: "x",
@@ -121,7 +127,7 @@ describe("listAuditLog", () => {
     })
     const frontDeskUser = await superuserPrisma.user.create({
       data: {
-        clinicId: clinicA.id,
+        branchId: branchA.id,
         name: frontDeskName,
         email: `audit-fd-${RUN}@test.local`,
         passwordHash: "x",
@@ -130,7 +136,7 @@ describe("listAuditLog", () => {
     })
     const doctorUser = await superuserPrisma.user.create({
       data: {
-        clinicId: clinicA.id,
+        branchId: branchA.id,
         name: `Audit Doctor ${RUN}`,
         email: `audit-dr-${RUN}@test.local`,
         passwordHash: "x",
@@ -138,16 +144,16 @@ describe("listAuditLog", () => {
       },
     })
 
-    holdingAdmin = { id: holdingUser.id, role: Role.HOLDING_ADMIN, clinicId: null, holdingCompanyId: holding.id }
-    clinicAdmin = { id: adminUser.id, role: Role.CLINIC_ADMIN, clinicId: clinicA.id, holdingCompanyId: null }
-    frontDesk = { id: frontDeskUser.id, role: Role.FRONT_DESK, clinicId: clinicA.id, holdingCompanyId: null }
-    doctor = { id: doctorUser.id, role: Role.DOCTOR, clinicId: clinicA.id, holdingCompanyId: null }
+    holdingAdmin = { id: holdingUser.id, role: Role.HOLDING_ADMIN, branchId: null, holdingCompanyId: holding.id }
+    clinicAdmin = { id: adminUser.id, role: Role.CLINIC_ADMIN, branchId: branchA.id, holdingCompanyId: null }
+    frontDesk = { id: frontDeskUser.id, role: Role.FRONT_DESK, branchId: branchA.id, holdingCompanyId: null }
+    doctor = { id: doctorUser.id, role: Role.DOCTOR, branchId: branchA.id, holdingCompanyId: null }
 
     // Timestamps sit at midday Manila so the range assertions don't hinge on
     // a few hours of timezone slop either way.
     const rowA1 = await superuserPrisma.auditLog.create({
       data: {
-        clinicId: clinicA.id,
+        branchId: branchA.id,
         userId: frontDeskUser.id,
         action: ACTION_ALPHA,
         entityType: TYPE_ALPHA,
@@ -161,7 +167,7 @@ describe("listAuditLog", () => {
     })
     const rowA2 = await superuserPrisma.auditLog.create({
       data: {
-        clinicId: clinicA.id,
+        branchId: branchA.id,
         userId: frontDeskUser.id,
         action: ACTION_BETA,
         entityType: TYPE_ALPHA,
@@ -172,7 +178,7 @@ describe("listAuditLog", () => {
     })
     const rowA3 = await superuserPrisma.auditLog.create({
       data: {
-        clinicId: clinicB.id,
+        branchId: branchB.id,
         userId: adminUser.id,
         action: ACTION_ALPHA,
         entityType: TYPE_ALPHA,
@@ -180,12 +186,12 @@ describe("listAuditLog", () => {
         createdAt: new Date("2026-03-16T04:00:00.000Z"),
       },
     })
-    // Holding-level row: no clinic, no acting user, no entity id, no
+    // Holding-level row: no branch, no acting user, no entity id, no
     // changes. Every one of these is nullable in the schema and the viewer
     // has to render the row anyway.
     const rowA4 = await superuserPrisma.auditLog.create({
       data: {
-        clinicId: null,
+        branchId: null,
         userId: null,
         action: ACTION_ALPHA,
         entityType: TYPE_ALPHA,
@@ -196,7 +202,7 @@ describe("listAuditLog", () => {
     })
     const rowB1 = await superuserPrisma.auditLog.create({
       data: {
-        clinicId: clinicA.id,
+        branchId: branchA.id,
         userId: frontDeskUser.id,
         action: ACTION_ALPHA,
         entityType: TYPE_BETA,
@@ -217,7 +223,7 @@ describe("listAuditLog", () => {
       Array.from({ length: 5 }, (_, i) =>
         superuserPrisma.auditLog.create({
           data: {
-            clinicId: clinicA.id,
+            branchId: branchA.id,
             userId: frontDeskUser.id,
             action: ACTION_ALPHA,
             entityType: TYPE_PAGED,
@@ -237,23 +243,26 @@ describe("listAuditLog", () => {
     otherHolding = await superuserPrisma.holdingCompany.create({
       data: { name: `Rival Holding — audit ${RUN}` },
     })
-    otherClinic = await superuserPrisma.clinic.create({
+    const otherClinic = await superuserPrisma.clinic.create({
+      data: { holdingCompanyId: otherHolding.id, name: `Rival Clinic ${RUN}` },
+    })
+    otherBranch = await superuserPrisma.branch.create({
       data: {
-        holdingCompanyId: otherHolding.id,
-        name: `Rival Clinic ${RUN}`,
-        slug: `rival-clinic-${RUN}`,
+        clinicId: otherClinic.id,
+        name: `Rival Branch ${RUN}`,
+        slug: `rival-branch-${RUN}`,
         address: "9 Rival St",
         city: "Rival City",
         phone: "9999",
         operatingHours: {},
       },
     })
-    otherClinicUserName = `Rival Front Desk ${RUN}`
+    otherBranchUserName = `Rival Front Desk ${RUN}`
     otherHoldingAdminName = `Rival Owner ${RUN}`
-    const otherClinicUser = await superuserPrisma.user.create({
+    const otherBranchUser = await superuserPrisma.user.create({
       data: {
-        clinicId: otherClinic.id,
-        name: otherClinicUserName,
+        branchId: otherBranch.id,
+        name: otherBranchUserName,
         email: `rival-fd-${RUN}@test.local`,
         passwordHash: "x",
         role: Role.FRONT_DESK,
@@ -271,16 +280,16 @@ describe("listAuditLog", () => {
 
     const rowF1 = await superuserPrisma.auditLog.create({
       data: {
-        clinicId: otherClinic.id,
-        userId: otherClinicUser.id,
+        branchId: otherBranch.id,
+        userId: otherBranchUser.id,
         action: ACTION_ALPHA,
         entityType: TYPE_FOREIGN,
         entityId: SHARED_ENTITY_ID, // same entityId as ours, so `q` can't be a fluke
         createdAt: new Date("2026-03-19T04:00:00.000Z"),
       },
     })
-    // Clinic-less, but written by the RIVAL owner — the case a naive
-    // "clinicId IS NULL is always visible" rule would leak.
+    // Branch-less, but written by the RIVAL owner — the case a naive
+    // "branchId IS NULL is always visible" rule would leak.
     const rowF2 = await superuserPrisma.auditLog.create({
       data: {
         userId: otherHoldingAdminUser.id,
@@ -294,17 +303,18 @@ describe("listAuditLog", () => {
   })
 
   afterAll(async () => {
-    const clinicIds = [clinicA.id, clinicB.id, otherClinic.id]
+    const branchIds = [branchA.id, branchB.id, otherBranch.id]
     const holdingIds = [holding.id, otherHolding.id]
     await superuserPrisma.auditLog.deleteMany({ where: { entityType: { in: FIXTURE_TYPES } } })
-    await superuserPrisma.auditLog.deleteMany({ where: { clinicId: { in: clinicIds } } })
-    // Clinic-less rows are found via their author, not their clinic.
+    await superuserPrisma.auditLog.deleteMany({ where: { branchId: { in: branchIds } } })
+    // Branch-less rows are found via their author, not their branch.
     await superuserPrisma.auditLog.deleteMany({
       where: { user: { holdingCompanyId: { in: holdingIds } } },
     })
-    await superuserPrisma.user.deleteMany({ where: { clinicId: { in: clinicIds } } })
+    await superuserPrisma.user.deleteMany({ where: { branchId: { in: branchIds } } })
     await superuserPrisma.user.deleteMany({ where: { holdingCompanyId: { in: holdingIds } } })
-    await superuserPrisma.clinic.deleteMany({ where: { id: { in: clinicIds } } })
+    await superuserPrisma.branch.deleteMany({ where: { id: { in: branchIds } } })
+    await superuserPrisma.clinic.deleteMany({ where: { holdingCompanyId: { in: holdingIds } } })
     await superuserPrisma.holdingCompany.deleteMany({ where: { id: { in: holdingIds } } })
     await superuserPrisma.$disconnect()
     await prisma.$disconnect()
@@ -324,15 +334,15 @@ describe("listAuditLog", () => {
     expect(result.hasNext).toBe(false)
   })
 
-  it("maps a clinic-and-user row into the DTO with names resolved", async () => {
+  it("maps a branch-and-user row into the DTO with names resolved", async () => {
     const result = await listAuditLog(holdingAdmin, { entityType: TYPE_ALPHA })
     const row = result.rows.find((r) => r.id === a1)
 
     expect(row).toBeDefined()
     expect(row).toMatchObject({
       id: a1,
-      clinicId: clinicA.id,
-      clinicName: clinicA.name,
+      branchId: branchA.id,
+      branchName: branchA.name,
       userId: frontDesk.id,
       userName: frontDeskName,
       action: ACTION_ALPHA,
@@ -345,14 +355,14 @@ describe("listAuditLog", () => {
     expect(row!.createdAt).toBeInstanceOf(Date)
   })
 
-  it("still returns and renders a row with no clinic and no user", async () => {
+  it("still returns and renders a row with no branch and no user", async () => {
     const result = await listAuditLog(holdingAdmin, { entityType: TYPE_ALPHA })
     const row = result.rows.find((r) => r.id === a4)
 
     expect(row).toBeDefined()
     expect(row).toMatchObject({
-      clinicId: null,
-      clinicName: null,
+      branchId: null,
+      branchName: null,
       userId: null,
       userName: null,
       entityId: null,
@@ -399,14 +409,14 @@ describe("listAuditLog", () => {
     // grants every HOLDING_ADMIN a blanket bypass regardless of which
     // holding company they belong to. These tests cover the only thing that
     // actually separates one owner from another.
-    it("hides another holding company's clinic rows", async () => {
+    it("hides another holding company's branch rows", async () => {
       const result = await listAuditLog(holdingAdmin, { entityType: TYPE_FOREIGN })
       expect(result.rows).toEqual([])
       expect(result.total).toBe(0)
     })
 
-    it("hides another holding company's clinic-less rows", async () => {
-      // f2 has clinicId NULL, so a rule that treated "no clinic" as
+    it("hides another holding company's branch-less rows", async () => {
+      // f2 has branchId NULL, so a rule that treated "no branch" as
       // "holding-level, always visible" would leak it across tenants.
       const result = await listAuditLog(holdingAdmin, { action: ACTION_ALPHA })
       const ids = result.rows.map((r) => r.id)
@@ -415,24 +425,24 @@ describe("listAuditLog", () => {
       expect(ids).toContain(a1) // ...while our own rows still come back
     })
 
-    it("still shows our own clinic-less rows, including system rows with no user", async () => {
-      // a4 has neither clinic nor user — a retention.purge-shaped row. The
+    it("still shows our own branch-less rows, including system rows with no user", async () => {
+      // a4 has neither branch nor user — a retention.purge-shaped row. The
       // scope must not throw those away while excluding foreign ones.
       const result = await listAuditLog(holdingAdmin, { entityType: TYPE_ALPHA })
       expect(result.rows.map((r) => r.id)).toContain(a4)
     })
 
-    it("cannot be widened by a hand-edited clinicId filter", async () => {
+    it("cannot be widened by a hand-edited branchId filter", async () => {
       // The filters are AND-ed with the holding scope, so naming another
-      // owner's clinic intersects to nothing rather than reaching across.
-      const result = await listAuditLog(holdingAdmin, { clinicId: otherClinic.id })
+      // owner's branch intersects to nothing rather than reaching across.
+      const result = await listAuditLog(holdingAdmin, { branchId: otherBranch.id })
       expect(result.rows).toEqual([])
       expect(result.total).toBe(0)
     })
 
     it("cannot be widened by a hand-edited userId filter", async () => {
       const rival = await superuserPrisma.user.findFirstOrThrow({
-        where: { name: otherClinicUserName },
+        where: { name: otherBranchUserName },
       })
       const result = await listAuditLog(holdingAdmin, { userId: rival.id })
       expect(result.rows).toEqual([])
@@ -446,20 +456,20 @@ describe("listAuditLog", () => {
       expect(ids).toContain(a1)
     })
 
-    it("does not enumerate other holding companies in the clinic dropdown", async () => {
-      // `clinics` has no RLS policy at all, so an unfiltered read here would
-      // list every clinic in the database regardless of owner.
+    it("does not enumerate other holding companies in the branch dropdown", async () => {
+      // `branches` has no RLS policy at all, so an unfiltered read here would
+      // list every branch in the database regardless of owner.
       const result = await listAuditLog(holdingAdmin, {})
-      const names = result.options.clinics.map((c) => c.name)
-      expect(names).toContain(clinicA.name)
-      expect(names).not.toContain(otherClinic.name)
+      const names = result.options.branches.map((c) => c.name)
+      expect(names).toContain(branchA.name)
+      expect(names).not.toContain(otherBranch.name)
     })
 
     it("does not enumerate other holding companies' accounts in the user dropdown", async () => {
       const result = await listAuditLog(holdingAdmin, {})
       const names = result.options.users.map((u) => u.name)
       expect(names).toContain(frontDeskName)
-      expect(names).not.toContain(otherClinicUserName)
+      expect(names).not.toContain(otherBranchUserName)
       expect(names).not.toContain(otherHoldingAdminName)
     })
   })
@@ -508,10 +518,10 @@ describe("listAuditLog", () => {
       expect(idsOf(result.rows)).toEqual(sorted([a1, a2]))
     })
 
-    it("narrows by clinicId", async () => {
-      const result = await listAuditLog(holdingAdmin, { entityType: TYPE_ALPHA, clinicId: clinicB.id })
+    it("narrows by branchId", async () => {
+      const result = await listAuditLog(holdingAdmin, { entityType: TYPE_ALPHA, branchId: branchB.id })
       expect(idsOf(result.rows)).toEqual([a3])
-      expect(result.rows[0].clinicName).toBe(clinicB.name)
+      expect(result.rows[0].branchName).toBe(branchB.name)
     })
 
     it("matches q against entityId, case-insensitively, across entity types", async () => {
@@ -524,7 +534,7 @@ describe("listAuditLog", () => {
       const result = await listAuditLog(holdingAdmin, {
         entityType: TYPE_ALPHA,
         action: ACTION_ALPHA,
-        clinicId: clinicB.id,
+        branchId: branchB.id,
       })
       expect(idsOf(result.rows)).toEqual([a3])
     })
@@ -540,7 +550,7 @@ describe("listAuditLog", () => {
       // types would otherwise leak the existence of their activity.
       expect(result.options.entityTypes).not.toContain(TYPE_FOREIGN)
       expect(new Set(result.options.actions).size).toBe(result.options.actions.length)
-      expect(result.options.clinics.map((c) => c.id)).toEqual(expect.arrayContaining([clinicA.id, clinicB.id]))
+      expect(result.options.branches.map((c) => c.id)).toEqual(expect.arrayContaining([branchA.id, branchB.id]))
       expect(result.options.users.map((u) => u.name)).toContain(clinicAdminName)
     })
   })

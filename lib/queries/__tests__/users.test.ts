@@ -37,7 +37,7 @@ describe("isLockedOut", () => {
 
 describe("login lockout and password change", () => {
   let holding: { id: string }
-  let clinic: { id: string }
+  let branch: { id: string }
   let user: { id: string }
   let subject: AbilitySubject
   const CURRENT_PASSWORD = "InitialPass123"
@@ -46,11 +46,14 @@ describe("login lockout and password change", () => {
     holding = await superuserPrisma.holdingCompany.create({
       data: { name: "Test Holding — users" },
     })
-    clinic = await superuserPrisma.clinic.create({
+    const clinic = await superuserPrisma.clinic.create({
+      data: { holdingCompanyId: holding.id, name: "Clinic Users" },
+    })
+    branch = await superuserPrisma.branch.create({
       data: {
-        holdingCompanyId: holding.id,
-        name: "Clinic Users",
-        slug: `clinic-users-${Date.now()}`,
+        clinicId: clinic.id,
+        name: "Branch Users",
+        slug: `branch-users-${Date.now()}`,
         address: "1 Test St",
         city: "Test City",
         phone: "0000",
@@ -59,7 +62,7 @@ describe("login lockout and password change", () => {
     })
     user = await superuserPrisma.user.create({
       data: {
-        clinicId: clinic.id,
+        branchId: branch.id,
         name: "Lockout Test User",
         email: `lockout-${Date.now()}@test.local`,
         passwordHash: await bcrypt.hash(CURRENT_PASSWORD, 10),
@@ -67,13 +70,15 @@ describe("login lockout and password change", () => {
         mustChangePassword: true,
       },
     })
-    subject = { id: user.id, role: Role.FRONT_DESK, clinicId: clinic.id, holdingCompanyId: null }
+    subject = { id: user.id, role: Role.FRONT_DESK, branchId: branch.id, holdingCompanyId: null }
   })
 
   afterAll(async () => {
-    await superuserPrisma.auditLog.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.user.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.clinic.deleteMany({ where: { id: clinic.id } })
+    await superuserPrisma.auditLog.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.user.deleteMany({ where: { branchId: branch.id } })
+    const { clinicId } = await superuserPrisma.branch.findUniqueOrThrow({ where: { id: branch.id }, select: { clinicId: true } })
+    await superuserPrisma.branch.deleteMany({ where: { id: branch.id } })
+    await superuserPrisma.clinic.delete({ where: { id: clinicId } })
     await superuserPrisma.holdingCompany.deleteMany({ where: { id: holding.id } })
     await superuserPrisma.$disconnect()
     await prisma.$disconnect()
@@ -146,8 +151,8 @@ describe("generateTempPassword", () => {
 
 describe("user management", () => {
   let holding: { id: string }
-  let clinicA: { id: string }
-  let clinicB: { id: string }
+  let branchA: { id: string }
+  let branchB: { id: string }
   let clinicAdminA: AbilitySubject
   let holdingAdmin: AbilitySubject
   let frontDeskInA: { id: string }
@@ -155,22 +160,24 @@ describe("user management", () => {
 
   beforeAll(async () => {
     holding = await superuserPrisma.holdingCompany.create({ data: { name: "Test Holding — user mgmt" } })
-    clinicA = await superuserPrisma.clinic.create({
+    const clinicA = await superuserPrisma.clinic.create({ data: { holdingCompanyId: holding.id, name: "Clinic A" } })
+    const clinicB = await superuserPrisma.clinic.create({ data: { holdingCompanyId: holding.id, name: "Clinic B" } })
+    branchA = await superuserPrisma.branch.create({
       data: {
-        holdingCompanyId: holding.id,
-        name: "Clinic A",
-        slug: `clinic-mgmt-a-${Date.now()}`,
+        clinicId: clinicA.id,
+        name: "Branch A",
+        slug: `branch-mgmt-a-${Date.now()}`,
         address: "1 Test St",
         city: "Test City",
         phone: "0000",
         operatingHours: {},
       },
     })
-    clinicB = await superuserPrisma.clinic.create({
+    branchB = await superuserPrisma.branch.create({
       data: {
-        holdingCompanyId: holding.id,
-        name: "Clinic B",
-        slug: `clinic-mgmt-b-${Date.now()}`,
+        clinicId: clinicB.id,
+        name: "Branch B",
+        slug: `branch-mgmt-b-${Date.now()}`,
         address: "2 Test St",
         city: "Test City",
         phone: "0000",
@@ -180,14 +187,14 @@ describe("user management", () => {
 
     const adminUser = await superuserPrisma.user.create({
       data: {
-        clinicId: clinicA.id,
+        branchId: branchA.id,
         name: "Clinic A Admin",
         email: `admin-a-${Date.now()}@test.local`,
         passwordHash: "x",
         role: Role.CLINIC_ADMIN,
       },
     })
-    clinicAdminA = { id: adminUser.id, role: Role.CLINIC_ADMIN, clinicId: clinicA.id, holdingCompanyId: null }
+    clinicAdminA = { id: adminUser.id, role: Role.CLINIC_ADMIN, branchId: branchA.id, holdingCompanyId: null }
 
     const holdingUser = await superuserPrisma.user.create({
       data: {
@@ -198,11 +205,11 @@ describe("user management", () => {
         role: Role.HOLDING_ADMIN,
       },
     })
-    holdingAdmin = { id: holdingUser.id, role: Role.HOLDING_ADMIN, clinicId: null, holdingCompanyId: holding.id }
+    holdingAdmin = { id: holdingUser.id, role: Role.HOLDING_ADMIN, branchId: null, holdingCompanyId: holding.id }
 
     const fdA = await superuserPrisma.user.create({
       data: {
-        clinicId: clinicA.id,
+        branchId: branchA.id,
         name: "Front Desk A",
         email: `fd-a-${Date.now()}@test.local`,
         passwordHash: "x",
@@ -213,7 +220,7 @@ describe("user management", () => {
 
     const fdB = await superuserPrisma.user.create({
       data: {
-        clinicId: clinicB.id,
+        branchId: branchB.id,
         name: "Front Desk B",
         email: `fd-b-${Date.now()}@test.local`,
         passwordHash: "x",
@@ -224,17 +231,18 @@ describe("user management", () => {
   })
 
   afterAll(async () => {
-    await superuserPrisma.auditLog.deleteMany({ where: { clinicId: { in: [clinicA.id, clinicB.id] } } })
-    await superuserPrisma.doctor.deleteMany({ where: { clinicId: { in: [clinicA.id, clinicB.id] } } })
-    await superuserPrisma.user.deleteMany({ where: { clinicId: { in: [clinicA.id, clinicB.id] } } })
+    await superuserPrisma.auditLog.deleteMany({ where: { branchId: { in: [branchA.id, branchB.id] } } })
+    await superuserPrisma.doctor.deleteMany({ where: { branchId: { in: [branchA.id, branchB.id] } } })
+    await superuserPrisma.user.deleteMany({ where: { branchId: { in: [branchA.id, branchB.id] } } })
     await superuserPrisma.user.delete({ where: { id: holdingAdmin.id } })
-    await superuserPrisma.clinic.deleteMany({ where: { id: { in: [clinicA.id, clinicB.id] } } })
+    await superuserPrisma.branch.deleteMany({ where: { id: { in: [branchA.id, branchB.id] } } })
+    await superuserPrisma.clinic.deleteMany({ where: { holdingCompanyId: holding.id } })
     await superuserPrisma.holdingCompany.deleteMany({ where: { id: holding.id } })
     await superuserPrisma.$disconnect()
     await prisma.$disconnect()
   })
 
-  it("lets a clinic admin create a front desk account in their own clinic", async () => {
+  it("lets a clinic admin create a front desk account in their own branch", async () => {
     const result = await createUser(clinicAdminA, {
       name: "New Staff",
       email: `new-staff-${Date.now()}@test.local`,
@@ -242,7 +250,7 @@ describe("user management", () => {
     })
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.user.clinicId).toBe(clinicA.id)
+    expect(result.user.branchId).toBe(branchA.id)
     expect(result.user.mustChangePassword).toBe(true)
     expect(result.tempPassword.length).toBeGreaterThanOrEqual(10)
 
@@ -261,30 +269,30 @@ describe("user management", () => {
     expect(result).toEqual({ ok: false, error: "You can't create an account with that role." })
   })
 
-  it("ignores a clinic admin's attempt to assign a user to a different clinic", async () => {
+  it("ignores a clinic admin's attempt to assign a user to a different branch", async () => {
     const result = await createUser(clinicAdminA, {
       name: "Should Be In A",
       email: `should-be-a-${Date.now()}@test.local`,
       role: "FRONT_DESK",
-      clinicId: clinicB.id, // attacker-supplied — must be ignored
+      branchId: branchB.id, // attacker-supplied — must be ignored
     })
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.user.clinicId).toBe(clinicA.id)
+    expect(result.user.branchId).toBe(branchA.id)
   })
 
-  it("lets a holding admin create a doctor in any clinic, with the paired Doctor row", async () => {
+  it("lets a holding admin create a doctor in any branch, with the paired Doctor row", async () => {
     const result = await createUser(holdingAdmin, {
       name: "Dr. New",
       email: `dr-new-${Date.now()}@test.local`,
       role: "DOCTOR",
-      clinicId: clinicB.id,
+      branchId: branchB.id,
       licenseNumber: "LIC-999",
       consultationFeePesos: "500",
     })
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.user.clinicId).toBe(clinicB.id)
+    expect(result.user.branchId).toBe(branchB.id)
     expect(result.user.doctor).toEqual({
       licenseNumber: "LIC-999",
       specialization: "General Practitioner",
@@ -294,38 +302,38 @@ describe("user management", () => {
 
   it("rejects a duplicate email", async () => {
     const email = `dupe-${Date.now()}@test.local`
-    const first = await createUser(holdingAdmin, { name: "First", email, role: "FRONT_DESK", clinicId: clinicA.id })
+    const first = await createUser(holdingAdmin, { name: "First", email, role: "FRONT_DESK", branchId: branchA.id })
     expect(first.ok).toBe(true)
-    const second = await createUser(holdingAdmin, { name: "Second", email, role: "FRONT_DESK", clinicId: clinicA.id })
+    const second = await createUser(holdingAdmin, { name: "Second", email, role: "FRONT_DESK", branchId: branchA.id })
     expect(second).toEqual({ ok: false, error: "An account with that email already exists." })
   })
 
-  it("scopes listUsers to the clinic admin's own clinic, front desk/doctor only", async () => {
+  it("scopes listUsers to the clinic admin's own branch, front desk/doctor only", async () => {
     const rows = await listUsers(clinicAdminA)
     expect(rows.some((r) => r.id === frontDeskInA.id)).toBe(true)
     expect(rows.some((r) => r.id === frontDeskInB.id)).toBe(false)
     expect(rows.every((r) => r.role === "FRONT_DESK" || r.role === "DOCTOR")).toBe(true)
   })
 
-  it("lets a holding admin list users across every clinic", async () => {
+  it("lets a holding admin list users across every branch", async () => {
     const rows = await listUsers(holdingAdmin)
     expect(rows.some((r) => r.id === frontDeskInA.id)).toBe(true)
     expect(rows.some((r) => r.id === frontDeskInB.id)).toBe(true)
   })
 
-  it("returns null for a user outside the clinic admin's clinic — not an error, not a leak", async () => {
+  it("returns null for a user outside the clinic admin's branch — not an error, not a leak", async () => {
     const result = await getManagedUserById(clinicAdminA, frontDeskInB.id)
     expect(result).toBeNull()
   })
 
-  it("lets a clinic admin update a front desk account in their clinic", async () => {
+  it("lets a clinic admin update a front desk account in their branch", async () => {
     const result = await updateUser(clinicAdminA, frontDeskInA.id, { name: "Front Desk A Renamed" })
     expect(result).toEqual({ ok: true })
     const row = await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInA.id } })
     expect(row.name).toBe("Front Desk A Renamed")
   })
 
-  it("blocks updating a user outside the clinic admin's clinic", async () => {
+  it("blocks updating a user outside the clinic admin's branch", async () => {
     const result = await updateUser(clinicAdminA, frontDeskInB.id, { name: "Hijacked" })
     expect(result).toEqual({ ok: false, error: "User not found." })
   })

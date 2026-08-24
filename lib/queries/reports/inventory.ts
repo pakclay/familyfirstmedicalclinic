@@ -1,6 +1,6 @@
 import { runWithRls } from "@/lib/db/rls"
-import { requireClinicId, type AbilitySubject } from "@/lib/permissions/ability"
-import { clinicTimezone } from "@/lib/queries/queue"
+import { requireBranchId, type AbilitySubject } from "@/lib/permissions/ability"
+import { branchTimezone } from "@/lib/queries/queue"
 import { resolveReportInstantRange, type DateRangeParams } from "@/lib/utils/report-dates"
 import { listMedicines, getInventoryDashboardPanels, type InventoryDashboardPanels } from "@/lib/queries/inventory"
 import type { MedicineDetailDTO } from "@/lib/dto/medicine"
@@ -33,17 +33,17 @@ export type InventoryReportData = {
  * writes to.
  */
 export async function getInventoryReport(user: AbilitySubject, params: DateRangeParams): Promise<InventoryReportData> {
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
 
   return runWithRls(user, async (tx) => {
-    const timezone = await clinicTimezone(tx, clinicId)
+    const timezone = await branchTimezone(tx, branchId)
     const { start, end, startLabel, endLabel } = resolveReportInstantRange(params, timezone)
 
     const medicines: MedicineDetailDTO[] = await listMedicines(user, { includeInactive: true })
     const totalValuationCentavos = medicines.reduce((sum, m) => sum + m.currentStock * m.unitCost, 0)
 
     const movements = await tx.stockMovement.findMany({
-      where: { clinicId, createdAt: { gte: start, lt: end } },
+      where: { branchId, createdAt: { gte: start, lt: end } },
       select: { medicineId: true, movementType: true, quantityChange: true },
     })
 

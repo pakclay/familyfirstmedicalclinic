@@ -1,5 +1,5 @@
 import { runWithRls } from "@/lib/db/rls"
-import { requireClinicId, type AbilitySubject } from "@/lib/permissions/ability"
+import { requireBranchId, type AbilitySubject } from "@/lib/permissions/ability"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import { expenseSchema } from "@/lib/validation/expense"
 import { resolveReportInstantRange, type DateRangeParams } from "@/lib/utils/report-dates"
@@ -16,27 +16,27 @@ export type ExpenseEntry = {
 /**
  * §9 Clinic Admin screen "expenses" — the minimal ledger §8's P&L
  * ("expenses, net") needs to mean anything. Resolves the range from the
- * clinic's own timezone the same way the reports queries do (§8's other
+ * branch's own timezone the same way the reports queries do (§8's other
  * screens) rather than accepting pre-resolved instants from the caller —
  * `Expense.expenseDate` is a `@db.Date` column, and comparing it against a
  * raw `new Date()` instant silently drops "today" for the 8-hour window
- * every day where the clinic's calendar date has ticked over but UTC's
+ * every day where the branch's calendar date has ticked over but UTC's
  * hasn't yet (the same bug class `todayAsQueueDate` exists to prevent).
  */
 export async function listExpenses(
   user: AbilitySubject,
   params: DateRangeParams
 ): Promise<{ expenses: ExpenseEntry[]; startLabel: string; endLabel: string }> {
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   return runWithRls(user, async (tx) => {
-    const clinic = await tx.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { timezone: true } })
-    const { startLabel, endLabel } = resolveReportInstantRange(params, clinic.timezone)
+    const branch = await tx.branch.findUniqueOrThrow({ where: { id: branchId }, select: { timezone: true } })
+    const { startLabel, endLabel } = resolveReportInstantRange(params, branch.timezone)
     const [sy, sm, sd] = startLabel.split("-").map(Number)
     const [ey, em, ed] = endLabel.split("-").map(Number)
     const start = new Date(Date.UTC(sy, sm - 1, sd))
     const end = new Date(Date.UTC(ey, em - 1, ed))
     const rows = await tx.expense.findMany({
-      where: { clinicId, expenseDate: { gte: start, lte: end } },
+      where: { branchId, expenseDate: { gte: start, lte: end } },
       include: { recordedByUser: { select: { name: true } } },
       orderBy: { expenseDate: "desc" },
     })
@@ -57,13 +57,13 @@ export async function listExpenses(
 
 export async function createExpense(user: AbilitySubject, input: unknown): Promise<void> {
   if (user.role !== "CLINIC_ADMIN") throw new ForbiddenError("Only a clinic admin can record expenses")
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   const parsed = expenseSchema.parse(input)
 
   await runWithRls(user, async (tx) => {
     const expense = await tx.expense.create({
       data: {
-        clinicId,
+        branchId,
         category: parsed.category,
         description: parsed.description || null,
         amount: parsed.amount,
@@ -72,7 +72,7 @@ export async function createExpense(user: AbilitySubject, input: unknown): Promi
       },
     })
     await tx.auditLog.create({
-      data: { clinicId, userId: user.id, action: "expense.create", entityType: "Expense", entityId: expense.id, changes: { amount: expense.amount } },
+      data: { branchId, userId: user.id, action: "expense.create", entityType: "Expense", entityId: expense.id, changes: { amount: expense.amount } },
     })
   })
 }

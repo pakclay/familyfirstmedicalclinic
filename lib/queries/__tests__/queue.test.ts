@@ -26,17 +26,17 @@ import type { AbilitySubject } from "@/lib/permissions/ability"
  * covers the state transitions and query results the poll re-fetches.
  */
 describe("queue", () => {
-  let clinic: { id: string; slug: string; timezone: string }
+  let branch: { id: string; slug: string; timezone: string }
   let frontDesk: AbilitySubject
   let doctorA: AbilitySubject
   let doctorAId: string
   let doctorBId: string
-  const queueDate = () => todayAsQueueDate(clinic.timezone)
+  const queueDate = () => todayAsQueueDate(branch.timezone)
 
   async function createPatient(overrides: { firstName?: string; lastName?: string; phone?: string; birthdate?: Date } = {}) {
     return superuserPrisma.patient.create({
       data: {
-        clinicId: clinic.id,
+        branchId: branch.id,
         firstName: "Test",
         lastName: `Patient${Math.random().toString(36).slice(2, 8)}`,
         birthdate: new Date("1990-01-01"),
@@ -62,7 +62,7 @@ describe("queue", () => {
     entryCounter += 1
     return superuserPrisma.queueEntry.create({
       data: {
-        clinicId: clinic.id,
+        branchId: branch.id,
         patientId: opts.patientId,
         queueNumber: 1000 + entryCounter, // out of the way of numbers the code under test allocates itself
         queueDate: queueDate(),
@@ -78,11 +78,12 @@ describe("queue", () => {
 
   beforeAll(async () => {
     const holding = await superuserPrisma.holdingCompany.create({ data: { name: "Queue Test Holding" } })
-    clinic = await superuserPrisma.clinic.create({
+    const clinic = await superuserPrisma.clinic.create({ data: { holdingCompanyId: holding.id, name: "Queue Test Clinic" } })
+    branch = await superuserPrisma.branch.create({
       data: {
-        holdingCompanyId: holding.id,
-        name: "Queue Test Clinic",
-        slug: `queue-test-clinic-${Date.now()}`,
+        clinicId: clinic.id,
+        name: "Queue Test Branch",
+        slug: `queue-test-branch-${Date.now()}`,
         address: "1 Test St",
         city: "Test City",
         phone: "0000",
@@ -91,50 +92,52 @@ describe("queue", () => {
       },
     })
     const fdUser = await superuserPrisma.user.create({
-      data: { clinicId: clinic.id, name: "Front Desk", email: `fd-${Date.now()}@test.local`, passwordHash: "x", role: Role.FRONT_DESK },
+      data: { branchId: branch.id, name: "Front Desk", email: `fd-${Date.now()}@test.local`, passwordHash: "x", role: Role.FRONT_DESK },
     })
-    frontDesk = { id: fdUser.id, role: Role.FRONT_DESK, clinicId: clinic.id, holdingCompanyId: null }
+    frontDesk = { id: fdUser.id, role: Role.FRONT_DESK, branchId: branch.id, holdingCompanyId: null }
 
     const docUserA = await superuserPrisma.user.create({
-      data: { clinicId: clinic.id, name: "Dr. A", email: `doc-a-${Date.now()}@test.local`, passwordHash: "x", role: Role.DOCTOR },
+      data: { branchId: branch.id, name: "Dr. A", email: `doc-a-${Date.now()}@test.local`, passwordHash: "x", role: Role.DOCTOR },
     })
     const docA = await superuserPrisma.doctor.create({
-      data: { userId: docUserA.id, clinicId: clinic.id, licenseNumber: "A", consultationFee: 50000 },
+      data: { userId: docUserA.id, branchId: branch.id, licenseNumber: "A", consultationFee: 50000 },
     })
     doctorAId = docA.id
-    doctorA = { id: docUserA.id, role: Role.DOCTOR, clinicId: clinic.id, holdingCompanyId: null }
+    doctorA = { id: docUserA.id, role: Role.DOCTOR, branchId: branch.id, holdingCompanyId: null }
 
     const docUserB = await superuserPrisma.user.create({
-      data: { clinicId: clinic.id, name: "Dr. B", email: `doc-b-${Date.now()}@test.local`, passwordHash: "x", role: Role.DOCTOR },
+      data: { branchId: branch.id, name: "Dr. B", email: `doc-b-${Date.now()}@test.local`, passwordHash: "x", role: Role.DOCTOR },
     })
     const docB = await superuserPrisma.doctor.create({
-      data: { userId: docUserB.id, clinicId: clinic.id, licenseNumber: "B", consultationFee: 50000 },
+      data: { userId: docUserB.id, branchId: branch.id, licenseNumber: "B", consultationFee: 50000 },
     })
     doctorBId = docB.id
   })
 
   // Every test's queue entries are cleared afterward so ordering/neighbor
   // assertions in one test are never affected by another test's leftover
-  // CHECKED_IN/WAITING/CALLED rows in the same clinic+day — `callNextEntry`,
+  // CHECKED_IN/WAITING/CALLED rows in the same branch+day — `callNextEntry`,
   // `moveQueueEntryOrder`, and the public display's "next 3" all query
-  // across *all* of today's entries for the clinic, not just the ones a
+  // across *all* of today's entries for the branch, not just the ones a
   // given test created.
   afterEach(async () => {
-    await superuserPrisma.queueEntry.deleteMany({ where: { clinicId: clinic.id } })
+    await superuserPrisma.queueEntry.deleteMany({ where: { branchId: branch.id } })
   })
 
   afterAll(async () => {
-    await superuserPrisma.auditLog.deleteMany({ where: { clinicId: clinic.id } })
+    const clinicId = (await superuserPrisma.branch.findUniqueOrThrow({ where: { id: branch.id }, select: { clinicId: true } })).clinicId
+    await superuserPrisma.auditLog.deleteMany({ where: { branchId: branch.id } })
     // notifications.patient_id is ON DELETE RESTRICT (queue_entry_id is
     // SET NULL, which is why afterEach's queueEntry cleanup alone never
     // needed this) — M5 wired real notification sends into callNextEntry/
     // markNoShow/moveQueueEntryOrder, so tests that exercise those now
     // leave rows here too.
-    await superuserPrisma.notification.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.patient.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.doctor.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.user.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.clinic.delete({ where: { id: clinic.id } })
+    await superuserPrisma.notification.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.patient.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.doctor.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.user.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.branch.delete({ where: { id: branch.id } })
+    await superuserPrisma.clinic.delete({ where: { id: clinicId } })
     await superuserPrisma.holdingCompany.deleteMany({ where: { name: "Queue Test Holding" } })
     await superuserPrisma.$disconnect()
     await prisma.$disconnect()
@@ -202,15 +205,16 @@ describe("queue", () => {
     expect(started.status).toBe("IN_CONSULTATION")
   })
 
-  it("rejects assigning a doctor from a different clinic", async () => {
-    const otherClinic = await superuserPrisma.clinic.create({
-      data: { name: "Other", slug: `other-${Date.now()}`, address: "x", city: "x", phone: "0", timezone: "Asia/Manila", operatingHours: {} },
+  it("rejects assigning a doctor from a different branch", async () => {
+    const otherClinic = await superuserPrisma.clinic.create({ data: { name: "Other" } })
+    const otherBranch = await superuserPrisma.branch.create({
+      data: { clinicId: otherClinic.id, name: "Other", slug: `other-${Date.now()}`, address: "x", city: "x", phone: "0", timezone: "Asia/Manila", operatingHours: {} },
     })
     const otherDocUser = await superuserPrisma.user.create({
-      data: { clinicId: otherClinic.id, name: "Other Doc", email: `other-doc-${Date.now()}@test.local`, passwordHash: "x", role: Role.DOCTOR },
+      data: { branchId: otherBranch.id, name: "Other Doc", email: `other-doc-${Date.now()}@test.local`, passwordHash: "x", role: Role.DOCTOR },
     })
     const otherDoc = await superuserPrisma.doctor.create({
-      data: { userId: otherDocUser.id, clinicId: otherClinic.id, licenseNumber: "X", consultationFee: 50000 },
+      data: { userId: otherDocUser.id, branchId: otherBranch.id, licenseNumber: "X", consultationFee: 50000 },
     })
     const patient = await createPatient()
     const entry = await createEntry({ patientId: patient.id, status: "CHECKED_IN" })
@@ -219,6 +223,7 @@ describe("queue", () => {
 
     await superuserPrisma.doctor.delete({ where: { id: otherDoc.id } })
     await superuserPrisma.user.delete({ where: { id: otherDocUser.id } })
+    await superuserPrisma.branch.delete({ where: { id: otherBranch.id } })
     await superuserPrisma.clinic.delete({ where: { id: otherClinic.id } })
   })
 
@@ -275,7 +280,7 @@ describe("queue", () => {
     const patient = await createPatient({ firstName: "Secret", lastName: "Name" })
     const entry = await createEntry({ patientId: patient.id, status: "CHECKED_IN" })
 
-    const state = await getPublicDisplayState(clinic.slug)
+    const state = await getPublicDisplayState(branch.slug)
     expect(state).toBeTruthy()
     expect(JSON.stringify(state)).not.toContain("Secret")
     expect(JSON.stringify(state)).not.toContain(patient.id)
@@ -285,7 +290,7 @@ describe("queue", () => {
   it("public booking creates a BOOKED, source=FACEBOOK entry and auto-matches an existing patient", async () => {
     const existing = await createPatient({ firstName: "Repeat", lastName: "Visitor", phone: "+63 917 222 3333", birthdate: new Date("1980-02-02") })
 
-    const booking = await createPublicBooking(clinic.slug, {
+    const booking = await createPublicBooking(branch.slug, {
       firstName: "Repeat",
       lastName: "Visitor",
       birthdate: "1980-02-02",

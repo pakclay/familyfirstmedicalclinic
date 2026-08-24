@@ -11,7 +11,7 @@ export default async function DoctorQueuePage() {
   const user: AbilitySubject = {
     id: session.user.id,
     role: session.user.role,
-    clinicId: session.user.clinicId,
+    branchId: session.user.branchId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const entries = await listDoctorQueue(user)

@@ -4,22 +4,22 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import type { ClinicDTO } from "@/lib/dto/clinic"
-import type { Weekday } from "@/lib/validation/clinic"
+import type { BranchDTO } from "@/lib/dto/branch"
+import type { Weekday } from "@/lib/validation/operating-hours"
 import {
   OperatingHoursFields,
   toDayForms,
   toOperatingHours,
   type DayForm,
 } from "../clinics/operating-hours-fields"
-import { updateClinicSettingsAction } from "./actions"
+import { updateBranchSettingsAction } from "./actions"
 
-export function ClinicSettingsForm({ clinic }: { clinic: ClinicDTO }) {
-  const [address, setAddress] = useState(clinic.address)
-  const [city, setCity] = useState(clinic.city)
-  const [phone, setPhone] = useState(clinic.phone)
-  const [facebookPageUrl, setFacebookPageUrl] = useState(clinic.facebookPageUrl ?? "")
-  const [hours, setHours] = useState<Record<Weekday, DayForm>>(() => toDayForms(clinic.operatingHours))
+export function BranchSettingsForm({ branch }: { branch: BranchDTO }) {
+  const [address, setAddress] = useState(branch.address)
+  const [city, setCity] = useState(branch.city)
+  const [phone, setPhone] = useState(branch.phone)
+  const [facebookPageUrl, setFacebookPageUrl] = useState(branch.facebookPageUrl ?? "")
+  const [hours, setHours] = useState<Record<Weekday, DayForm>>(() => toDayForms(branch.operatingHours))
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
@@ -29,9 +29,9 @@ export function ClinicSettingsForm({ clinic }: { clinic: ClinicDTO }) {
     setPending(true)
     setError(null)
     setSaved(false)
-    // No clinic id in this payload — the server resolves it from the
-    // session. Nothing here identifies which clinic to write.
-    const res = await updateClinicSettingsAction({
+    // No branch id in this payload — the server resolves it from the
+    // session. Nothing here identifies which branch to write.
+    const res = await updateBranchSettingsAction({
       address,
       city,
       phone,

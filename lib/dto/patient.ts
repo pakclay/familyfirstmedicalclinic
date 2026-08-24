@@ -9,7 +9,7 @@ import { ageInYears } from "@/lib/utils/age"
  */
 export type PatientDTO = {
   id: string
-  clinicId: string
+  branchId: string
   firstName: string
   lastName: string
   middleName: string | null
@@ -32,7 +32,7 @@ export function toPatientDTO(patient: Patient): PatientDTO {
   const age = ageInYears(patient.birthdate)
   return {
     id: patient.id,
-    clinicId: patient.clinicId,
+    branchId: patient.branchId,
     firstName: patient.firstName,
     lastName: patient.lastName,
     middleName: patient.middleName,

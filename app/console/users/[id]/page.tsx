@@ -16,7 +16,7 @@ export default async function EditUserPage({ params }: { params: Promise<{ id: s
   const actor: AbilitySubject = {
     id: session.user.id,
     role: session.user.role,
-    clinicId: session.user.clinicId,
+    branchId: session.user.branchId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const managedUser = await getManagedUserById(actor, id)
@@ -27,7 +27,7 @@ export default async function EditUserPage({ params }: { params: Promise<{ id: s
       <h1 className="text-2xl font-heading font-semibold">{managedUser.name}</h1>
       <p className="text-sm text-muted-foreground">
         {managedUser.email}
-        {managedUser.clinicName ? ` · ${managedUser.clinicName}` : ""}
+        {managedUser.branchName ? ` · ${managedUser.branchName}` : ""}
       </p>
 
       <div className="mt-4">

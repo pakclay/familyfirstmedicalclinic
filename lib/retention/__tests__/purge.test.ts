@@ -15,7 +15,7 @@ function daysAgo(days: number): Date {
 }
 
 describe("retention purge", () => {
-  let clinic: { id: string }
+  let branch: { id: string }
   let doctorId: string
   let collectorUserId: string
 
@@ -33,9 +33,12 @@ describe("retention purge", () => {
   beforeAll(async () => {
     const holding = await superuserPrisma.holdingCompany.create({ data: { name: "Retention Test Holding" } })
     const clinicRow = await superuserPrisma.clinic.create({
+      data: { holdingCompanyId: holding.id, name: "Retention Test Clinic" },
+    })
+    const branchRow = await superuserPrisma.branch.create({
       data: {
-        holdingCompanyId: holding.id,
-        name: "Retention Test Clinic",
+        clinicId: clinicRow.id,
+        name: "Retention Test Branch",
         slug: `retention-test-${Date.now()}`,
         address: "1 Test St",
         city: "Test City",
@@ -43,11 +46,11 @@ describe("retention purge", () => {
         operatingHours: {},
       },
     })
-    clinic = { id: clinicRow.id }
+    branch = { id: branchRow.id }
 
     const docUser = await superuserPrisma.user.create({
       data: {
-        clinicId: clinic.id,
+        branchId: branch.id,
         name: "Dr. Retention",
         email: `dr-retention-${Date.now()}@test.local`,
         passwordHash: "x",
@@ -55,13 +58,13 @@ describe("retention purge", () => {
       },
     })
     const doctor = await superuserPrisma.doctor.create({
-      data: { userId: docUser.id, clinicId: clinic.id, licenseNumber: "R1", consultationFee: 50000 },
+      data: { userId: docUser.id, branchId: branch.id, licenseNumber: "R1", consultationFee: 50000 },
     })
     doctorId = doctor.id
 
     const collector = await superuserPrisma.user.create({
       data: {
-        clinicId: clinic.id,
+        branchId: branch.id,
         name: "Front Desk Retention",
         email: `fd-retention-${Date.now()}@test.local`,
         passwordHash: "x",
@@ -73,7 +76,7 @@ describe("retention purge", () => {
     async function makePatient(name: string, createdAt: Date) {
       return superuserPrisma.patient.create({
         data: {
-          clinicId: clinic.id,
+          branchId: branch.id,
           firstName: name,
           lastName: "Retention",
           birthdate: new Date("1990-01-01"),
@@ -94,7 +97,7 @@ describe("retention purge", () => {
     async function makeQueueEntry(patientId: string, queueDate: Date, createdAt: Date) {
       return superuserPrisma.queueEntry.create({
         data: {
-          clinicId: clinic.id,
+          branchId: branch.id,
           patientId,
           doctorId,
           queueNumber: Math.floor(Math.random() * 1_000_000) + 1,
@@ -120,7 +123,7 @@ describe("retention purge", () => {
         queueEntryId: oldQueueEntry.id,
         patientId: patientOldButStillReferenced.id,
         doctorId,
-        clinicId: clinic.id,
+        branchId: branch.id,
         chiefComplaint: "Old visit",
         createdAt: oldQueueDate,
       },
@@ -128,7 +131,7 @@ describe("retention purge", () => {
     const oldDispensed = await superuserPrisma.medicineDispensed.create({
       data: {
         consultationId: oldConsultation.id,
-        clinicId: clinic.id,
+        branchId: branch.id,
         medicineName: "Old Medicine",
         quantity: 1,
         createdAt: oldQueueDate,
@@ -150,7 +153,7 @@ describe("retention purge", () => {
         queueEntryId: recentQueueEntry.id,
         patientId: patientOldButStillReferenced.id,
         doctorId,
-        clinicId: clinic.id,
+        branchId: branch.id,
         chiefComplaint: "Recent visit",
       },
     })
@@ -163,7 +166,7 @@ describe("retention purge", () => {
     async function makePayment(patientId: string, receivedAt: Date) {
       return superuserPrisma.payment.create({
         data: {
-          clinicId: clinic.id,
+          branchId: branch.id,
           patientId,
           amount: 10000,
           collectedByUserId: collectorUserId,
@@ -179,7 +182,7 @@ describe("retention purge", () => {
     async function makeNotification(patientId: string, createdAt: Date) {
       return superuserPrisma.notification.create({
         data: {
-          clinicId: clinic.id,
+          branchId: branch.id,
           patientId,
           channel: "SMS",
           templateKey: "test",
@@ -195,16 +198,18 @@ describe("retention purge", () => {
   })
 
   afterAll(async () => {
-    await superuserPrisma.auditLog.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.notification.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.payment.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.medicineDispensed.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.consultation.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.queueEntry.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.patient.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.doctor.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.user.deleteMany({ where: { clinicId: clinic.id } })
-    await superuserPrisma.clinic.deleteMany({ where: { id: clinic.id } })
+    await superuserPrisma.auditLog.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.notification.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.payment.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.medicineDispensed.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.consultation.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.queueEntry.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.patient.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.doctor.deleteMany({ where: { branchId: branch.id } })
+    await superuserPrisma.user.deleteMany({ where: { branchId: branch.id } })
+    const { clinicId } = await superuserPrisma.branch.findUniqueOrThrow({ where: { id: branch.id }, select: { clinicId: true } })
+    await superuserPrisma.branch.deleteMany({ where: { id: branch.id } })
+    await superuserPrisma.clinic.delete({ where: { id: clinicId } })
     await superuserPrisma.$disconnect()
     await prisma.$disconnect()
   })

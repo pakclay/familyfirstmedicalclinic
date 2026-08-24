@@ -5,18 +5,10 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import type { ClinicDTO } from "@/lib/dto/clinic"
-import type { Weekday } from "@/lib/validation/clinic"
-import { OperatingHoursFields, toDayForms, toOperatingHours, type DayForm } from "../operating-hours-fields"
 import { updateClinicAction } from "../actions"
 
 export function EditClinicForm({ clinic }: { clinic: ClinicDTO }) {
   const [name, setName] = useState(clinic.name)
-  const [address, setAddress] = useState(clinic.address)
-  const [city, setCity] = useState(clinic.city)
-  const [phone, setPhone] = useState(clinic.phone)
-  const [facebookPageUrl, setFacebookPageUrl] = useState(clinic.facebookPageUrl ?? "")
-  const [timezone, setTimezone] = useState(clinic.timezone)
-  const [hours, setHours] = useState<Record<Weekday, DayForm>>(() => toDayForms(clinic.operatingHours))
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
@@ -26,17 +18,7 @@ export function EditClinicForm({ clinic }: { clinic: ClinicDTO }) {
     setPending(true)
     setError(null)
     setSaved(false)
-    // No slug in this payload — editClinicSchema doesn't accept one, and
-    // the query layer never writes it.
-    const res = await updateClinicAction(clinic.id, {
-      name,
-      address,
-      city,
-      phone,
-      facebookPageUrl,
-      timezone,
-      operatingHours: toOperatingHours(hours),
-    })
+    const res = await updateClinicAction(clinic.id, { name })
     setPending(false)
     if (!res.ok) {
       setError(res.error)
@@ -51,42 +33,6 @@ export function EditClinicForm({ clinic }: { clinic: ClinicDTO }) {
         <Label htmlFor="name">Name</Label>
         <Input id="name" required value={name} onChange={(e) => setName(e.target.value)} className="h-10" />
       </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="slug">URL slug</Label>
-        <Input id="slug" value={clinic.slug} disabled readOnly className="h-10" />
-        <p className="text-xs text-muted-foreground">
-          Fixed once the clinic exists — the booking link /book/{clinic.slug} may already be shared publicly.
-        </p>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="address">Address</Label>
-        <Input id="address" required value={address} onChange={(e) => setAddress(e.target.value)} className="h-10" />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="city">City</Label>
-        <Input id="city" required value={city} onChange={(e) => setCity(e.target.value)} className="h-10" />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="phone">Phone</Label>
-        <Input id="phone" required value={phone} onChange={(e) => setPhone(e.target.value)} className="h-10" />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="facebookPageUrl">Facebook page (optional)</Label>
-        <Input
-          id="facebookPageUrl"
-          type="url"
-          placeholder="https://facebook.com/…"
-          value={facebookPageUrl}
-          onChange={(e) => setFacebookPageUrl(e.target.value)}
-          className="h-10"
-        />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="timezone">Timezone</Label>
-        <Input id="timezone" required value={timezone} onChange={(e) => setTimezone(e.target.value)} className="h-10" />
-      </div>
-
-      <OperatingHoursFields value={hours} onChange={setHours} />
 
       {error && <p className="text-sm text-destructive">{error}</p>}
       {saved && <p className="text-sm text-muted-foreground">Saved.</p>}
