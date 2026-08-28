@@ -53,6 +53,11 @@ export const editUserSchema = z.object({
   specialization: z.string().trim().optional(),
   licenseNumber: z.string().trim().optional(),
   consultationFeePesos: z.string().trim().optional(),
+  // Which branch the user works at. Optional and absent-means-unchanged, so
+  // a form that never renders the picker (a clinic admin's, or a holding
+  // admin's own branchless account) can keep posting the same payload it
+  // always has. updateUser decides whether the actor may act on it at all.
+  branchId: z.string().optional(),
 })
 
 export type EditUserInput = z.infer<typeof editUserSchema>

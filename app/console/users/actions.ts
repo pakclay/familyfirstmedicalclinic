@@ -29,6 +29,19 @@ async function actingUser(): Promise<AbilitySubject> {
   }
 }
 
+/**
+ * A user row is rendered in two places — the flat /console/users list and
+ * the staff section of its clinic's detail page — so every mutation has to
+ * revalidate both or the clinic page keeps showing a deactivated account as
+ * active. "layout" revalidates the whole /console/clinics subtree because
+ * the affected clinic's id isn't known here (the action only receives a
+ * user id) and a user can be moved between branches by updateUser.
+ */
+function revalidateUserViews(): void {
+  revalidatePath("/console/users")
+  revalidatePath("/console/clinics", "layout")
+}
+
 export async function createUserAction(formData: Record<string, unknown>): Promise<CreateUserResult> {
   const user = await actingUser()
   const parsed = createUserSchema.safeParse(formData)
@@ -36,7 +49,7 @@ export async function createUserAction(formData: Record<string, unknown>): Promi
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Check the form for errors." }
   }
   const result = await createUser(user, parsed.data)
-  if (result.ok) revalidatePath("/console/users")
+  if (result.ok) revalidateUserViews()
   return result
 }
 
@@ -47,27 +60,27 @@ export async function updateUserAction(id: string, formData: Record<string, unkn
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Check the form for errors." }
   }
   const result = await updateUser(user, id, parsed.data)
-  if (result.ok) revalidatePath("/console/users")
+  if (result.ok) revalidateUserViews()
   return result
 }
 
 export async function setUserActiveAction(id: string, isActive: boolean): Promise<ManageUserResult> {
   const user = await actingUser()
   const result = await setUserActive(user, id, isActive)
-  if (result.ok) revalidatePath("/console/users")
+  if (result.ok) revalidateUserViews()
   return result
 }
 
 export async function forcePasswordResetAction(id: string): Promise<ManageUserResult> {
   const user = await actingUser()
   const result = await forcePasswordReset(user, id)
-  if (result.ok) revalidatePath("/console/users")
+  if (result.ok) revalidateUserViews()
   return result
 }
 
 export async function unlockAccountAction(id: string): Promise<ManageUserResult> {
   const user = await actingUser()
   const result = await unlockAccount(user, id)
-  if (result.ok) revalidatePath("/console/users")
+  if (result.ok) revalidateUserViews()
   return result
 }

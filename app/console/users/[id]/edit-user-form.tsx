@@ -7,9 +7,18 @@ import { Label } from "@/components/ui/label"
 import type { UserDTO } from "@/lib/dto/user"
 import { updateUserAction } from "../actions"
 
-export function EditUserForm({ user }: { user: UserDTO }) {
+export function EditUserForm({
+  user,
+  branches,
+  showBranchPicker,
+}: {
+  user: UserDTO
+  branches: { id: string; name: string; clinic: { name: string } }[]
+  showBranchPicker: boolean
+}) {
   const [name, setName] = useState(user.name)
   const [phone, setPhone] = useState(user.phone ?? "")
+  const [branchId, setBranchId] = useState(user.branchId ?? "")
   const [licenseNumber, setLicenseNumber] = useState(user.doctor?.licenseNumber ?? "")
   const [specialization, setSpecialization] = useState(user.doctor?.specialization ?? "")
   const [consultationFeePesos, setConsultationFeePesos] = useState(
@@ -30,6 +39,10 @@ export function EditUserForm({ user }: { user: UserDTO }) {
       licenseNumber,
       specialization,
       consultationFeePesos,
+      // Omitted entirely when the picker isn't shown, so the payload stays
+      // "no branch change requested" rather than posting a value the server
+      // would have to recognise as a no-op.
+      ...(showBranchPicker ? { branchId } : {}),
     })
     setPending(false)
     if (!res.ok) {
@@ -49,6 +62,32 @@ export function EditUserForm({ user }: { user: UserDTO }) {
         <Label htmlFor="phone">Phone (optional)</Label>
         <Input id="phone" value={phone} onChange={(e) => setPhone(e.target.value)} className="h-10" />
       </div>
+
+      {showBranchPicker && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="branchId">Branch</Label>
+          <select
+            id="branchId"
+            name="branchId"
+            required
+            value={branchId}
+            onChange={(e) => setBranchId(e.target.value)}
+            className="h-10 rounded-md border border-input bg-transparent px-3 text-sm"
+          >
+            <option value="">Select…</option>
+            {branches.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.clinic.name} — {b.name}
+              </option>
+            ))}
+          </select>
+          {branchId !== (user.branchId ?? "") && (
+            <p className="text-xs text-muted-foreground">
+              Moves this account to another branch. Past records stay with the branch they happened in.
+            </p>
+          )}
+        </div>
+      )}
 
       {user.doctor && (
         <>

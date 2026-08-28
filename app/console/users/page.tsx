@@ -5,13 +5,7 @@ import { listUsers } from "@/lib/queries/users"
 import type { AbilitySubject } from "@/lib/permissions/ability"
 import { Button } from "@/components/ui/button"
 import { UserRowActions } from "./user-row-actions"
-
-const ROLE_LABEL: Record<string, string> = {
-  FRONT_DESK: "Front desk",
-  DOCTOR: "Doctor",
-  CLINIC_ADMIN: "Clinic admin",
-  HOLDING_ADMIN: "Holding admin",
-}
+import { ROLE_LABEL } from "@/lib/dto/user"
 
 export default async function UsersPage() {
   const session = await auth()

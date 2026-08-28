@@ -149,6 +149,35 @@ export async function listUsers(actor: AbilitySubject): Promise<UserDTO[]> {
   return rows.map(toUserDTO)
 }
 
+/**
+ * The users working at one clinic — i.e. every user whose *branch* belongs
+ * to it. A user is attached to a branch, not a clinic (User.branchId; there
+ * is no clinicId on the row), so "this clinic's staff" is the union across
+ * its branches and a user moves between clinics only by moving branch.
+ *
+ * Holding admins are deliberately absent: their branchId is null, so they
+ * belong to no clinic and would otherwise appear identically under every
+ * one of them.
+ *
+ * Same authorization shape as listUsers above, plus the clinic filter — a
+ * clinic admin asking about a clinic that isn't theirs matches nothing
+ * rather than being told it exists. `users` has no RLS policy (see
+ * changeOwnPassword's comment), so this where-clause is the only thing
+ * enforcing that; it must never be relaxed to lean on a database backstop
+ * that isn't there.
+ */
+export async function listUsersForClinic(actor: AbilitySubject, clinicId: string): Promise<UserDTO[]> {
+  const where: Prisma.UserWhereInput = isHoldingAdmin(actor)
+    ? { branch: { clinicId } }
+    : { branchId: requireBranchId(actor), branch: { clinicId }, role: { in: ["FRONT_DESK", "DOCTOR"] } }
+  const rows = await prisma.user.findMany({
+    where,
+    include: userInclude,
+    orderBy: [{ branch: { name: "asc" } }, { role: "asc" }, { name: "asc" }],
+  })
+  return rows.map(toUserDTO)
+}
+
 /** Returns null for "doesn't exist" *and* "exists but actor can't manage it" — same non-enumeration reasoning as the login lockout not distinguishing its causes. */
 export async function getManagedUserById(actor: AbilitySubject, id: string): Promise<UserDTO | null> {
   const row = await prisma.user.findUnique({ where: { id }, include: userInclude })
@@ -229,12 +258,77 @@ export async function createUser(actor: AbilitySubject, input: CreateUserInput):
 
 export type ManageUserResult = { ok: true } | { ok: false; error: string }
 
+/**
+ * A queue entry in one of these states still expects its doctor to be
+ * working in that branch — assignDoctor only ever attaches an in-branch
+ * doctor (queue.ts's `findFirst({ id: doctorId, branchId })`), so moving a
+ * doctor out from under a live entry would leave it pointing at someone the
+ * branch can no longer act on. The finished states (COMPLETED, NO_SHOW,
+ * CANCELLED) are history and stay attributed to whoever handled them.
+ */
+const UNFINISHED_QUEUE_STATUSES = ["BOOKED", "CHECKED_IN", "WAITING", "CALLED", "IN_CONSULTATION"] as const
+
 export async function updateUser(actor: AbilitySubject, id: string, input: EditUserInput): Promise<ManageUserResult> {
   const target = await prisma.user.findUnique({ where: { id }, include: { doctor: true } })
   if (!target || !canManageTarget(actor, target)) return { ok: false, error: "User not found." }
 
+  // An absent branchId means "leave it alone" — only an explicit, different
+  // value is a move. Past work (payments, consultations, audit rows) keeps
+  // the branch it happened in; this only changes where the person works next.
+  const requestedBranchId = input.branchId?.trim() || null
+  const movingBranch = requestedBranchId !== null && requestedBranchId !== target.branchId
+
+  if (movingBranch) {
+    // Deliberately holding-admin-only. canManageTarget already confines a
+    // clinic admin to targets in their own branch, so without this a clinic
+    // admin could push one of their staff into a branch they have no rights
+    // over — a one-way escalation out of their own scope.
+    if (!isHoldingAdmin(actor)) {
+      return { ok: false, error: "Only a holding admin can move a user to another branch." }
+    }
+    if (target.role === "HOLDING_ADMIN") {
+      return { ok: false, error: "A holding admin isn't attached to a branch." }
+    }
+    const branch = await prisma.branch.findUnique({ where: { id: requestedBranchId } })
+    if (!branch) return { ok: false, error: "Select a branch." }
+    if (!branch.isActive) return { ok: false, error: "That branch is inactive." }
+
+    if (target.doctor) {
+      // Counted inside runWithRls, not on the bare client: queue_entries is
+      // RLS-protected, so an un-scoped count outside a transaction sets no
+      // GUCs, matches no policy, and returns 0 for everyone — a guard that
+      // silently never fires. The actor is necessarily a holding admin here
+      // (checked above), whose app.role satisfies every branch policy, so
+      // this sees the doctor's entries in whichever branch they sit.
+      const unfinished = await runWithRls(actor, (tx) =>
+        tx.queueEntry.count({
+          where: { doctorId: target.doctor!.id, status: { in: [...UNFINISHED_QUEUE_STATUSES] } },
+        })
+      )
+      if (unfinished > 0) {
+        return {
+          ok: false,
+          error: `This doctor still has ${unfinished} unfinished queue ${unfinished === 1 ? "entry" : "entries"}. Complete or reassign them before moving branch.`,
+        }
+      }
+    }
+  }
+
   await runWithRls(actor, async (tx) => {
-    await tx.user.update({ where: { id }, data: { name: input.name.trim(), phone: input.phone?.trim() || null } })
+    await tx.user.update({
+      where: { id },
+      data: {
+        name: input.name.trim(),
+        phone: input.phone?.trim() || null,
+        ...(movingBranch ? { branchId: requestedBranchId } : {}),
+      },
+    })
+    // Doctor.branchId is its own non-nullable column, not a view of the
+    // user's — leaving it behind would put the doctor in one branch's
+    // picker while their account lives in another.
+    if (movingBranch && target.doctor) {
+      await tx.doctor.update({ where: { userId: id }, data: { branchId: requestedBranchId } })
+    }
     if (target.role === "DOCTOR" && target.doctor) {
       await tx.doctor.update({
         where: { userId: id },
@@ -247,8 +341,19 @@ export async function updateUser(actor: AbilitySubject, id: string, input: EditU
         },
       })
     }
+    // Logged against the branch the user is moving *to*: that branch's
+    // admins are the ones who need to see a new person appear in their
+    // scope. The `from` id is in `changes` so the move stays traceable from
+    // either end.
     await tx.auditLog.create({
-      data: { branchId: target.branchId, userId: actor.id, action: "user.updated", entityType: "User", entityId: id },
+      data: {
+        branchId: movingBranch ? requestedBranchId : target.branchId,
+        userId: actor.id,
+        action: movingBranch ? "user.branch_changed" : "user.updated",
+        entityType: "User",
+        entityId: id,
+        ...(movingBranch ? { changes: { fromBranchId: target.branchId, toBranchId: requestedBranchId } } : {}),
+      },
     })
   })
   return { ok: true }

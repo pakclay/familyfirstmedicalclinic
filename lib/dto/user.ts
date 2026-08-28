@@ -1,5 +1,13 @@
 import type { User, Doctor } from "@prisma/client"
 
+/** Display names for the Role enum, shared by every UI that renders a role. */
+export const ROLE_LABEL: Record<string, string> = {
+  FRONT_DESK: "Front desk",
+  DOCTOR: "Doctor",
+  CLINIC_ADMIN: "Clinic admin",
+  HOLDING_ADMIN: "Holding admin",
+}
+
 /**
  * Explicit field allowlist — deliberately excludes passwordHash,
  * failedLoginAttempts, and lockedUntil, none of which any UI needs to

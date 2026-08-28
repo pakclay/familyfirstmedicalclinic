@@ -4,7 +4,12 @@ import { prisma } from "@/lib/db/prisma"
 import { assignableRoles, type AbilitySubject } from "@/lib/permissions/ability"
 import { NewUserForm } from "./new-user-form"
 
-export default async function NewUserPage() {
+export default async function NewUserPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ clinicId?: string }>
+}) {
+  const { clinicId } = await searchParams
   const session = await auth()
   if (!session?.user) redirect("/login")
   if (session.user.role !== "HOLDING_ADMIN" && session.user.role !== "CLINIC_ADMIN") {
@@ -26,10 +31,16 @@ export default async function NewUserPage() {
   // Labeled "Clinic — Branch" since a clinic can have more than one branch
   // now, so the branch name alone may not disambiguate (e.g. two branches
   // both named after their city).
+  // `clinicId` narrows the picker when arriving from a clinic's staff
+  // section, so "Add user" there offers only that clinic's branches instead
+  // of every branch in the company. It is a convenience filter on a
+  // read-only list, never an authorization decision — createUser still
+  // decides the branch server-side, so a forged clinicId can only ever
+  // shrink what this dropdown offers, not widen who can be created.
   const branches =
     session.user.role === "HOLDING_ADMIN"
       ? await prisma.branch.findMany({
-          where: { isActive: true },
+          where: { isActive: true, ...(clinicId ? { clinicId } : {}) },
           select: { id: true, name: true, clinic: { select: { name: true } } },
           orderBy: [{ clinic: { name: "asc" } }, { name: "asc" }],
         })

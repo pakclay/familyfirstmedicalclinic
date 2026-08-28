@@ -7,13 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent } from "@/components/ui/card"
 import { createUserAction } from "../actions"
-
-const ROLE_LABEL: Record<string, string> = {
-  FRONT_DESK: "Front desk",
-  DOCTOR: "Doctor",
-  CLINIC_ADMIN: "Clinic admin",
-  HOLDING_ADMIN: "Holding admin",
-}
+import { ROLE_LABEL } from "@/lib/dto/user"
 
 type Form = {
   name: string

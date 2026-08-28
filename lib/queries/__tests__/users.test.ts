@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import bcrypt from "bcryptjs"
-import { Role } from "@prisma/client"
+import { Role, Sex } from "@prisma/client"
 import { superuserPrisma } from "@/lib/test/superuser-prisma"
 import { prisma } from "@/lib/db/prisma"
 import {
@@ -10,6 +10,7 @@ import {
   changeOwnPassword,
   generateTempPassword,
   listUsers,
+  listUsersForClinic,
   getManagedUserById,
   createUser,
   updateUser,
@@ -377,5 +378,316 @@ describe("user management", () => {
     const row = await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInA.id } })
     expect(row.failedLoginAttempts).toBe(0)
     expect(row.lockedUntil).toBeNull()
+  })
+})
+
+/**
+ * Moving a user between branches — the console's branch picker on
+ * /console/users/[id]. Two things make this worth its own fixture: a user's
+ * branch is the whole basis of every scoping decision elsewhere, and a
+ * DOCTOR carries a *second* branch_id on its own row that has to travel
+ * with it.
+ *
+ * `move-` prefixes on every slug/email keep this suite from colliding with
+ * the other describes sharing this database.
+ */
+describe("updateUser — branch reassignment", () => {
+  const stamp = Date.now()
+  let holding: { id: string }
+  let clinicOneId: string
+  let branchA: { id: string }
+  let siblingOfA: { id: string }
+  let branchB: { id: string }
+  let inactiveBranch: { id: string }
+  let holdingAdmin: AbilitySubject
+  let clinicAdminA: AbilitySubject
+  let frontDeskInA: { id: string }
+  let doctorUserId: string
+  let doctorRowId: string
+  let patientInA: { id: string }
+
+  async function makeBranch(clinicId: string, name: string, slug: string, isActive = true) {
+    return superuserPrisma.branch.create({
+      data: {
+        clinicId,
+        name,
+        slug: `${slug}-${stamp}`,
+        address: "1 Move St",
+        city: "Move City",
+        phone: "0000",
+        operatingHours: {},
+        isActive,
+      },
+    })
+  }
+
+  beforeAll(async () => {
+    holding = await superuserPrisma.holdingCompany.create({ data: { name: `Test Holding — move ${stamp}` } })
+    const clinicOne = await superuserPrisma.clinic.create({
+      data: { holdingCompanyId: holding.id, name: `Move Clinic One ${stamp}` },
+    })
+    const clinicTwo = await superuserPrisma.clinic.create({
+      data: { holdingCompanyId: holding.id, name: `Move Clinic Two ${stamp}` },
+    })
+    clinicOneId = clinicOne.id
+
+    // branchA and siblingOfA share a parent clinic — the boundary the Branch
+    // refactor introduced. branchB is the older cross-clinic control.
+    branchA = await makeBranch(clinicOne.id, "Move Branch A", "move-a")
+    siblingOfA = await makeBranch(clinicOne.id, "Move Sibling A", "move-sib-a")
+    branchB = await makeBranch(clinicTwo.id, "Move Branch B", "move-b")
+    inactiveBranch = await makeBranch(clinicOne.id, "Move Closed", "move-closed", false)
+
+    const owner = await superuserPrisma.user.create({
+      data: {
+        holdingCompanyId: holding.id,
+        name: "Move Holding Owner",
+        email: `move-owner-${stamp}@test.local`,
+        passwordHash: "x",
+        role: Role.HOLDING_ADMIN,
+      },
+    })
+    holdingAdmin = { id: owner.id, role: Role.HOLDING_ADMIN, branchId: null, holdingCompanyId: holding.id }
+
+    const admin = await superuserPrisma.user.create({
+      data: {
+        branchId: branchA.id,
+        name: "Move Clinic Admin A",
+        email: `move-admin-a-${stamp}@test.local`,
+        passwordHash: "x",
+        role: Role.CLINIC_ADMIN,
+      },
+    })
+    clinicAdminA = { id: admin.id, role: Role.CLINIC_ADMIN, branchId: branchA.id, holdingCompanyId: null }
+
+    frontDeskInA = await superuserPrisma.user.create({
+      data: {
+        branchId: branchA.id,
+        name: "Move Front Desk A",
+        email: `move-fd-a-${stamp}@test.local`,
+        passwordHash: "x",
+        role: Role.FRONT_DESK,
+      },
+    })
+
+    const doctorUser = await superuserPrisma.user.create({
+      data: {
+        branchId: branchA.id,
+        name: "Move Dr. A",
+        email: `move-dr-a-${stamp}@test.local`,
+        passwordHash: "x",
+        role: Role.DOCTOR,
+      },
+    })
+    doctorUserId = doctorUser.id
+    const doctorRow = await superuserPrisma.doctor.create({
+      data: {
+        userId: doctorUser.id,
+        branchId: branchA.id,
+        licenseNumber: `MOVE-LIC-${stamp}`,
+        consultationFee: 50000,
+      },
+    })
+    doctorRowId = doctorRow.id
+
+    patientInA = await superuserPrisma.patient.create({
+      data: {
+        branchId: branchA.id,
+        firstName: "Move",
+        lastName: "Patient",
+        birthdate: new Date("1990-01-01"),
+        sex: Sex.FEMALE,
+        phone: "09170000000",
+        address: "1 Move St",
+        emergencyContactName: "Kin",
+        emergencyContactPhone: "09170000001",
+      },
+    })
+  })
+
+  afterAll(async () => {
+    const branchIds = [branchA.id, siblingOfA.id, branchB.id, inactiveBranch.id]
+    await superuserPrisma.queueEntry.deleteMany({ where: { branchId: { in: branchIds } } })
+    await superuserPrisma.auditLog.deleteMany({ where: { branchId: { in: branchIds } } })
+    await superuserPrisma.patient.deleteMany({ where: { branchId: { in: branchIds } } })
+    await superuserPrisma.doctor.deleteMany({ where: { branchId: { in: branchIds } } })
+    await superuserPrisma.user.deleteMany({ where: { branchId: { in: branchIds } } })
+    await superuserPrisma.user.deleteMany({ where: { holdingCompanyId: holding.id } })
+    await superuserPrisma.branch.deleteMany({ where: { id: { in: branchIds } } })
+    await superuserPrisma.clinic.deleteMany({ where: { holdingCompanyId: holding.id } })
+    await superuserPrisma.holdingCompany.deleteMany({ where: { id: holding.id } })
+    await superuserPrisma.$disconnect()
+    await prisma.$disconnect()
+  })
+
+  /** Park the doctor back in branchA so each test starts from a known branch. */
+  async function resetDoctorToBranchA() {
+    await superuserPrisma.user.update({ where: { id: doctorUserId }, data: { branchId: branchA.id } })
+    await superuserPrisma.doctor.update({ where: { id: doctorRowId }, data: { branchId: branchA.id } })
+    await superuserPrisma.queueEntry.deleteMany({ where: { doctorId: doctorRowId } })
+  }
+
+  async function giveDoctorAnEntry(status: "WAITING" | "COMPLETED", queueNumber: number) {
+    return superuserPrisma.queueEntry.create({
+      data: {
+        branchId: branchA.id,
+        patientId: patientInA.id,
+        doctorId: doctorRowId,
+        queueDate: new Date("2099-01-01T00:00:00Z"),
+        queueNumber,
+        status,
+        source: "WALK_IN",
+        accessToken: `move-tok-${stamp}-${queueNumber}`,
+      },
+    })
+  }
+
+  it("omitting branchId leaves the user's branch untouched", async () => {
+    const result = await updateUser(holdingAdmin, frontDeskInA.id, { name: "Move Front Desk A" })
+    expect(result).toEqual({ ok: true })
+    const row = await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInA.id } })
+    expect(row.branchId).toBe(branchA.id)
+  })
+
+  it("moves a user to a sibling branch under the same clinic", async () => {
+    const result = await updateUser(holdingAdmin, frontDeskInA.id, {
+      name: "Move Front Desk A",
+      branchId: siblingOfA.id,
+    })
+    expect(result).toEqual({ ok: true })
+    const row = await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInA.id } })
+    expect(row.branchId).toBe(siblingOfA.id)
+
+    // Put them back, which also proves the move works in both directions
+    // rather than only toward one branch.
+    const back = await updateUser(holdingAdmin, frontDeskInA.id, {
+      name: "Move Front Desk A",
+      branchId: branchA.id,
+    })
+    expect(back).toEqual({ ok: true })
+    expect((await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInA.id } })).branchId).toBe(branchA.id)
+  })
+
+  it("audit-logs the move against the destination branch, recording both ends", async () => {
+    await updateUser(holdingAdmin, frontDeskInA.id, { name: "Move Front Desk A", branchId: branchB.id })
+    const log = await superuserPrisma.auditLog.findFirst({
+      where: { entityId: frontDeskInA.id, action: "user.branch_changed" },
+      orderBy: { createdAt: "desc" },
+    })
+    expect(log).toBeTruthy()
+    expect(log!.branchId).toBe(branchB.id)
+    expect(log!.changes).toMatchObject({ fromBranchId: branchA.id, toBranchId: branchB.id })
+
+    await updateUser(holdingAdmin, frontDeskInA.id, { name: "Move Front Desk A", branchId: branchA.id })
+  })
+
+  it("moves a doctor's Doctor row in lockstep with their user account", async () => {
+    await resetDoctorToBranchA()
+    const result = await updateUser(holdingAdmin, doctorUserId, { name: "Move Dr. A", branchId: siblingOfA.id })
+    expect(result).toEqual({ ok: true })
+
+    const user = await superuserPrisma.user.findUniqueOrThrow({ where: { id: doctorUserId } })
+    const doctor = await superuserPrisma.doctor.findUniqueOrThrow({ where: { id: doctorRowId } })
+    expect(user.branchId).toBe(siblingOfA.id)
+    // The point of the test: Doctor.branch_id is its own non-nullable column,
+    // so a move that updated only the user would leave the doctor listed in
+    // branchA's assignment picker while their account lived in the sibling.
+    expect(doctor.branchId).toBe(siblingOfA.id)
+    expect(doctor.branchId).toBe(user.branchId)
+  })
+
+  it("refuses to move a doctor who still has unfinished queue entries, and moves nothing", async () => {
+    await resetDoctorToBranchA()
+    await giveDoctorAnEntry("WAITING", 90001)
+
+    const result = await updateUser(holdingAdmin, doctorUserId, { name: "Move Dr. A", branchId: siblingOfA.id })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error).toContain("unfinished queue")
+
+    // Neither row may have moved — a refusal that still wrote half the change
+    // would be worse than no guard at all.
+    expect((await superuserPrisma.user.findUniqueOrThrow({ where: { id: doctorUserId } })).branchId).toBe(branchA.id)
+    expect((await superuserPrisma.doctor.findUniqueOrThrow({ where: { id: doctorRowId } })).branchId).toBe(branchA.id)
+  })
+
+  /**
+   * The positive control for the guard above, and the reason it exists as a
+   * separate test: the first implementation counted on the bare Prisma
+   * client, outside runWithRls. queue_entries is RLS-protected, so with no
+   * GUCs set the policy matched nothing, the count was always 0, and the
+   * guard could never fire. Both halves have to hold — refuses while the
+   * entry is live, allows once it is finished — or a guard that blocks
+   * everything and a guard that blocks nothing both look correct.
+   */
+  it("allows the same move once that entry reaches a finished state", async () => {
+    await resetDoctorToBranchA()
+    const entry = await giveDoctorAnEntry("WAITING", 90002)
+
+    const blocked = await updateUser(holdingAdmin, doctorUserId, { name: "Move Dr. A", branchId: siblingOfA.id })
+    expect(blocked.ok).toBe(false)
+
+    await superuserPrisma.queueEntry.update({ where: { id: entry.id }, data: { status: "COMPLETED" } })
+
+    const allowed = await updateUser(holdingAdmin, doctorUserId, { name: "Move Dr. A", branchId: siblingOfA.id })
+    expect(allowed).toEqual({ ok: true })
+    expect((await superuserPrisma.doctor.findUniqueOrThrow({ where: { id: doctorRowId } })).branchId).toBe(
+      siblingOfA.id
+    )
+  })
+
+  it("refuses a clinic admin moving their own staff into another branch", async () => {
+    const result = await updateUser(clinicAdminA, frontDeskInA.id, {
+      name: "Move Front Desk A",
+      branchId: siblingOfA.id,
+    })
+    expect(result).toEqual({
+      ok: false,
+      error: "Only a holding admin can move a user to another branch.",
+    })
+    // A clinic admin is confined to their own branch by canManageTarget, so
+    // without this check the move would be a one-way exit from their scope.
+    expect((await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInA.id } })).branchId).toBe(branchA.id)
+  })
+
+  it("refuses to give a holding admin a branch", async () => {
+    const result = await updateUser(holdingAdmin, holdingAdmin.id, {
+      name: "Move Holding Owner",
+      branchId: branchA.id,
+    })
+    expect(result).toEqual({ ok: false, error: "A holding admin isn't attached to a branch." })
+    expect((await superuserPrisma.user.findUniqueOrThrow({ where: { id: holdingAdmin.id } })).branchId).toBeNull()
+  })
+
+  it("refuses a move into an inactive branch", async () => {
+    const result = await updateUser(holdingAdmin, frontDeskInA.id, {
+      name: "Move Front Desk A",
+      branchId: inactiveBranch.id,
+    })
+    expect(result).toEqual({ ok: false, error: "That branch is inactive." })
+    expect((await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInA.id } })).branchId).toBe(branchA.id)
+  })
+
+  it("refuses a branch id that doesn't exist", async () => {
+    const result = await updateUser(holdingAdmin, frontDeskInA.id, {
+      name: "Move Front Desk A",
+      branchId: "00000000-0000-0000-0000-000000000000",
+    })
+    expect(result).toEqual({ ok: false, error: "Select a branch." })
+    expect((await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInA.id } })).branchId).toBe(branchA.id)
+  })
+
+  it("keeps listUsersForClinic consistent with the move", async () => {
+    await superuserPrisma.user.update({ where: { id: frontDeskInA.id }, data: { branchId: branchA.id } })
+    const before = await listUsersForClinic(holdingAdmin, clinicOneId)
+    expect(before.some((u) => u.id === frontDeskInA.id)).toBe(true)
+
+    // branchB sits under the other clinic, so the user should leave this
+    // clinic's staff list entirely once moved.
+    await updateUser(holdingAdmin, frontDeskInA.id, { name: "Move Front Desk A", branchId: branchB.id })
+    const after = await listUsersForClinic(holdingAdmin, clinicOneId)
+    expect(after.some((u) => u.id === frontDeskInA.id)).toBe(false)
+
+    await updateUser(holdingAdmin, frontDeskInA.id, { name: "Move Front Desk A", branchId: branchA.id })
   })
 })
