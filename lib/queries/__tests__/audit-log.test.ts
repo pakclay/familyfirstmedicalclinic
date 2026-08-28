@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
-import { Role } from "@prisma/client"
+import { Role, type Prisma } from "@prisma/client"
 import { superuserPrisma } from "@/lib/test/superuser-prisma"
 import { prisma } from "@/lib/db/prisma"
 import {
@@ -35,13 +35,34 @@ const ACTION_ALPHA = `fixture.alpha.${RUN}`
 const ACTION_BETA = `fixture.beta.${RUN}`
 const SHARED_ENTITY_ID = `patient-alpha-${RUN}`
 
+/**
+ * The branch tier's own boundary: `branchA` and `siblingOfA` sit under the
+ * SAME clinic. Every pre-existing fixture pair in this file (`branchA` /
+ * `branchB`) is cross-*clinic*, so nothing above can tell a genuinely
+ * branch-keyed rule apart from a clinic-keyed one. These rows can.
+ *
+ * Their entity types are deliberately new literals rather than additions to
+ * `OWN_FIXTURE_TYPES`, so none of the exact-equality assertions above (which
+ * all filter by TYPE_ALPHA / TYPE_BETA / TYPE_PAGED) can be perturbed by
+ * them, and none of their entity ids contain `SHARED_ENTITY_ID` so the `q`
+ * exact-set test is untouched too.
+ */
+const TYPE_SIBLING = `AuditFixtureSibling-${RUN}`
+/** Rows written *by the RLS-bound client* inside the INSERT-policy tests. */
+const TYPE_INSERT = `AuditFixtureInsert-${RUN}`
+const ACTION_SIBLING = `fixture.sibling.${RUN}`
+const ACTION_INSERT = `fixture.insert.${RUN}`
+/** Payload markers — a leak of the row also leaks the string inside it. */
+const SIBLING_PHI = `SIBLING-ONLY-PHI-${RUN}`
+const OWN_PHI = `BRANCH-A-ONLY-PHI-${RUN}`
+
 /** All five paging fixtures share this instant exactly, to force sort ties. */
 const TIED_INSTANT = new Date("2026-05-04T04:00:00.000Z")
 
 /** Ours — the ones a holding admin of `holding` is entitled to see. */
 const OWN_FIXTURE_TYPES = [TYPE_ALPHA, TYPE_BETA, TYPE_PAGED]
 /** Everything this suite creates, including the rival's, for teardown only. */
-const FIXTURE_TYPES = [...OWN_FIXTURE_TYPES, TYPE_FOREIGN]
+const FIXTURE_TYPES = [...OWN_FIXTURE_TYPES, TYPE_FOREIGN, TYPE_SIBLING, TYPE_INSERT]
 
 function idsOf(rows: { id: string }[]): string[] {
   return rows.map((r) => r.id).sort()
@@ -51,14 +72,38 @@ function sorted(ids: string[]): string[] {
   return [...ids].sort()
 }
 
+/**
+ * The three session GUCs `lib/db/rls.ts` sets, spelled out by hand so the
+ * RLS tests below exercise the *policy* rather than `runWithRls`. Note the
+ * branch id is a parameter of its own: every negative assertion in this file
+ * is paired with the identical query under a different `app.branch_id`, and
+ * that pairing is the only thing separating "the policy is branch-keyed"
+ * from "the query returns nothing at all".
+ */
+async function setRlsGucs(
+  tx: Prisma.TransactionClient,
+  role: Role,
+  userId: string,
+  branchId: string
+): Promise<void> {
+  await tx.$executeRaw`SELECT set_config('app.role', ${role}, true)`
+  await tx.$executeRaw`SELECT set_config('app.user_id', ${userId}, true)`
+  await tx.$executeRaw`SELECT set_config('app.branch_id', ${branchId}, true)`
+}
+
 describe("listAuditLog", () => {
   let holding: { id: string }
   let branchA: { id: string; name: string }
   let branchB: { id: string; name: string }
+  /** Under the SAME clinic as branchA — the boundary the branch tier adds. */
+  let siblingOfA: { id: string; name: string }
+  let clinicAName: string
   let holdingAdmin: AbilitySubject
   let clinicAdmin: AbilitySubject
   let frontDesk: AbilitySubject
   let doctor: AbilitySubject
+  /** A branch-scoped admin whose branch shares clinicA with branchA. */
+  let siblingAdmin: AbilitySubject
   let frontDeskName: string
   let clinicAdminName: string
 
@@ -69,6 +114,11 @@ describe("listAuditLog", () => {
   let a4: string // NO branch · NO user · ACTION_ALPHA · Mar 17
   let b1: string // TYPE_BETA · branch A · front desk · Mar 18
   let pagedIds: string[] = []
+
+  // The sibling pair. Same clinic, same entityType, same action — the only
+  // thing that differs is the branch, which is exactly the property under test.
+  let own1: string // TYPE_SIBLING · branch A       · carries OWN_PHI
+  let s1: string //  TYPE_SIBLING · siblingOfA      · carries SIBLING_PHI + attemptedBranchId
 
   // A second, unrelated holding company. Nothing below belongs to our
   // holdingAdmin, and none of it may ever surface in their results.
@@ -102,6 +152,12 @@ describe("listAuditLog", () => {
     })
     branchB = await superuserPrisma.branch.create({
       data: branchData(clinicB.id, `Audit Branch B ${RUN}`, `audit-branch-b-${RUN}`),
+    })
+    clinicAName = clinicA.name
+    // Second branch under clinicA. branchA/branchB are in *different* clinics,
+    // so they cannot distinguish a branch-keyed rule from a clinic-keyed one.
+    siblingOfA = await superuserPrisma.branch.create({
+      data: branchData(clinicA.id, `Audit Branch A Sibling ${RUN}`, `audit-branch-a-sibling-${RUN}`),
     })
 
     frontDeskName = `Audit Front Desk ${RUN}`
@@ -235,6 +291,51 @@ describe("listAuditLog", () => {
     )
     pagedIds = paged.map((row) => row.id)
 
+    // ── The sibling pair, under ONE clinic ───────────────────────────────
+    const siblingAdminUser = await superuserPrisma.user.create({
+      data: {
+        branchId: siblingOfA.id,
+        name: `Audit Sibling Admin ${RUN}`,
+        email: `audit-sib-admin-${RUN}@test.local`,
+        passwordHash: "x",
+        role: Role.CLINIC_ADMIN,
+      },
+    })
+    siblingAdmin = {
+      id: siblingAdminUser.id,
+      role: Role.CLINIC_ADMIN,
+      branchId: siblingOfA.id,
+      holdingCompanyId: null,
+    }
+
+    const rowOwn1 = await superuserPrisma.auditLog.create({
+      data: {
+        branchId: branchA.id,
+        userId: frontDeskUser.id,
+        action: ACTION_SIBLING,
+        entityType: TYPE_SIBLING,
+        entityId: `own-phi-${RUN}`,
+        changes: { diagnosis: OWN_PHI },
+        createdAt: new Date("2026-03-21T04:00:00.000Z"),
+      },
+    })
+    // A denial row, the shape `getPatientById` writes when it refuses a
+    // cross-branch read: it embeds both PHI and the branch that was reached
+    // for. Neither may ever surface to the branch next door.
+    const rowS1 = await superuserPrisma.auditLog.create({
+      data: {
+        branchId: siblingOfA.id,
+        userId: siblingAdminUser.id,
+        action: ACTION_SIBLING,
+        entityType: TYPE_SIBLING,
+        entityId: `sibling-phi-${RUN}`,
+        changes: { diagnosis: SIBLING_PHI, attemptedBranchId: siblingOfA.id },
+        createdAt: new Date("2026-03-22T04:00:00.000Z"),
+      },
+    })
+    own1 = rowOwn1.id
+    s1 = rowS1.id
+
     // ── A second holding company, entirely unrelated to `holding` ────────
     // The RLS policy grants any HOLDING_ADMIN a blanket bypass and says
     // nothing about *which* holding company they own, so these rows are
@@ -303,7 +404,7 @@ describe("listAuditLog", () => {
   })
 
   afterAll(async () => {
-    const branchIds = [branchA.id, branchB.id, otherBranch.id]
+    const branchIds = [branchA.id, branchB.id, siblingOfA.id, otherBranch.id]
     const holdingIds = [holding.id, otherHolding.id]
     await superuserPrisma.auditLog.deleteMany({ where: { entityType: { in: FIXTURE_TYPES } } })
     await superuserPrisma.auditLog.deleteMany({ where: { branchId: { in: branchIds } } })
@@ -616,6 +717,340 @@ describe("listAuditLog", () => {
       expect(clampPageSize(10.9)).toBe(10)
       expect(clampPageSize(Number.MAX_SAFE_INTEGER)).toBe(AUDIT_LOG_PAGE_SIZE_MAX)
       expect(clampPageSize(Number.POSITIVE_INFINITY)).toBe(AUDIT_LOG_PAGE_SIZE_DEFAULT)
+    })
+  })
+
+  /**
+   * ── Two branches under ONE clinic ──────────────────────────────────────
+   *
+   * Everything above proves the cross-*clinic* and cross-*holding-company*
+   * boundaries. The branch rewrite introduced a third, tighter one that none
+   * of it can see: `branchA` and `siblingOfA` share clinicA, so a regression
+   * from `branchId: <id>` to `branch: { clinicId }` — or from a branch-keyed
+   * RLS policy to a clinic-keyed one — leaves every assertion above green.
+   *
+   * Both enforcement layers are exercised separately, because they fail
+   * independently: the app-layer `where` clause via `listAuditLog`, and the
+   * Postgres policy via the RLS-bound `prisma` client with the session GUCs
+   * set by hand. `superuserPrisma` is deliberately NOT used for the policy
+   * tests — it connects as the migration superuser, which bypasses RLS
+   * outright, so the negative half would pass for the wrong reason.
+   */
+  describe("sibling branches under one clinic", () => {
+    it("has no branch-scoped read path at all — a clinic admin of the sibling branch is refused, not filtered", async () => {
+      // `listAuditLog` gates on role before it ever looks at a branch, so the
+      // sibling's own admin never reaches a query. Sharing clinicA with
+      // branchA buys nothing, and neither does owning the rows themselves.
+      await expect(listAuditLog(siblingAdmin, { entityType: TYPE_SIBLING })).rejects.toBeInstanceOf(ForbiddenError)
+
+      // Positive control: a refusal is only meaningful if there was something
+      // to refuse. Both sibling rows exist and are readable by someone.
+      const visible = await listAuditLog(holdingAdmin, { entityType: TYPE_SIBLING })
+      expect(idsOf(visible.rows)).toEqual(sorted([own1, s1]))
+    })
+
+    it("the branchId filter separates two branches under the SAME clinic", async () => {
+      // The regression catcher the existing "narrows by branchId" test cannot
+      // be: that one names branchB, which is in a *different* clinic, so a
+      // clinic-keyed `where` would satisfy it just as well. These two calls
+      // differ only in the branch id, and both clinics are the same clinic.
+      const mine = await listAuditLog(holdingAdmin, { entityType: TYPE_SIBLING, branchId: branchA.id })
+      expect(idsOf(mine.rows)).toEqual([own1])
+      expect(mine.rows[0].branchName).toBe(branchA.name)
+
+      const theirs = await listAuditLog(holdingAdmin, { entityType: TYPE_SIBLING, branchId: siblingOfA.id })
+      expect(idsOf(theirs.rows)).toEqual([s1])
+      expect(theirs.rows[0].branchName).toBe(siblingOfA.name)
+    })
+
+    it("a sibling's changes payload never rides along in the other branch's page", async () => {
+      const mine = await listAuditLog(holdingAdmin, { entityType: TYPE_SIBLING, branchId: branchA.id })
+      const serialized = JSON.stringify(mine.rows)
+      // Not just the row — the PHI inside it, and the attemptedBranchId that
+      // would name the sibling branch even if the diagnosis were redacted.
+      expect(serialized).not.toContain(SIBLING_PHI)
+      expect(serialized).not.toContain(siblingOfA.id)
+      // Positive control: this page does carry its own branch's payload, so
+      // the two absences above are not just "changes is never populated".
+      expect(mine.rows[0].changes).toContain(OWN_PHI)
+
+      const theirs = await listAuditLog(holdingAdmin, { entityType: TYPE_SIBLING, branchId: siblingOfA.id })
+      const theirsSerialized = JSON.stringify(theirs.rows)
+      expect(theirsSerialized).toContain(SIBLING_PHI)
+      expect(theirsSerialized).toContain(siblingOfA.id)
+    })
+
+    it("a holding admin legitimately sees both siblings, listed under the one clinic name", async () => {
+      // The other half of the boundary: separating siblings must not mean
+      // losing them. This also pins the extra branch → clinic → holding
+      // company hop the refactor added, in both the rows and the dropdown.
+      const result = await listAuditLog(holdingAdmin, { entityType: TYPE_SIBLING })
+      expect(idsOf(result.rows)).toEqual(sorted([own1, s1]))
+
+      const mineOption = result.options.branches.find((b) => b.id === branchA.id)
+      const siblingOption = result.options.branches.find((b) => b.id === siblingOfA.id)
+      expect(mineOption?.clinicName).toBe(clinicAName)
+      expect(siblingOption?.clinicName).toBe(clinicAName)
+      expect(siblingOption?.name).toBe(siblingOfA.name)
+    })
+
+    it("RLS backstop: a branch-scoped session cannot SELECT a sibling branch's audit row", async () => {
+      const hidden = await prisma.$transaction(async (tx) => {
+        await setRlsGucs(tx, Role.FRONT_DESK, frontDesk.id, branchA.id)
+        // Deliberately unfiltered by branch — this proves Postgres hides the
+        // row, not that some `where` clause forgot to ask for it.
+        return tx.auditLog.findMany({ where: { id: s1 } })
+      })
+      expect(hidden).toHaveLength(0)
+
+      // Positive control. A policy of `USING (false)`, a wiped table, or a
+      // broken fixture all satisfy the zero above. Identical query, identical
+      // code path, only `app.branch_id` differs — this passing is what proves
+      // the policy is keyed on the branch rather than blocking everything.
+      const visible = await prisma.$transaction(async (tx) => {
+        await setRlsGucs(tx, Role.FRONT_DESK, frontDesk.id, siblingOfA.id)
+        return tx.auditLog.findMany({ where: { id: s1 } })
+      })
+      expect(visible).toHaveLength(1)
+    })
+
+    it("RLS backstop: the same branch-scoped session does see its own branch's row", async () => {
+      const rows = await prisma.$transaction(async (tx) => {
+        await setRlsGucs(tx, Role.FRONT_DESK, frontDesk.id, branchA.id)
+        return tx.auditLog.findMany({ where: { id: own1 } })
+      })
+      expect(rows).toHaveLength(1)
+      expect(rows[0].branchId).toBe(branchA.id)
+    })
+
+    it("RLS backstop: the sibling's PHI and attemptedBranchId never reach a branch-scoped session", async () => {
+      // A whole-entityType sweep rather than a lookup by id: this is the
+      // shape a leak would actually take — a list query that forgot its
+      // branch predicate and fell back on the database to be right.
+      const fromBranchA = await prisma.$transaction(async (tx) => {
+        await setRlsGucs(tx, Role.FRONT_DESK, frontDesk.id, branchA.id)
+        return tx.auditLog.findMany({ where: { entityType: TYPE_SIBLING } })
+      })
+      expect(fromBranchA.map((r) => r.id)).toEqual([own1]) // positive control: own row present
+      expect(JSON.stringify(fromBranchA)).not.toContain(SIBLING_PHI)
+      expect(JSON.stringify(fromBranchA)).not.toContain(siblingOfA.id)
+
+      const fromSibling = await prisma.$transaction(async (tx) => {
+        await setRlsGucs(tx, Role.FRONT_DESK, frontDesk.id, siblingOfA.id)
+        return tx.auditLog.findMany({ where: { entityType: TYPE_SIBLING } })
+      })
+      expect(fromSibling.map((r) => r.id)).toEqual([s1])
+      expect(JSON.stringify(fromSibling)).toContain(SIBLING_PHI)
+    })
+
+    it("RLS backstop: branch_id IS NULL rows are invisible to a branch-scoped session — the SELECT policy has no NULL arm", async () => {
+      // `audit_logs` is the one table whose branch_id is nullable, and its
+      // INSERT policy has an explicit `branch_id IS NULL` arm that the SELECT
+      // policy deliberately does not mirror. The consequence is that a
+      // holding-level row is readable by holding admins only — a branch
+      // session cannot see it even though the same session could (via raw
+      // SQL) have written it. See the INSERT test below for the other half.
+      const fromBranchA = await prisma.$transaction(async (tx) => {
+        await setRlsGucs(tx, Role.FRONT_DESK, frontDesk.id, branchA.id)
+        return {
+          holdingLevel: await tx.auditLog.findMany({ where: { id: a4 } }),
+          // Positive control inside the very same session: this context is
+          // not simply blind.
+          ownRow: await tx.auditLog.findMany({ where: { id: own1 } }),
+        }
+      })
+      expect(fromBranchA.holdingLevel).toHaveLength(0)
+      expect(fromBranchA.ownRow).toHaveLength(1)
+
+      // Second positive control: the row itself is readable — through the
+      // policy's role arm, which is the only arm a NULL branch_id can match.
+      const asHoldingAdmin = await prisma.$transaction(async (tx) => {
+        await setRlsGucs(tx, Role.HOLDING_ADMIN, holdingAdmin.id, "")
+        return tx.auditLog.findMany({ where: { id: a4 } })
+      })
+      expect(asHoldingAdmin).toHaveLength(1)
+      expect(asHoldingAdmin[0].branchId).toBeNull()
+    })
+
+    it("append-only: a branch-scoped session cannot UPDATE even its own branch's audit row", async () => {
+      // There is no UPDATE policy on `audit_logs` at all, so every row is
+      // outside the updatable set and `updateMany` matches nothing.
+      const result = await prisma.$transaction(async (tx) => {
+        await setRlsGucs(tx, Role.FRONT_DESK, frontDesk.id, branchA.id)
+        // Positive control, in the same transaction and the same session:
+        // the row IS visible here, so `count: 0` below is the missing UPDATE
+        // policy rather than an invisible row.
+        const readable = await tx.auditLog.findMany({ where: { id: own1 } })
+        const updated = await tx.auditLog.updateMany({ where: { id: own1 }, data: { action: "tampered.by.own.branch" } })
+        return { readable: readable.length, count: updated.count }
+      })
+      expect(result.readable).toBe(1)
+      expect(result.count).toBe(0)
+
+      const row = await superuserPrisma.auditLog.findUniqueOrThrow({ where: { id: own1 } })
+      expect(row.action).toBe(ACTION_SIBLING)
+    })
+
+    it("append-only: neither branch can UPDATE the sibling's audit row — not the neighbour, not its owner", async () => {
+      const fromBranchA = await prisma.$transaction(async (tx) => {
+        await setRlsGucs(tx, Role.FRONT_DESK, frontDesk.id, branchA.id)
+        return tx.auditLog.updateMany({ where: { id: s1 }, data: { action: "tampered.from.branch.a" } })
+      })
+      expect(fromBranchA.count).toBe(0)
+
+      const fromSibling = await prisma.$transaction(async (tx) => {
+        await setRlsGucs(tx, Role.CLINIC_ADMIN, siblingAdmin.id, siblingOfA.id)
+        // Positive control: the owning branch can read it, so the zero counts
+        // are about writing, not about visibility.
+        const readable = await tx.auditLog.findMany({ where: { id: s1 } })
+        const updated = await tx.auditLog.updateMany({ where: { id: s1 }, data: { action: "tampered.from.sibling" } })
+        return { readable: readable.length, count: updated.count }
+      })
+      expect(fromSibling.readable).toBe(1)
+      expect(fromSibling.count).toBe(0)
+
+      const row = await superuserPrisma.auditLog.findUniqueOrThrow({ where: { id: s1 } })
+      expect(row.action).toBe(ACTION_SIBLING)
+    })
+
+    it("append-only: not even a HOLDING_ADMIN session can UPDATE an audit row", async () => {
+      // Append-only is not a branch rule — the role arm of the SELECT policy
+      // widens *reads* only. Someone who can see every branch's trail still
+      // cannot rewrite any of it.
+      const result = await prisma.$transaction(async (tx) => {
+        await setRlsGucs(tx, Role.HOLDING_ADMIN, holdingAdmin.id, "")
+        const readable = await tx.auditLog.findMany({ where: { id: s1 } })
+        const updated = await tx.auditLog.updateMany({ where: { id: s1 }, data: { action: "tampered.by.holding.admin" } })
+        return { readable: readable.length, count: updated.count }
+      })
+      expect(result.readable).toBe(1) // positive control: fully visible to this session
+      expect(result.count).toBe(0)
+
+      const row = await superuserPrisma.auditLog.findUniqueOrThrow({ where: { id: s1 } })
+      expect(row.action).toBe(ACTION_SIBLING)
+    })
+
+    it("append-only: a single-row update rejects rather than silently reporting success", async () => {
+      // `updateMany` reporting 0 is easy to ignore; the single-row form has
+      // to fail loudly, because a caller that ignores its result would
+      // otherwise believe the row was rewritten.
+      const attempt = prisma.$transaction(async (tx) => {
+        await setRlsGucs(tx, Role.FRONT_DESK, frontDesk.id, branchA.id)
+        return tx.auditLog.update({ where: { id: own1 }, data: { action: "tampered.single" } })
+      })
+      await expect(attempt).rejects.toThrow(/No record was found for an update/)
+
+      const row = await superuserPrisma.auditLog.findUniqueOrThrow({ where: { id: own1 } })
+      expect(row.action).toBe(ACTION_SIBLING)
+    })
+
+    it("append-only: a branch-scoped session cannot hard-delete an audit row", async () => {
+      // Belt and braces above the missing UPDATE policy: the app role is not
+      // granted DELETE on this table at all, so the attempt fails at
+      // permission-check time rather than quietly matching zero rows.
+      const attempt = prisma.$transaction(async (tx) => {
+        await setRlsGucs(tx, Role.FRONT_DESK, frontDesk.id, branchA.id)
+        return tx.auditLog.deleteMany({ where: { id: own1 } })
+      })
+      await expect(attempt).rejects.toThrow(/permission denied/)
+
+      // Positive control: the row is still there to have been deleted.
+      expect(await superuserPrisma.auditLog.count({ where: { id: own1 } })).toBe(1)
+    })
+
+    it("RLS backstop: a branch-scoped session cannot forge an audit row attributed to a sibling branch", async () => {
+      // The mirror image of the SELECT tests. A branch that cannot read its
+      // sibling's trail must also not be able to write into it — planting a
+      // fabricated entry under the branch next door is a tamper, not a read.
+      const forged = prisma.$transaction(async (tx) => {
+        await setRlsGucs(tx, Role.FRONT_DESK, frontDesk.id, branchA.id)
+        return tx.auditLog.create({
+          data: {
+            branchId: siblingOfA.id,
+            userId: frontDesk.id,
+            action: ACTION_INSERT,
+            entityType: TYPE_INSERT,
+            entityId: `insert-forged-${RUN}`,
+          },
+        })
+      })
+      await expect(forged).rejects.toThrow(/row-level security policy/)
+      expect(await superuserPrisma.auditLog.count({ where: { entityId: `insert-forged-${RUN}` } })).toBe(0)
+
+      // Positive control: the identical write into the caller's OWN branch
+      // succeeds, so the rejection above is the branch predicate and not a
+      // blanket "this session may never insert".
+      const allowed = await prisma.$transaction(async (tx) => {
+        await setRlsGucs(tx, Role.FRONT_DESK, frontDesk.id, branchA.id)
+        return tx.auditLog.create({
+          data: {
+            branchId: branchA.id,
+            userId: frontDesk.id,
+            action: ACTION_INSERT,
+            entityType: TYPE_INSERT,
+            entityId: `insert-own-${RUN}`,
+          },
+        })
+      })
+      expect(allowed.branchId).toBe(branchA.id)
+    })
+
+    it("the INSERT policy's wider NULL arm is unreachable through Prisma, and unreadable even when forced", async () => {
+      // The asymmetry spelled out: INSERT accepts `branch_id IS NULL`,
+      // SELECT has no NULL arm. Prisma's `create` always emits RETURNING, and
+      // Postgres runs the SELECT policy over the returned row — so the wider
+      // INSERT arm is dead code for any ORM write from a branch session.
+      const viaPrisma = prisma.$transaction(async (tx) => {
+        await setRlsGucs(tx, Role.FRONT_DESK, frontDesk.id, branchA.id)
+        return tx.auditLog.create({
+          data: {
+            branchId: null,
+            userId: frontDesk.id,
+            action: ACTION_INSERT,
+            entityType: TYPE_INSERT,
+            entityId: `insert-null-prisma-${RUN}`,
+          },
+        })
+      })
+      await expect(viaPrisma).rejects.toThrow(/row-level security policy/)
+      expect(await superuserPrisma.auditLog.count({ where: { entityId: `insert-null-prisma-${RUN}` } })).toBe(0)
+
+      // Drop the RETURNING and the same session's INSERT is accepted — which
+      // is what the wider arm actually buys, and the reason it is worth
+      // pinning: the write lands somewhere its author can never read back.
+      const rawEntityId = `insert-null-raw-${RUN}`
+      const inserted = await prisma.$transaction(async (tx) => {
+        await setRlsGucs(tx, Role.FRONT_DESK, frontDesk.id, branchA.id)
+        return tx.$executeRaw`INSERT INTO "audit_logs" ("id", "branch_id", "user_id", "action", "entity_type", "entity_id", "created_at")
+          VALUES (gen_random_uuid(), NULL, ${frontDesk.id}::uuid, ${ACTION_INSERT}, ${TYPE_INSERT}, ${rawEntityId}, now())`
+      })
+      expect(inserted).toBe(1)
+
+      const readBack = await prisma.$transaction(async (tx) => {
+        await setRlsGucs(tx, Role.FRONT_DESK, frontDesk.id, branchA.id)
+        return tx.auditLog.findMany({ where: { entityId: rawEntityId } })
+      })
+      expect(readBack).toHaveLength(0)
+      // Positive control: the row genuinely exists — the zero above is the
+      // missing NULL arm on SELECT, not a failed insert.
+      expect(await superuserPrisma.auditLog.count({ where: { entityId: rawEntityId } })).toBe(1)
+
+      // Positive control for the rejection: a HOLDING_ADMIN session writes
+      // the exact same branch-less row through Prisma without complaint,
+      // because the role arm satisfies both policies at once.
+      const holdingLevel = await prisma.$transaction(async (tx) => {
+        await setRlsGucs(tx, Role.HOLDING_ADMIN, holdingAdmin.id, "")
+        return tx.auditLog.create({
+          data: {
+            branchId: null,
+            userId: holdingAdmin.id,
+            action: ACTION_INSERT,
+            entityType: TYPE_INSERT,
+            entityId: `insert-null-holding-${RUN}`,
+          },
+        })
+      })
+      expect(holdingLevel.branchId).toBeNull()
     })
   })
 })
