@@ -7,9 +7,9 @@ import { NewUserForm } from "./new-user-form"
 export default async function NewUserPage({
   searchParams,
 }: {
-  searchParams: Promise<{ clinicId?: string }>
+  searchParams: Promise<{ clinicId?: string; branchId?: string }>
 }) {
-  const { clinicId } = await searchParams
+  const { clinicId, branchId } = await searchParams
   const session = await auth()
   if (!session?.user) redirect("/login")
   if (session.user.role !== "HOLDING_ADMIN" && session.user.role !== "CLINIC_ADMIN") {
@@ -32,11 +32,11 @@ export default async function NewUserPage({
   // now, so the branch name alone may not disambiguate (e.g. two branches
   // both named after their city).
   // `clinicId` narrows the picker when arriving from a clinic's staff
-  // section, so "Add user" there offers only that clinic's branches instead
-  // of every branch in the company. It is a convenience filter on a
-  // read-only list, never an authorization decision — createUser still
-  // decides the branch server-side, so a forged clinicId can only ever
-  // shrink what this dropdown offers, not widen who can be created.
+  // section, and `branchId` preselects when arriving from a single branch's.
+  // Both are conveniences on a read-only list, never authorization decisions
+  // — createUser still decides the branch server-side, so a forged value can
+  // only shrink or preselect what this dropdown offers, never widen who can
+  // be created or where.
   const branches =
     session.user.role === "HOLDING_ADMIN"
       ? await prisma.branch.findMany({
@@ -50,7 +50,12 @@ export default async function NewUserPage({
     <div className="mx-auto max-w-md">
       <h1 className="text-2xl font-heading font-semibold">Add user</h1>
       <div className="mt-4">
-        <NewUserForm roles={roles} branches={branches} showBranchPicker={session.user.role === "HOLDING_ADMIN"} />
+        <NewUserForm
+          roles={roles}
+          branches={branches}
+          showBranchPicker={session.user.role === "HOLDING_ADMIN"}
+          defaultBranchId={branchId && branches.some((b) => b.id === branchId) ? branchId : undefined}
+        />
       </div>
     </div>
   )

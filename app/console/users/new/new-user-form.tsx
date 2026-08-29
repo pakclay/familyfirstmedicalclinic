@@ -35,12 +35,15 @@ export function NewUserForm({
   roles,
   branches,
   showBranchPicker,
+  defaultBranchId,
 }: {
   roles: string[]
   branches: { id: string; name: string; clinic: { name: string } }[]
   showBranchPicker: boolean
+  /** Preselected when arriving from a branch's staff section. */
+  defaultBranchId?: string
 }) {
-  const [form, setForm] = useState<Form>(initial)
+  const [form, setForm] = useState<Form>({ ...initial, branchId: defaultBranchId ?? "" })
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [created, setCreated] = useState<{ name: string; tempPassword: string } | null>(null)

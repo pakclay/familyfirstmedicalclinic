@@ -178,6 +178,30 @@ export async function listUsersForClinic(actor: AbilitySubject, clinicId: string
   return rows.map(toUserDTO)
 }
 
+/**
+ * The staff of one branch — the level users are actually attached to, so
+ * unlike listUsersForClinic this needs no union and the branch column is a
+ * direct match.
+ *
+ * A clinic admin gets their own branch only: asking about a sibling branch
+ * under the same clinic returns nothing rather than an error, so a probe
+ * can't distinguish "empty branch" from "not yours". Same reasoning as
+ * getManagedUserById returning null for both causes.
+ */
+export async function listUsersForBranch(actor: AbilitySubject, branchId: string): Promise<UserDTO[]> {
+  if (!isHoldingAdmin(actor) && requireBranchId(actor) !== branchId) return []
+
+  const where: Prisma.UserWhereInput = isHoldingAdmin(actor)
+    ? { branchId }
+    : { branchId, role: { in: ["FRONT_DESK", "DOCTOR"] } }
+  const rows = await prisma.user.findMany({
+    where,
+    include: userInclude,
+    orderBy: [{ role: "asc" }, { name: "asc" }],
+  })
+  return rows.map(toUserDTO)
+}
+
 /** Returns null for "doesn't exist" *and* "exists but actor can't manage it" — same non-enumeration reasoning as the login lockout not distinguishing its causes. */
 export async function getManagedUserById(actor: AbilitySubject, id: string): Promise<UserDTO | null> {
   const row = await prisma.user.findUnique({ where: { id }, include: userInclude })

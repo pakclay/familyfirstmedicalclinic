@@ -11,6 +11,7 @@ import {
   generateTempPassword,
   listUsers,
   listUsersForClinic,
+  listUsersForBranch,
   getManagedUserById,
   createUser,
   updateUser,
@@ -675,6 +676,41 @@ describe("updateUser — branch reassignment", () => {
     })
     expect(result).toEqual({ ok: false, error: "Select a branch." })
     expect((await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInA.id } })).branchId).toBe(branchA.id)
+  })
+
+  it("listUsersForBranch returns only that branch's staff, not a sibling's under the same clinic", async () => {
+    await superuserPrisma.user.update({ where: { id: frontDeskInA.id }, data: { branchId: branchA.id } })
+    const moved = await superuserPrisma.user.create({
+      data: {
+        branchId: siblingOfA.id,
+        name: "Move Sibling Staff",
+        email: `move-sib-staff-${stamp}@test.local`,
+        passwordHash: "x",
+        role: Role.FRONT_DESK,
+      },
+    })
+
+    const inA = await listUsersForBranch(holdingAdmin, branchA.id)
+    expect(inA.some((u) => u.id === frontDeskInA.id)).toBe(true)
+    // The sibling shares a parent clinic, so a clinic-level filter would
+    // wrongly include them here.
+    expect(inA.some((u) => u.id === moved.id)).toBe(false)
+
+    // Positive control: the sibling's own branch does return them, so the
+    // exclusion above is a branch match rather than a query that finds nothing.
+    const inSibling = await listUsersForBranch(holdingAdmin, siblingOfA.id)
+    expect(inSibling.some((u) => u.id === moved.id)).toBe(true)
+  })
+
+  it("listUsersForBranch gives a clinic admin their own branch and nothing else", async () => {
+    const own = await listUsersForBranch(clinicAdminA, branchA.id)
+    expect(own.some((u) => u.id === frontDeskInA.id)).toBe(true)
+    // Clinic admins see front desk/doctor only — not their own peer row.
+    expect(own.every((u) => u.role === "FRONT_DESK" || u.role === "DOCTOR")).toBe(true)
+
+    // A sibling branch under the same clinic is not theirs to inspect.
+    expect(await listUsersForBranch(clinicAdminA, siblingOfA.id)).toEqual([])
+    expect(await listUsersForBranch(clinicAdminA, branchB.id)).toEqual([])
   })
 
   it("keeps listUsersForClinic consistent with the move", async () => {
