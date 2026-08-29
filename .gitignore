@@ -40,3 +40,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# claude code — personal per-machine overrides. .claude/settings.json is the
+# shared, committed one; this is where an individual's own permission rules
+# go, and it must not follow them into the repo.
+.claude/settings.local.json
