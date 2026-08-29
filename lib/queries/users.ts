@@ -442,6 +442,72 @@ export async function setUserActive(actor: AbilitySubject, id: string, isActive:
   return { ok: true }
 }
 
+export type RegenerateTempPasswordResult = { ok: true; tempPassword: string } | { ok: false; error: string }
+
+/**
+ * Issues a fresh temporary password for an account whose old one is lost.
+ *
+ * forcePasswordReset only raises the mustChangePassword flag — the account
+ * still needs its *current* password to sign in and change it, which is
+ * exactly what is missing once an onboarding password goes astray. Without
+ * this, such an account is unreachable and the only remedy is deleting and
+ * recreating it, which is not available once anything references the row.
+ *
+ * Returns the plaintext to the caller once, the same contract createUser
+ * has: it is never stored, never logged, and never recoverable afterwards.
+ * The audit row records that a password was issued, never the value.
+ */
+export async function regenerateTempPassword(
+  actor: AbilitySubject,
+  id: string
+): Promise<RegenerateTempPasswordResult> {
+  // Refused for the actor's own account, and checked before canManageTarget
+  // for the same reason setUserActive checks first — otherwise a holding
+  // admin's own row returns the misleading "not found".
+  //
+  // This is a real boundary, not tidiness: changeOwnPassword requires the
+  // current password, so a stolen session cannot rotate its own credentials
+  // today. Allowing self-service here would hand it exactly that, letting an
+  // attacker lock the real owner out of their own account. Someone who has
+  // genuinely lost their own password needs another admin to issue one.
+  if (id === actor.id) {
+    return { ok: false, error: "You can't issue yourself a new password — ask another admin." }
+  }
+
+  const target = await prisma.user.findFirst({ where: managedUserWhere(actor, id) })
+  if (!target || !canManageTarget(actor, target)) return { ok: false, error: "User not found." }
+
+  const tempPassword = generateTempPassword()
+  const passwordHash = await bcrypt.hash(tempPassword, 10)
+
+  await runWithRls(actor, async (tx) => {
+    await tx.user.update({
+      where: { id },
+      data: {
+        passwordHash,
+        mustChangePassword: true,
+        // Clearing the lockout is part of issuing the password, not a
+        // separate courtesy: a lockout counts failed attempts against the
+        // *old* password, so leaving it would block the new one too and make
+        // this action appear not to have worked.
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    })
+    await tx.auditLog.create({
+      data: {
+        branchId: target.branchId,
+        userId: actor.id,
+        action: "user.temp_password_issued",
+        entityType: "User",
+        entityId: id,
+      },
+    })
+  })
+
+  return { ok: true, tempPassword }
+}
+
 export async function forcePasswordReset(actor: AbilitySubject, id: string): Promise<ManageUserResult> {
   const target = await prisma.user.findFirst({ where: managedUserWhere(actor, id) })
   if (!target || !canManageTarget(actor, target)) return { ok: false, error: "User not found." }

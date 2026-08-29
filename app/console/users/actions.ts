@@ -10,9 +10,11 @@ import {
   updateUser,
   setUserActive,
   forcePasswordReset,
+  regenerateTempPassword,
   unlockAccount,
   type CreateUserResult,
   type ManageUserResult,
+  type RegenerateTempPasswordResult,
 } from "@/lib/queries/users"
 
 async function actingUser(): Promise<AbilitySubject> {
@@ -67,6 +69,13 @@ export async function updateUserAction(id: string, formData: Record<string, unkn
 export async function setUserActiveAction(id: string, isActive: boolean): Promise<ManageUserResult> {
   const user = await actingUser()
   const result = await setUserActive(user, id, isActive)
+  if (result.ok) revalidateUserViews()
+  return result
+}
+
+export async function regenerateTempPasswordAction(id: string): Promise<RegenerateTempPasswordResult> {
+  const user = await actingUser()
+  const result = await regenerateTempPassword(user, id)
   if (result.ok) revalidateUserViews()
   return result
 }

@@ -9,6 +9,50 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-08-29 — Issuing a replacement temporary password
+
+An account created through the console gets a generated password shown
+exactly once and stored only as a bcrypt hash. Lose that, and the account
+was unreachable: the only remedy was deleting and recreating it, which
+stops being available the moment anything references the row. Surfaced by
+a real account in the dev database — created, never signed into, password
+gone.
+
+- **`forcePasswordReset` looked like the recovery path and was not.** It
+  raises `mustChangePassword` and nothing else, so the account still needs
+  its *current* password to sign in and change it — exactly what is
+  missing. The name and its placement next to "Unlock account" both
+  suggest otherwise, which is how it went unnoticed. Both actions are kept:
+  forcing a change on a password the holder still knows is a different
+  operation from replacing one nobody knows.
+- **Refused for the actor's own account, and this is a real boundary.**
+  `changeOwnPassword` requires the current password, so a stolen session
+  cannot rotate its own credentials today. Allowing self-service here would
+  hand it precisely that, letting an attacker lock the genuine owner out of
+  their own account. An admin who has lost their own password needs another
+  admin, which is the same shape as `setUserActive` refusing self-
+  deactivation — checked before `canManageTarget` for the same reason, so
+  the answer is the real one rather than a misleading "not found".
+- **Issuing a password clears the lockout.** A lockout counts failed
+  attempts against the *old* password; leaving it would block the new one
+  too and make the action appear not to have worked. Bundled into the same
+  update rather than left as a second button the admin has to know to press.
+- **The audit row records that a password was issued, never its value.**
+  `audit_logs` is readable by every holding admin in the company and
+  retained far longer than a temporary password stays valid. A test asserts
+  the serialized row does not contain the plaintext, so this cannot regress
+  quietly.
+- **The test asserts the returned password actually authenticates**
+  (`bcrypt.compare` against the stored hash) and that the previous one no
+  longer does. Checking only that a string came back would pass against a
+  function that generated one password and stored a different one — and
+  against one that added a second valid credential instead of replacing the
+  first.
+- **Not verified in a browser.** The dev session had expired, and signing
+  in means typing a password, which is not something to do on the owner's
+  behalf. Covered at the query and type layers instead; the button itself
+  is unexercised.
+
 ## 2026-08-29 — Administration page, and staff management by clinic and branch
 
 The console could create branches but had no way to see or staff them.

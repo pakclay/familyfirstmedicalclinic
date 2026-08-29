@@ -17,6 +17,7 @@ import {
   updateUser,
   setUserActive,
   forcePasswordReset,
+  regenerateTempPassword,
   unlockAccount,
   LOGIN_LOCKOUT_THRESHOLD,
   LOGIN_LOCKOUT_DURATION_MINUTES,
@@ -367,6 +368,89 @@ describe("user management", () => {
     expect((await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInA.id } })).mustChangePassword).toBe(
       true
     )
+  })
+
+  it("issues a working temporary password, and invalidates the old one", async () => {
+    const email = `regen-${Date.now()}@test.local`
+    const created = await createUser(holdingAdmin, {
+      name: "Regen Target",
+      email,
+      role: "FRONT_DESK",
+      branchId: branchA.id,
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    const oldPassword = created.tempPassword
+
+    const result = await regenerateTempPassword(holdingAdmin, created.user.id)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.tempPassword).not.toBe(oldPassword)
+    expect(result.tempPassword.length).toBeGreaterThanOrEqual(10)
+
+    const row = await superuserPrisma.user.findUniqueOrThrow({ where: { id: created.user.id } })
+    // The returned plaintext must actually be the account's password —
+    // asserting only that a string came back would pass against a function
+    // that generated one and stored something else entirely.
+    expect(await bcrypt.compare(result.tempPassword, row.passwordHash)).toBe(true)
+    // And the old one must be dead, or "issuing a new password" would just
+    // be handing out a second valid credential.
+    expect(await bcrypt.compare(oldPassword, row.passwordHash)).toBe(false)
+    expect(row.mustChangePassword).toBe(true)
+  })
+
+  it("clears any lockout when issuing a new password", async () => {
+    await superuserPrisma.user.update({
+      where: { id: frontDeskInA.id },
+      data: { failedLoginAttempts: 4, lockedUntil: new Date(Date.now() + 60_000) },
+    })
+    const result = await regenerateTempPassword(holdingAdmin, frontDeskInA.id)
+    expect(result.ok).toBe(true)
+
+    const row = await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInA.id } })
+    // A lockout counts failures against the OLD password; leaving it in
+    // place would block the new one too and make the action look broken.
+    expect(row.failedLoginAttempts).toBe(0)
+    expect(row.lockedUntil).toBeNull()
+    expect(isLockedOut(row)).toBe(false)
+  })
+
+  it("audit-logs that a password was issued, without recording it", async () => {
+    const result = await regenerateTempPassword(holdingAdmin, frontDeskInA.id)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+
+    const log = await superuserPrisma.auditLog.findFirst({
+      where: { entityId: frontDeskInA.id, action: "user.temp_password_issued" },
+      orderBy: { createdAt: "desc" },
+    })
+    expect(log).toBeTruthy()
+    expect(log!.userId).toBe(holdingAdmin.id)
+    // The value must never reach the audit trail, which is readable by every
+    // holding admin and retained far longer than the password is valid.
+    expect(JSON.stringify(log)).not.toContain(result.tempPassword)
+  })
+
+  it("refuses to issue the actor their own new password", async () => {
+    const before = await superuserPrisma.user.findUniqueOrThrow({ where: { id: clinicAdminA.id } })
+    const result = await regenerateTempPassword(clinicAdminA, clinicAdminA.id)
+    expect(result).toEqual({
+      ok: false,
+      error: "You can't issue yourself a new password — ask another admin.",
+    })
+    // changeOwnPassword requires the current password, so self-service here
+    // would let a stolen session rotate its own credentials and lock the
+    // real owner out. The hash must be untouched.
+    const after = await superuserPrisma.user.findUniqueOrThrow({ where: { id: clinicAdminA.id } })
+    expect(after.passwordHash).toBe(before.passwordHash)
+  })
+
+  it("refuses to issue a password for a user outside the actor's branch", async () => {
+    const before = await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInB.id } })
+    const result = await regenerateTempPassword(clinicAdminA, frontDeskInB.id)
+    expect(result).toEqual({ ok: false, error: "User not found." })
+    const after = await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInB.id } })
+    expect(after.passwordHash).toBe(before.passwordHash)
   })
 
   it("unlocks a locked account", async () => {
