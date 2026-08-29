@@ -3,7 +3,13 @@ import { randomBytes } from "crypto"
 import type { Role, Prisma } from "@prisma/client"
 import { prisma } from "@/lib/db/prisma"
 import { runWithRls } from "@/lib/db/rls"
-import { isHoldingAdmin, requireBranchId, canManageRole, type AbilitySubject } from "@/lib/permissions/ability"
+import {
+  isHoldingAdmin,
+  requireBranchId,
+  requireHoldingCompanyId,
+  canManageRole,
+  type AbilitySubject,
+} from "@/lib/permissions/ability"
 import { toUserDTO, type UserDTO } from "@/lib/dto/user"
 import type { CreateUserInput, EditUserInput } from "@/lib/validation/user"
 
@@ -139,11 +145,38 @@ function canManageTarget(actor: AbilitySubject, target: { role: Role; branchId: 
   return target.branchId === actor.branchId && (target.role === "FRONT_DESK" || target.role === "DOCTOR")
 }
 
+/**
+ * Bounds a single-user lookup to accounts `actor` could manage at all.
+ *
+ * canManageTarget answers "is this the right *role* and branch", but for a
+ * holding admin it answers plain `true` — it has no notion of tenancy. The
+ * company bound therefore has to be part of the query, not a check after
+ * it: `users` has no RLS, so a bare findUnique by id reaches every account
+ * in the database. Expressed as a where-clause rather than a post-filter so
+ * another tenant's account is simply "not found", which is the same answer
+ * getManagedUserById already gives for "exists but not yours".
+ */
+function managedUserWhere(actor: AbilitySubject, id: string): Prisma.UserWhereInput {
+  return isHoldingAdmin(actor) ? { id, ...holdingCompanyScope(requireHoldingCompanyId(actor)) } : { id }
+}
+
 const userInclude = { branch: { select: { name: true } }, doctor: true } as const
+
+/**
+ * A holding admin's list is bounded to their own company — matching by the
+ * user's own holdingCompanyId (how holding admins are attached) OR through
+ * their branch's clinic (how everyone else is). `users` has no RLS, so
+ * dropping this predicate lists every account in the database.
+ */
+function holdingCompanyScope(holdingCompanyId: string): Prisma.UserWhereInput {
+  return {
+    OR: [{ holdingCompanyId }, { branch: { clinic: { holdingCompanyId } } }],
+  }
+}
 
 export async function listUsers(actor: AbilitySubject): Promise<UserDTO[]> {
   const where: Prisma.UserWhereInput = isHoldingAdmin(actor)
-    ? {}
+    ? holdingCompanyScope(requireHoldingCompanyId(actor))
     : { branchId: requireBranchId(actor), role: { in: ["FRONT_DESK", "DOCTOR"] } }
   const rows = await prisma.user.findMany({ where, include: userInclude, orderBy: [{ role: "asc" }, { name: "asc" }] })
   return rows.map(toUserDTO)
@@ -168,7 +201,7 @@ export async function listUsers(actor: AbilitySubject): Promise<UserDTO[]> {
  */
 export async function listUsersForClinic(actor: AbilitySubject, clinicId: string): Promise<UserDTO[]> {
   const where: Prisma.UserWhereInput = isHoldingAdmin(actor)
-    ? { branch: { clinicId } }
+    ? { branch: { clinicId, clinic: { holdingCompanyId: requireHoldingCompanyId(actor) } } }
     : { branchId: requireBranchId(actor), branch: { clinicId }, role: { in: ["FRONT_DESK", "DOCTOR"] } }
   const rows = await prisma.user.findMany({
     where,
@@ -192,7 +225,7 @@ export async function listUsersForBranch(actor: AbilitySubject, branchId: string
   if (!isHoldingAdmin(actor) && requireBranchId(actor) !== branchId) return []
 
   const where: Prisma.UserWhereInput = isHoldingAdmin(actor)
-    ? { branchId }
+    ? { branchId, branch: { clinic: { holdingCompanyId: requireHoldingCompanyId(actor) } } }
     : { branchId, role: { in: ["FRONT_DESK", "DOCTOR"] } }
   const rows = await prisma.user.findMany({
     where,
@@ -204,7 +237,7 @@ export async function listUsersForBranch(actor: AbilitySubject, branchId: string
 
 /** Returns null for "doesn't exist" *and* "exists but actor can't manage it" — same non-enumeration reasoning as the login lockout not distinguishing its causes. */
 export async function getManagedUserById(actor: AbilitySubject, id: string): Promise<UserDTO | null> {
-  const row = await prisma.user.findUnique({ where: { id }, include: userInclude })
+  const row = await prisma.user.findFirst({ where: managedUserWhere(actor, id), include: userInclude })
   if (!row || !canManageTarget(actor, row)) return null
   return toUserDTO(row)
 }
@@ -293,7 +326,7 @@ export type ManageUserResult = { ok: true } | { ok: false; error: string }
 const UNFINISHED_QUEUE_STATUSES = ["BOOKED", "CHECKED_IN", "WAITING", "CALLED", "IN_CONSULTATION"] as const
 
 export async function updateUser(actor: AbilitySubject, id: string, input: EditUserInput): Promise<ManageUserResult> {
-  const target = await prisma.user.findUnique({ where: { id }, include: { doctor: true } })
+  const target = await prisma.user.findFirst({ where: managedUserWhere(actor, id), include: { doctor: true } })
   if (!target || !canManageTarget(actor, target)) return { ok: false, error: "User not found." }
 
   // An absent branchId means "leave it alone" — only an explicit, different
@@ -391,7 +424,7 @@ export async function setUserActive(actor: AbilitySubject, id: string, isActive:
   // instead of the real reason.
   if (id === actor.id) return { ok: false, error: "You can't deactivate your own account." }
 
-  const target = await prisma.user.findUnique({ where: { id } })
+  const target = await prisma.user.findFirst({ where: managedUserWhere(actor, id) })
   if (!target || !canManageTarget(actor, target)) return { ok: false, error: "User not found." }
 
   await runWithRls(actor, async (tx) => {
@@ -410,7 +443,7 @@ export async function setUserActive(actor: AbilitySubject, id: string, isActive:
 }
 
 export async function forcePasswordReset(actor: AbilitySubject, id: string): Promise<ManageUserResult> {
-  const target = await prisma.user.findUnique({ where: { id } })
+  const target = await prisma.user.findFirst({ where: managedUserWhere(actor, id) })
   if (!target || !canManageTarget(actor, target)) return { ok: false, error: "User not found." }
 
   await runWithRls(actor, async (tx) => {
@@ -429,7 +462,7 @@ export async function forcePasswordReset(actor: AbilitySubject, id: string): Pro
 }
 
 export async function unlockAccount(actor: AbilitySubject, id: string): Promise<ManageUserResult> {
-  const target = await prisma.user.findUnique({ where: { id } })
+  const target = await prisma.user.findFirst({ where: managedUserWhere(actor, id) })
   if (!target || !canManageTarget(actor, target)) return { ok: false, error: "User not found." }
 
   await runWithRls(actor, async (tx) => {

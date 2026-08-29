@@ -35,6 +35,29 @@ export function requireBranchId(user: AbilitySubject): string {
 }
 
 /**
+ * The holding company every cross-branch read must be bounded by.
+ *
+ * A holding admin is unscoped *within* their company, not across companies.
+ * `clinics`, `branches`, `users` and `doctors` carry no RLS policy at all
+ * (see lib/queries/users.ts's changeOwnPassword comment), so unlike the
+ * operational tables there is no database backstop here — an org-wide read
+ * that omits this predicate returns every tenant's rows. lib/queries/audit-log.ts
+ * already bounds every one of its reads this way for exactly that reason.
+ *
+ * Throws rather than returning null so a company-less holding admin fails
+ * loudly instead of silently widening to the whole database, matching
+ * getHoldingConsolidatedReport's guard.
+ */
+export function requireHoldingCompanyId(user: AbilitySubject): string {
+  if (!user.holdingCompanyId) {
+    throw new Error(
+      `requireHoldingCompanyId called for a user with no holdingCompanyId (role=${user.role}) — a cross-branch read cannot be bounded`
+    )
+  }
+  return user.holdingCompanyId
+}
+
+/**
  * Which roles `actor` is allowed to create or edit — §4's role table:
  * holding admin manages all users, clinic admin manages "doctors and
  * staff" in their own clinic only (not other admins). Deliberately a

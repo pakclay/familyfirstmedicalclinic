@@ -1,7 +1,12 @@
 import type { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/db/prisma"
 import { runWithRls } from "@/lib/db/rls"
-import { isHoldingAdmin, requireBranchId, type AbilitySubject } from "@/lib/permissions/ability"
+import {
+  isHoldingAdmin,
+  requireBranchId,
+  requireHoldingCompanyId,
+  type AbilitySubject,
+} from "@/lib/permissions/ability"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import { toBranchDTO, type BranchDTO } from "@/lib/dto/branch"
 import type { BranchSettingsInput, CreateBranchInput, EditBranchInput } from "@/lib/validation/branch"
@@ -37,8 +42,14 @@ export async function listBranches(actor: AbilitySubject, filter?: { clinicId?: 
   // Inactive branches included on purpose — the list badges them rather
   // than hiding them, since a deactivated branch is exactly the one an
   // admin needs to find in order to reactivate it.
+  // The company bound goes through the parent clinic — `branches` has no
+  // RLS, so without it this lists every tenant's branches. An explicit
+  // clinicId narrows further but never widens past the company.
   const rows = await prisma.branch.findMany({
-    where: filter?.clinicId ? { clinicId: filter.clinicId } : undefined,
+    where: {
+      clinic: { holdingCompanyId: requireHoldingCompanyId(actor) },
+      ...(filter?.clinicId ? { clinicId: filter.clinicId } : {}),
+    },
     include: branchInclude,
     orderBy: { name: "asc" },
   })
@@ -55,7 +66,12 @@ export async function listBranches(actor: AbilitySubject, filter?: { clinicId?: 
  */
 export async function getBranchById(actor: AbilitySubject, id: string): Promise<BranchDTO | null> {
   if (!isHoldingAdmin(actor)) throw new ForbiddenError(NOT_A_HOLDING_ADMIN)
-  const row = await prisma.branch.findUnique({ where: { id }, include: branchInclude })
+  // findFirst so the company bound is part of the match — another tenant's
+  // branch reads as "no such branch", same shape as getClinicById.
+  const row = await prisma.branch.findFirst({
+    where: { id, clinic: { holdingCompanyId: requireHoldingCompanyId(actor) } },
+    include: branchInclude,
+  })
   return row ? toBranchDTO(row) : null
 }
 

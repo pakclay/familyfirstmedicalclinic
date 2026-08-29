@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db/prisma"
 import { runWithRls } from "@/lib/db/rls"
-import { isHoldingAdmin, type AbilitySubject } from "@/lib/permissions/ability"
+import { isHoldingAdmin, requireHoldingCompanyId, type AbilitySubject } from "@/lib/permissions/ability"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import { toClinicDTO, type ClinicDTO } from "@/lib/dto/clinic"
 import type { CreateClinicInput, EditClinicInput } from "@/lib/validation/clinic"
@@ -39,7 +39,13 @@ export async function listClinics(actor: AbilitySubject): Promise<ClinicDTO[]> {
   // clinics yet." Matches getHoldingConsolidatedReport, the other
   // holding-admin-only read.
   if (!isHoldingAdmin(actor)) throw new ForbiddenError(NOT_A_HOLDING_ADMIN)
-  const rows = await prisma.clinic.findMany({ orderBy: { name: "asc" } })
+  // Bounded to the actor's own company. `clinics` has no RLS, so this
+  // predicate is the entire tenant boundary — without it a holding admin
+  // reads every company's clinics. See requireHoldingCompanyId.
+  const rows = await prisma.clinic.findMany({
+    where: { holdingCompanyId: requireHoldingCompanyId(actor) },
+    orderBy: { name: "asc" },
+  })
   return rows.map(toClinicDTO)
 }
 
@@ -50,7 +56,12 @@ export async function listClinics(actor: AbilitySubject): Promise<ClinicDTO[]> {
  */
 export async function getClinicById(actor: AbilitySubject, id: string): Promise<ClinicDTO | null> {
   if (!isHoldingAdmin(actor)) throw new ForbiddenError(NOT_A_HOLDING_ADMIN)
-  const row = await prisma.clinic.findUnique({ where: { id } })
+  // findFirst rather than findUnique so the company bound is part of the
+  // match: another tenant's clinic reads as "no such clinic", which is the
+  // honest answer to give an admin who has no business seeing it.
+  const row = await prisma.clinic.findFirst({
+    where: { id, holdingCompanyId: requireHoldingCompanyId(actor) },
+  })
   return row ? toClinicDTO(row) : null
 }
 
