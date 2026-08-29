@@ -9,19 +9,22 @@ const CLINIC_ADMIN_NAV: NavItem[] = [
   { label: "Patients", href: "/staff/patients" },
   { label: "Reports", href: "/console/reports" },
   { label: "Expenses", href: "/console/expenses" },
-  { label: "Users", href: "/console/users" },
+  // Also under /staff, and branch-scoped for the same reason Patients is: a
+  // clinic admin runs one branch. /console/users spans the company and is
+  // reachable only through holding-admin screens.
+  { label: "Team", href: "/staff/team" },
   { label: "Settings", href: "/console/settings" },
 ]
 
 const HOLDING_ADMIN_NAV: NavItem[] = [
   { label: "Dashboard", href: "/console/dashboard" },
-  // Sits above Clinics/Users because it is the way into both: the org tree
-  // with staff counts, plus whatever currently needs acting on. Those two
-  // stay as the places to work once you know where you are going.
+  // The way into both clinics and accounts: the org tree with staff counts,
+  // plus whatever currently needs acting on. /console/users has no nav entry
+  // of its own — Administration links into it, and every account row on a
+  // clinic or branch page goes straight to the user it names.
   { label: "Administration", href: "/console/admin" },
   { label: "Reports", href: "/console/reports" },
   { label: "Clinics", href: "/console/clinics" },
-  { label: "Users", href: "/console/users" },
   { label: "Audit log", href: "/console/audit-log" },
 ]
 

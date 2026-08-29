@@ -33,16 +33,21 @@ async function actingUser(): Promise<AbilitySubject> {
 }
 
 /**
- * A user row is rendered in two places — the flat /console/users list and
- * the staff section of its clinic's detail page — so every mutation has to
- * revalidate both or the clinic page keeps showing a deactivated account as
- * active. "layout" revalidates the whole /console/clinics subtree because
- * the affected clinic's id isn't known here (the action only receives a
- * user id) and a user can be moved between branches by updateUser.
+ * A user row is rendered in three places — the flat /console/users list, the
+ * staff section of its clinic's and branch's detail pages, and a clinic
+ * admin's own /staff/team roster — so every mutation has to revalidate all of
+ * them or one keeps showing a deactivated account as active. "layout"
+ * revalidates the whole /console/clinics subtree because the affected
+ * clinic's id isn't known here (the action only receives a user id) and a
+ * user can be moved between branches by updateUser.
+ *
+ * Anything new that renders a user row belongs in this list. It is the one
+ * thing about these actions that is easy to forget and invisible when wrong.
  */
 function revalidateUserViews(): void {
   revalidatePath("/console/users")
   revalidatePath("/console/clinics", "layout")
+  revalidatePath("/staff/team")
 }
 
 export async function createUserAction(formData: Record<string, unknown>): Promise<CreateUserResult> {
