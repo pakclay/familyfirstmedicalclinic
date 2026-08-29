@@ -85,11 +85,26 @@ export function QueueBoard({ initialEntries, doctors }: { initialEntries: StaffQ
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm text-muted-foreground">Now serving</p>
-          <p className="font-numeric text-6xl font-bold text-brand">{nowServing ? nowServing.queueNumber : "—"}</p>
+          {/* An em-dash at this size sets as a solid bar rather than a dash,
+              which reads as a rendering fault instead of "nobody yet". */}
+          {nowServing ? (
+            <p className="font-numeric text-6xl font-bold text-brand">{nowServing.queueNumber}</p>
+          ) : (
+            <p className="text-2xl text-muted-foreground">Nobody called</p>
+          )}
         </div>
-        <Button size="lg" className="h-14 px-8 text-base" disabled={pending} onClick={() => run(callNextAction)}>
-          Call Next
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Opens in its own tab so the board stays put — the display is
+              meant to live on a second screen, not replace this one. */}
+          <Button variant="outline" size="lg" className="h-14" asChild>
+            <a href="/now-serving" target="_blank" rel="noopener noreferrer">
+              Open display
+            </a>
+          </Button>
+          <Button size="lg" className="h-14 px-8 text-base" disabled={pending} onClick={() => run(callNextAction)}>
+            Call Next
+          </Button>
+        </div>
       </div>
       {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
 
