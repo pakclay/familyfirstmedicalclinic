@@ -5,13 +5,7 @@ import { listUsers } from "@/lib/queries/users"
 import type { AbilitySubject } from "@/lib/permissions/ability"
 import { Button } from "@/components/ui/button"
 import { UserRowActions } from "./user-row-actions"
-
-const ROLE_LABEL: Record<string, string> = {
-  FRONT_DESK: "Front desk",
-  DOCTOR: "Doctor",
-  CLINIC_ADMIN: "Clinic admin",
-  HOLDING_ADMIN: "Holding admin",
-}
+import { ROLE_LABEL } from "@/lib/dto/user"
 
 export default async function UsersPage() {
   const session = await auth()
@@ -28,7 +22,7 @@ export default async function UsersPage() {
   const user: AbilitySubject = {
     id: session.user.id,
     role: session.user.role,
-    clinicId: session.user.clinicId,
+    branchId: session.user.branchId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const users = await listUsers(user)
@@ -53,7 +47,7 @@ export default async function UsersPage() {
               {u.isLockedOut && <span className="ml-2 text-xs text-destructive">Locked out</span>}
               <p className="truncate text-xs text-muted-foreground">
                 {u.email} · {ROLE_LABEL[u.role]}
-                {u.clinicName ? ` · ${u.clinicName}` : ""}
+                {u.branchName ? ` · ${u.branchName}` : ""}
               </p>
             </div>
             <UserRowActions userId={u.id} isActive={u.isActive} isLockedOut={u.isLockedOut} />

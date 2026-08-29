@@ -93,7 +93,15 @@ enum NotificationStatus {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Holding company / clinic
+// Holding company / clinic / branch
+//
+// Clinic is purely organizational (a name grouping under a HoldingCompany,
+// exactly like HoldingCompany itself has no operational data of its own).
+// Branch is the operational unit — everything Clinic used to own directly
+// (patients, queue, doctors, staff, inventory, money, audit logs, the
+// public booking slug, hours, address) now belongs to Branch instead. A
+// clinic can have multiple branches; every branch belongs to exactly one
+// clinic. See DECISIONS.md for the full rationale.
 // ─────────────────────────────────────────────────────────────────────────
 
 model HoldingCompany {
@@ -116,17 +124,30 @@ model Clinic {
   holdingCompanyId String?         @map("holding_company_id")
   holdingCompany   HoldingCompany? @relation(fields: [holdingCompanyId], references: [id])
   name             String
-  slug             String          @unique
-  address          String
-  city             String
-  phone            String
-  facebookPageUrl  String?         @map("facebook_page_url")
-  timezone         String          @default("Asia/Manila")
-  // JSON keyed by weekday ("mon".."sun") -> { open: "09:00", close: "18:00" } | null when closed
-  operatingHours   Json            @map("operating_hours")
-  isActive         Boolean         @default(true) @map("is_active")
   createdAt        DateTime        @default(now()) @map("created_at")
   updatedAt        DateTime        @updatedAt @map("updated_at")
+
+  branches Branch[]
+
+  @@map("clinics")
+}
+
+model Branch {
+  id              String   @id @default(uuid())
+  clinicId        String   @map("clinic_id")
+  clinic          Clinic   @relation(fields: [clinicId], references: [id])
+  name            String
+  slug            String   @unique
+  address         String
+  city            String
+  phone           String
+  facebookPageUrl String?  @map("facebook_page_url")
+  timezone        String   @default("Asia/Manila")
+  // JSON keyed by weekday ("mon".."sun") -> { open: "09:00", close: "18:00" } | null when closed
+  operatingHours  Json     @map("operating_hours")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   users              User[]
   doctors            Doctor[]
@@ -142,7 +163,8 @@ model Clinic {
   notifications      Notification[]
   auditLogs          AuditLog[]
 
-  @@map("clinics")
+  @@index([clinicId])
+  @@map("branches")
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -151,8 +173,8 @@ model Clinic {
 
 model User {
   id                  String          @id @default(uuid())
-  clinicId            String?         @map("clinic_id")
-  clinic              Clinic?         @relation(fields: [clinicId], references: [id])
+  branchId            String?         @map("branch_id")
+  branch              Branch?         @relation(fields: [branchId], references: [id])
   holdingCompanyId    String?         @map("holding_company_id")
   holdingCompany      HoldingCompany? @relation(fields: [holdingCompanyId], references: [id])
   name                String
@@ -174,6 +196,7 @@ model User {
   expensesRecorded     Expense[]
   stockMovementsMade   StockMovement[]
   auditLogs            AuditLog[]
+  vitalsRecorded       QueueEntry[]    @relation("QueueEntryVitalsRecordedBy")
 
   @@map("users")
 }
@@ -182,8 +205,8 @@ model Doctor {
   id               String   @id @default(uuid())
   userId           String   @unique @map("user_id")
   user             User     @relation(fields: [userId], references: [id])
-  clinicId         String   @map("clinic_id")
-  clinic           Clinic   @relation(fields: [clinicId], references: [id])
+  branchId         String   @map("branch_id")
+  branch           Branch   @relation(fields: [branchId], references: [id])
   licenseNumber    String   @map("license_number")
   specialization   String   @default("General Practitioner")
   // centavos
@@ -204,8 +227,8 @@ model Doctor {
 
 model Patient {
   id                    String    @id @default(uuid())
-  clinicId              String    @map("clinic_id")
-  clinic                Clinic    @relation(fields: [clinicId], references: [id])
+  branchId              String    @map("branch_id")
+  branch                Branch    @relation(fields: [branchId], references: [id])
   firstName             String    @map("first_name")
   lastName              String    @map("last_name")
   middleName            String?   @map("middle_name")
@@ -233,8 +256,8 @@ model Patient {
   payments      Payment[]
   notifications Notification[]
 
-  @@index([clinicId, phone])
-  @@index([clinicId, lastName, firstName])
+  @@index([branchId, phone])
+  @@index([branchId, lastName, firstName])
   @@map("patients")
 }
 
@@ -244,8 +267,8 @@ model Patient {
 
 model QueueEntry {
   id             String        @id @default(uuid())
-  clinicId       String        @map("clinic_id")
-  clinic         Clinic        @relation(fields: [clinicId], references: [id])
+  branchId       String        @map("branch_id")
+  branch         Branch        @relation(fields: [branchId], references: [id])
   patientId      String        @map("patient_id")
   patient        Patient       @relation(fields: [patientId], references: [id])
   doctorId       String?       @map("doctor_id")
@@ -262,14 +285,22 @@ model QueueEntry {
   completedAt    DateTime?     @map("completed_at")
   // cryptographically random, single-purpose; expires end of day (queueDate)
   accessToken    String        @unique @map("access_token")
+  // Triage vitals: { bp, temp, weight, height, pulse }. Recorded by front
+  // desk at check-in, before any consultation exists. Distinct from
+  // consultations.vitals, which is the doctor's own reading at the
+  // encounter — the two are allowed to differ.
+  vitals             Json?
+  vitalsRecordedAt   DateTime? @map("vitals_recorded_at")
+  vitalsRecordedById String?   @map("vitals_recorded_by")
+  vitalsRecordedBy   User?     @relation("QueueEntryVitalsRecordedBy", fields: [vitalsRecordedById], references: [id])
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
 
   consultations Consultation[]
   notifications Notification[]
 
-  @@unique([clinicId, queueDate, queueNumber])
-  @@index([clinicId, queueDate, status])
+  @@unique([branchId, queueDate, queueNumber])
+  @@index([branchId, queueDate, status])
   @@map("queue_entries")
 }
 
@@ -285,8 +316,8 @@ model Consultation {
   patient        Patient    @relation(fields: [patientId], references: [id])
   doctorId       String     @map("doctor_id")
   doctor         Doctor     @relation(fields: [doctorId], references: [id])
-  clinicId       String     @map("clinic_id")
-  clinic         Clinic     @relation(fields: [clinicId], references: [id])
+  branchId       String     @map("branch_id")
+  branch         Branch     @relation(fields: [branchId], references: [id])
   chiefComplaint String     @map("chief_complaint")
   // { bp, temp, weight, height, pulse }
   vitals         Json?
@@ -313,8 +344,8 @@ model Consultation {
 
 model Medicine {
   id           String       @id @default(uuid())
-  clinicId     String       @map("clinic_id")
-  clinic       Clinic       @relation(fields: [clinicId], references: [id])
+  branchId     String       @map("branch_id")
+  branch       Branch       @relation(fields: [branchId], references: [id])
   name         String
   genericName  String?      @map("generic_name")
   form         MedicineForm
@@ -334,14 +365,14 @@ model Medicine {
   stockMovements     StockMovement[]
   medicinesDispensed MedicineDispensed[]
 
-  @@index([clinicId, isActive])
+  @@index([branchId, isActive])
   @@map("medicines")
 }
 
 model StockMovement {
   id                String            @id @default(uuid())
-  clinicId          String            @map("clinic_id")
-  clinic            Clinic            @relation(fields: [clinicId], references: [id])
+  branchId          String            @map("branch_id")
+  branch            Branch            @relation(fields: [branchId], references: [id])
   medicineId        String            @map("medicine_id")
   medicine          Medicine          @relation(fields: [medicineId], references: [id])
   movementType      StockMovementType @map("movement_type")
@@ -357,7 +388,7 @@ model StockMovement {
 
   medicineDispensed MedicineDispensed?
 
-  @@index([clinicId, medicineId, createdAt])
+  @@index([branchId, medicineId, createdAt])
   @@map("stock_movements")
 }
 
@@ -381,8 +412,8 @@ model MedicineDispensed {
   createdAt       DateTime       @default(now()) @map("created_at")
   deletedAt       DateTime?      @map("deleted_at")
 
-  clinicId String @map("clinic_id")
-  clinic   Clinic @relation(fields: [clinicId], references: [id])
+  branchId String @map("branch_id")
+  branch   Branch @relation(fields: [branchId], references: [id])
 
   @@map("medicines_dispensed")
 }
@@ -393,8 +424,8 @@ model MedicineDispensed {
 
 model Payment {
   id                String        @id @default(uuid())
-  clinicId          String        @map("clinic_id")
-  clinic            Clinic        @relation(fields: [clinicId], references: [id])
+  branchId          String        @map("branch_id")
+  branch            Branch        @relation(fields: [branchId], references: [id])
   consultationId    String?       @map("consultation_id")
   consultation      Consultation? @relation(fields: [consultationId], references: [id])
   patientId         String        @map("patient_id")
@@ -409,15 +440,15 @@ model Payment {
   notes             String?
   createdAt         DateTime      @default(now()) @map("created_at")
 
-  @@index([clinicId, receivedAt])
+  @@index([branchId, receivedAt])
   @@index([collectedByUserId, receivedAt])
   @@map("payments")
 }
 
 model Remittance {
   id                String   @id @default(uuid())
-  clinicId          String   @map("clinic_id")
-  clinic            Clinic   @relation(fields: [clinicId], references: [id])
+  branchId          String   @map("branch_id")
+  branch            Branch   @relation(fields: [branchId], references: [id])
   userId            String   @map("user_id")
   user              User     @relation("RemittanceUser", fields: [userId], references: [id])
   shiftDate         DateTime @map("shift_date") @db.Date
@@ -431,14 +462,14 @@ model Remittance {
   notes             String?
   createdAt         DateTime @default(now()) @map("created_at")
 
-  @@index([clinicId, shiftDate])
+  @@index([branchId, shiftDate])
   @@map("remittances")
 }
 
 model Expense {
   id               String   @id @default(uuid())
-  clinicId         String   @map("clinic_id")
-  clinic           Clinic   @relation(fields: [clinicId], references: [id])
+  branchId         String   @map("branch_id")
+  branch           Branch   @relation(fields: [branchId], references: [id])
   category         String
   description      String?
   // centavos
@@ -448,7 +479,7 @@ model Expense {
   recordedByUser   User     @relation(fields: [recordedByUserId], references: [id])
   createdAt        DateTime @default(now()) @map("created_at")
 
-  @@index([clinicId, expenseDate])
+  @@index([branchId, expenseDate])
   @@map("expenses")
 }
 
@@ -458,8 +489,8 @@ model Expense {
 
 model Notification {
   id                String              @id @default(uuid())
-  clinicId          String              @map("clinic_id")
-  clinic            Clinic              @relation(fields: [clinicId], references: [id])
+  branchId          String              @map("branch_id")
+  branch            Branch              @relation(fields: [branchId], references: [id])
   patientId         String              @map("patient_id")
   patient           Patient             @relation(fields: [patientId], references: [id])
   queueEntryId      String?             @map("queue_entry_id")
@@ -473,7 +504,7 @@ model Notification {
   sentAt            DateTime?           @map("sent_at")
   createdAt         DateTime            @default(now()) @map("created_at")
 
-  @@index([clinicId, createdAt])
+  @@index([branchId, createdAt])
   @@index([patientId, createdAt])
   @@map("notifications")
 }
@@ -484,8 +515,8 @@ model Notification {
 
 model AuditLog {
   id         String   @id @default(uuid())
-  clinicId   String?  @map("clinic_id")
-  clinic     Clinic?  @relation(fields: [clinicId], references: [id])
+  branchId   String?  @map("branch_id")
+  branch     Branch?  @relation(fields: [branchId], references: [id])
   userId     String?  @map("user_id")
   user       User?    @relation(fields: [userId], references: [id])
   action     String
@@ -495,7 +526,7 @@ model AuditLog {
   ipAddress  String?  @map("ip_address")
   createdAt  DateTime @default(now()) @map("created_at")
 
-  @@index([clinicId, createdAt])
+  @@index([branchId, createdAt])
   @@index([entityType, entityId])
   @@map("audit_logs")
 }

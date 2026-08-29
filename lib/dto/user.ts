@@ -1,5 +1,13 @@
 import type { User, Doctor } from "@prisma/client"
 
+/** Display names for the Role enum, shared by every UI that renders a role. */
+export const ROLE_LABEL: Record<string, string> = {
+  FRONT_DESK: "Front desk",
+  DOCTOR: "Doctor",
+  CLINIC_ADMIN: "Clinic admin",
+  HOLDING_ADMIN: "Holding admin",
+}
+
 /**
  * Explicit field allowlist — deliberately excludes passwordHash,
  * failedLoginAttempts, and lockedUntil, none of which any UI needs to
@@ -12,8 +20,8 @@ export type UserDTO = {
   email: string
   phone: string | null
   role: User["role"]
-  clinicId: string | null
-  clinicName: string | null
+  branchId: string | null
+  branchName: string | null
   isActive: boolean
   mustChangePassword: boolean
   isLockedOut: boolean
@@ -22,7 +30,7 @@ export type UserDTO = {
 }
 
 export function toUserDTO(
-  user: User & { clinic: { name: string } | null; doctor: Doctor | null }
+  user: User & { branch: { name: string } | null; doctor: Doctor | null }
 ): UserDTO {
   return {
     id: user.id,
@@ -30,8 +38,8 @@ export function toUserDTO(
     email: user.email,
     phone: user.phone,
     role: user.role,
-    clinicId: user.clinicId,
-    clinicName: user.clinic?.name ?? null,
+    branchId: user.branchId,
+    branchName: user.branch?.name ?? null,
     isActive: user.isActive,
     mustChangePassword: user.mustChangePassword,
     isLockedOut: user.lockedUntil !== null && user.lockedUntil.getTime() > Date.now(),

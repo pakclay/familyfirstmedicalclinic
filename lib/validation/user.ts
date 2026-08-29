@@ -5,10 +5,10 @@ const baseUserFields = {
   email: z.string().trim().min(1, "Email is required").email("Enter a valid email"),
   phone: z.string().trim().optional(),
   role: z.enum(["FRONT_DESK", "DOCTOR", "CLINIC_ADMIN", "HOLDING_ADMIN"]),
-  // Empty string for a clinic admin creating within their own clinic — the
+  // Empty string for a clinic admin creating within their own branch — the
   // query layer fills that in; a holding admin must pick one explicitly
-  // unless the role is HOLDING_ADMIN, which has no clinic at all.
-  clinicId: z.string().optional(),
+  // unless the role is HOLDING_ADMIN, which has no branch at all.
+  branchId: z.string().optional(),
 }
 
 /**
@@ -53,6 +53,34 @@ export const editUserSchema = z.object({
   specialization: z.string().trim().optional(),
   licenseNumber: z.string().trim().optional(),
   consultationFeePesos: z.string().trim().optional(),
+  // Which branch the user works at. Optional and absent-means-unchanged, so
+  // a form that never renders the picker (a clinic admin's, or a holding
+  // admin's own branchless account) can keep posting the same payload it
+  // always has. updateUser decides whether the actor may act on it at all.
+  branchId: z.string().optional(),
 })
 
 export type EditUserInput = z.infer<typeof editUserSchema>
+
+/**
+ * Changing an existing account's role. Separate from editUserSchema because
+ * it is a different, far more dangerous operation than renaming someone,
+ * and it carries fields that only matter for one target role.
+ *
+ * `branchId` is required when moving *to* a branch-scoped role and ignored
+ * when moving to HOLDING_ADMIN, which has no branch. The doctor fields are
+ * required only when the target is DOCTOR and the account has no existing
+ * Doctor row to reuse — changeUserRole decides that, since it is the only
+ * side that can see whether one exists.
+ */
+export const changeRoleSchema = z.object({
+  role: z.enum(["FRONT_DESK", "DOCTOR", "CLINIC_ADMIN", "HOLDING_ADMIN"]),
+  branchId: z.string().optional(),
+  licenseNumber: z.string().trim().optional(),
+  specialization: z.string().trim().optional(),
+  consultationFeePesos: z.string().trim().optional(),
+  /** Typed confirmation, required by the UI for the two escalating changes. */
+  confirm: z.string().optional(),
+})
+
+export type ChangeRoleInput = z.infer<typeof changeRoleSchema>

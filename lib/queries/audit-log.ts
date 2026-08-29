@@ -17,7 +17,7 @@ export const AUDIT_LOG_PAGE_SIZE_DEFAULT = 50
  */
 export const AUDIT_LOG_PAGE_SIZE_MAX = 200
 
-/** Matches `Clinic.timezone`'s schema default; only used when no clinic exists at all. */
+/** Matches `Branch.timezone`'s schema default; only used when no branch exists at all. */
 const DEFAULT_TIMEZONE = "Asia/Manila"
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/
@@ -26,7 +26,7 @@ export type AuditLogFilters = DateRangeParams & {
   action?: string
   entityType?: string
   userId?: string
-  clinicId?: string
+  branchId?: string
   /** Free text, matched against `entityId`. */
   q?: string
   page?: string | number
@@ -40,14 +40,14 @@ export type AppliedAuditLogFilters = {
   action: string
   entityType: string
   userId: string
-  clinicId: string
+  branchId: string
   q: string
 }
 
 export type AuditLogFilterOptions = {
   actions: string[]
   entityTypes: string[]
-  clinics: { id: string; name: string }[]
+  branches: { id: string; name: string; clinicName: string }[]
   users: { id: string; name: string }[]
 }
 
@@ -90,17 +90,18 @@ function trimmed(value: string | undefined): string {
  *
  * ── Why every read here is inside `runWithRls` ──────────────────────────
  * `audit_logs` carries a Postgres SELECT policy (see the
- * enable_rls_backstop migration, which covers it along with patients,
- * queue entries, consultations, payments and the rest — `users`, `doctors`
- * and `clinics` are the exceptions that have no policy, not the rule), and
- * the app connects as the non-superuser `webinar_app` role, so that policy
- * actually bites. The policy reads `app.clinic_id` / `app.role`, and those
- * session GUCs are only ever set inside `runWithRls`. A SELECT issued
- * through the bare `prisma` client therefore returns **zero rows
- * silently** — no error, no warning, just a page that looks like nothing
- * has ever happened. That failure mode is indistinguishable from an empty
- * table, which is why the tests for this module assert on specific seeded
- * rows rather than on a non-empty array.
+ * enable_rls_backstop/branch_rewrite_rls_policies migrations, which cover
+ * it along with patients, queue entries, consultations, payments and the
+ * rest — `users`, `doctors`, `clinics`, and `branches` are the exceptions
+ * that have no policy, not the rule), and the app connects as the
+ * non-superuser `webinar_app` role, so that policy actually bites. The
+ * policy reads `app.branch_id` / `app.role`, and those session GUCs are
+ * only ever set inside `runWithRls`. A SELECT issued through the bare
+ * `prisma` client therefore returns **zero rows silently** — no error, no
+ * warning, just a page that looks like nothing has ever happened. That
+ * failure mode is indistinguishable from an empty table, which is why the
+ * tests for this module assert on specific seeded rows rather than on a
+ * non-empty array.
  *
  * ── Why the holding-company scope is applied here and not by RLS ────────
  * RLS is NOT the tenant boundary for this table. Its policy grants a blanket
@@ -109,9 +110,10 @@ function trimmed(value: string | undefined): string {
  * alone would show one owner every other owner's trail. §4 scopes a Holding
  * Admin to "all clinics under the holding company", so that narrowing has
  * to happen in this query — the same thing `getHoldingConsolidatedReport`
- * does for its clinic list.
+ * does for its branch list, one relation hop further now that branches sit
+ * under clinics under holding companies.
  *
- * Doing it as a plain join would erase the rows with `clinic_id IS NULL`
+ * Doing it as a plain join would erase the rows with `branch_id IS NULL`
  * that §10 most wants kept, so `holdingScope` below spells out all three
  * shapes a visible row can take. See the comment on it.
  *
@@ -155,15 +157,15 @@ export async function listAuditLog(user: AbilitySubject, params: AuditLogFilters
   const action = trimmed(params.action)
   const entityType = trimmed(params.entityType)
   const userId = trimmed(params.userId)
-  const clinicId = trimmed(params.clinicId)
+  const branchId = trimmed(params.branchId)
   const q = trimmed(params.q)
 
   // The tenant boundary, applied to every read below. A row is visible to
   // this holding admin if it is:
-  //   1. attached to one of their holding company's clinics, or
-  //   2. clinic-less but written by one of their own people (a holding-level
-  //      action such as creating a HOLDING_ADMIN, which stores no clinicId), or
-  //   3. clinic-less *and* user-less — a system/job row. `retention.purge`
+  //   1. attached to one of their holding company's branches, or
+  //   2. branch-less but written by one of their own people (a holding-level
+  //      action such as creating a HOLDING_ADMIN, which stores no branchId), or
+  //   3. branch-less *and* user-less — a system/job row. `retention.purge`
   //      (lib/retention/purge.ts) is the only one today: it runs from the CLI
   //      with no session at all, so it has neither field to scope by.
   // Case 3 is the deliberate compromise: those rows are shown to every
@@ -174,26 +176,26 @@ export async function listAuditLog(user: AbilitySubject, params: AuditLogFilters
   const holdingCompanyId = user.holdingCompanyId
   const holdingScope: Prisma.AuditLogWhereInput = {
     OR: [
-      { clinic: { holdingCompanyId } },
-      { clinicId: null, user: { holdingCompanyId } },
-      { clinicId: null, userId: null },
+      { branch: { clinic: { holdingCompanyId } } },
+      { branchId: null, user: { holdingCompanyId } },
+      { branchId: null, userId: null },
     ],
   }
 
   return runWithRls(user, async (tx) => {
-    const clinics = await tx.clinic.findMany({
-      where: { holdingCompanyId },
-      select: { id: true, name: true, timezone: true },
-      orderBy: { name: "asc" },
+    const branches = await tx.branch.findMany({
+      where: { clinic: { holdingCompanyId } },
+      select: { id: true, name: true, timezone: true, clinic: { select: { name: true } } },
+      orderBy: [{ clinic: { name: "asc" } }, { name: "asc" }],
     })
 
-    // Audit rows span every clinic at once, so there is no single "correct"
-    // clinic timezone for the range. Use the filtered clinic's when the user
-    // picked one, otherwise the first clinic's — in practice every clinic is
+    // Audit rows span every branch at once, so there is no single "correct"
+    // branch timezone for the range. Use the filtered branch's when the user
+    // picked one, otherwise the first branch's — in practice every branch is
     // Asia/Manila (§1), but nothing here assumes that.
     const timezone =
-      (clinicId ? clinics.find((c) => c.id === clinicId)?.timezone : undefined) ??
-      clinics[0]?.timezone ??
+      (branchId ? branches.find((b) => b.id === branchId)?.timezone : undefined) ??
+      branches[0]?.timezone ??
       DEFAULT_TIMEZONE
 
     // Reuse the reports helper for the timezone arithmetic (a calendar day
@@ -206,7 +208,7 @@ export async function listAuditLog(user: AbilitySubject, params: AuditLogFilters
 
     // holdingScope is AND-ed with the user's filters rather than merged into
     // them, so no filter value can widen what it allows. A hand-edited
-    // `?clinicId=<another owner's clinic>` intersects to nothing instead of
+    // `?branchId=<another owner's branch>` intersects to nothing instead of
     // reaching across the tenant boundary — the filters can only ever narrow.
     const where: Prisma.AuditLogWhereInput = {
       AND: [
@@ -216,7 +218,7 @@ export async function listAuditLog(user: AbilitySubject, params: AuditLogFilters
           ...(action ? { action } : {}),
           ...(entityType ? { entityType } : {}),
           ...(userId ? { userId } : {}),
-          ...(clinicId ? { clinicId } : {}),
+          ...(branchId ? { branchId } : {}),
           ...(q ? { entityId: { contains: q, mode: "insensitive" } } : {}),
         },
       ],
@@ -233,17 +235,17 @@ export async function listAuditLog(user: AbilitySubject, params: AuditLogFilters
     // the UI would rot into a filter that can't select half the rows. They
     // are deliberately computed over the *unfiltered* table so narrowing on
     // one facet never empties the other's dropdown.
-    // Every one of these is holding-scoped too. `users` and `clinics` have no
-    // RLS policy at all, so an unfiltered read here would list every account
-    // name and every clinic in the entire database to any holding admin —
-    // the dropdowns would leak the tenant boundary even while the table
-    // itself respected it.
+    // Every one of these is holding-scoped too. `users` and `branches` have
+    // no RLS policy at all, so an unfiltered read here would list every
+    // account name and every branch in the entire database to any holding
+    // admin — the dropdowns would leak the tenant boundary even while the
+    // table itself respected it.
     const [total, actionGroups, entityTypeGroups, users] = await Promise.all([
       tx.auditLog.count({ where }),
       tx.auditLog.groupBy({ by: ["action"], where: holdingScope, orderBy: { action: "asc" } }),
       tx.auditLog.groupBy({ by: ["entityType"], where: holdingScope, orderBy: { entityType: "asc" } }),
       tx.user.findMany({
-        where: { OR: [{ clinic: { holdingCompanyId } }, { holdingCompanyId }] },
+        where: { OR: [{ branch: { clinic: { holdingCompanyId } } }, { holdingCompanyId }] },
         select: { id: true, name: true },
         orderBy: { name: "asc" },
       }),
@@ -258,7 +260,7 @@ export async function listAuditLog(user: AbilitySubject, params: AuditLogFilters
       where,
       select: {
         id: true,
-        clinicId: true,
+        branchId: true,
         userId: true,
         action: true,
         entityType: true,
@@ -266,7 +268,7 @@ export async function listAuditLog(user: AbilitySubject, params: AuditLogFilters
         changes: true,
         ipAddress: true,
         createdAt: true,
-        clinic: { select: { name: true } },
+        branch: { select: { name: true } },
         user: { select: { name: true } },
       },
       // `createdAt desc` ALONE WOULD BE A BUG. Audit rows are routinely
@@ -290,11 +292,11 @@ export async function listAuditLog(user: AbilitySubject, params: AuditLogFilters
       hasPrev: page > 1,
       hasNext: page < pageCount,
       timezone,
-      applied: { start, end, action, entityType, userId, clinicId, q },
+      applied: { start, end, action, entityType, userId, branchId, q },
       options: {
         actions: actionGroups.map((g) => g.action),
         entityTypes: entityTypeGroups.map((g) => g.entityType),
-        clinics: clinics.map((c) => ({ id: c.id, name: c.name })),
+        branches: branches.map((b) => ({ id: b.id, name: b.name, clinicName: b.clinic.name })),
         users,
       },
     }

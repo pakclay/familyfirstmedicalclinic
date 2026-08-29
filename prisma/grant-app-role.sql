@@ -40,9 +40,10 @@ ALTER ROLE webinar_app WITH LOGIN PASSWORD :'app_password';
 -- defines no DELETE/UPDATE policy at all for some operations (e.g.
 -- stock_movements has no UPDATE policy — the ledger is append-only) so
 -- Postgres denies those commands outright for this role regardless of
--- the grant below. users/doctors/clinics/holding_companies have no RLS
--- policies (staff-directory access control is an app-layer concern, not
--- clinic-scoping — see DECISIONS.md's M1 entry), so the grant here is
--- their only gate.
+-- the grant below. users/doctors/clinics/holding_companies/branches have
+-- no RLS policies (staff-directory and clinic/branch-directory access
+-- control is an app-layer concern, not row-level scoping — see
+-- DECISIONS.md's M1 entry and the branch-hierarchy entry), so the grant
+-- here is their only gate.
 GRANT USAGE ON SCHEMA public TO webinar_app;
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO webinar_app;

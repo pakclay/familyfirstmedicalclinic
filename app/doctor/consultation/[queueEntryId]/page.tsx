@@ -14,7 +14,7 @@ export default async function ConsultationPage({ params }: { params: Promise<{ q
   const user: AbilitySubject = {
     id: session.user.id,
     role: session.user.role,
-    clinicId: session.user.clinicId,
+    branchId: session.user.branchId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
 

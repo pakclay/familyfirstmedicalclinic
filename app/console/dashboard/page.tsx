@@ -10,11 +10,22 @@ export default async function DashboardPage() {
   if (!session?.user) redirect("/login")
 
   if (session.user.role !== "CLINIC_ADMIN") {
+    // The panels below are branch-scoped, so they have nothing to show a
+    // holding admin. Point at the two pages that do rather than leaving the
+    // old "lands in M6" note, which outlived the reporting it promised.
     return (
       <div>
         <h1 className="text-2xl font-heading font-semibold">Dashboard</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Consolidated reporting lands in M6. Per-clinic panels below are a clinic admin view.
+          The panels here are per-branch. For a company-wide view, see{" "}
+          <Link href="/console/admin" className="underline">
+            Administration
+          </Link>{" "}
+          for clinics, branches and accounts, or{" "}
+          <Link href="/console/reports" className="underline">
+            Reports
+          </Link>{" "}
+          for consolidated revenue and visits.
         </p>
       </div>
     )
@@ -23,7 +34,7 @@ export default async function DashboardPage() {
   const user: AbilitySubject = {
     id: session.user.id,
     role: session.user.role,
-    clinicId: session.user.clinicId,
+    branchId: session.user.branchId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const panels = await getInventoryDashboardPanels(user)

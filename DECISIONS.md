@@ -9,6 +9,314 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-08-29 — Changing an existing account's role
+
+`updateUser` never touched `role` — only `createUser` set it — so an
+account's role was fixed for life and the remedy was deleting and
+recreating. Given its own page rather than a field on the edit form,
+because it is the one change that grants or removes access and it deserves
+its consequences spelled out rather than a dropdown beside "Phone".
+
+- **Kept out of `updateUser` deliberately.** Folding a privilege change
+  into the function used to fix a typo in someone's name would mean every
+  rename carried the machinery to grant company-wide access, and a caller
+  that forgot to omit `role` would escalate silently.
+- **A Doctor row is never deleted on demotion.** `consultations.doctor_id`
+  is NOT NULL with no ON DELETE, so a doctor who has ever recorded a
+  consultation has a row the database physically refuses to remove — and
+  should, since the clinical record points at it. Demotion leaves it
+  dormant; re-promotion reuses it, which also preserves the licence number
+  rather than asking for it again.
+- **That exposed a live bug, now fixed.** `listBranchDoctors` filtered only
+  on `branchId`, so any Doctor row stayed pickable in the "Assign doctor"
+  dropdown regardless of its user — a *deactivated* doctor was already
+  offered to the queue before this feature existed. Now filtered on
+  `user: { isActive: true, role: "DOCTOR" }`, which the demotion path
+  depends on to be correct at all.
+- **Self-change is refused, and that is also what protects the last
+  holding admin.** A demotion needs an acting holding admin and a different
+  target, so whoever performs it is still an admin when it commits.
+- **A "last holding admin" count was written and then deleted.** It could
+  never fire, for the reason directly above: the actor always counts as a
+  remaining admin. It was removed rather than kept as belt-and-braces,
+  because a guard that reads as load-bearing while being unreachable is
+  exactly the failure this file recorded that morning against the doctor
+  branch-move check. A test pins the reasoning instead, so a future path
+  that demotes an admin without another one acting fails there.
+- **Demoting a doctor mid-visit is refused**, on the same grounds as moving
+  one between branches: `assignDoctor` only ever attaches an in-branch
+  doctor, and a consultation in progress expects its doctor to still be
+  one.
+- **The capability matrix is data, not enforcement.** Each line names the
+  file that actually refuses, so it can be confirmed rather than trusted,
+  and if the two drift the query layer is right and the matrix is stale. It
+  exists because "CLINIC_ADMIN" on its own does not tell an admin that the
+  person will lose the consultation screen.
+- **Not verified in a browser.** The dev session had expired and signing in
+  means typing a password. The page compiles and the guards are covered at
+  the query layer, but the form is unexercised.
+
+## 2026-08-29 — Triage vitals on the visit
+
+Vitals already existed, as `consultations.vitals`, but only a doctor could
+ever write them: a Consultation row requires a `doctor_id` and is created
+by `saveConsultation`, after the patient has been seen. Vitals are taken at
+triage, before any of that exists, so the people who actually measure them
+had no write path at all.
+
+- **Columns on `queue_entries`, not a `vitals` table.** queue_entries
+  already carries the branch RLS policies from the branch refactor, so
+  these ride along on the existing row and inherit that isolation exactly.
+  A separate table would need its own SELECT/INSERT/UPDATE policies, and
+  that is the part this codebase has already demonstrated is easiest to get
+  wrong. Cardinality agrees: one reading per visit, whereas consultations
+  carry revisions and would duplicate vitals across every revision of the
+  same encounter.
+- **`consultations.vitals` is kept, not moved.** It stays the doctor's own
+  reading at the encounter; the queue entry holds triage's. The two are
+  allowed to differ — a patient reweighed in the consultation room is not a
+  data conflict, and collapsing them would force one of the two readings to
+  be silently overwritten by the other. The consultation form prefills from
+  triage and says so, but editing there does not write back.
+- **Readings are validated now, and were not before.** The old schema
+  accepted any string, so a temperature of "999" or a typo'd weight of
+  "700" was stored verbatim and shown to a doctor as fact. Ranges bound what
+  a living patient can plausibly measure rather than what is healthy — a
+  reading can be alarming and still be real. Both forms import one schema,
+  so a reading cannot be accepted at triage and rejected in the consultation
+  room.
+- **Kept as strings rather than numbers.** The JSON column already held
+  strings, and changing the value types would silently invalidate every
+  reading recorded before today. Blood pressure has no numeric
+  representation anyway, so the column was never uniformly numeric.
+- **An empty save is refused rather than written as `{}`.** It would stamp
+  a recorder and a timestamp onto a reading that does not exist, which the
+  UI then presents as "vitals were taken" — worse than showing nothing.
+- **The audit row records which fields were taken, never the values.**
+  Measurements are clinical data belonging to the visit; `audit_logs` is
+  readable by every holding admin in the company and retained far longer
+  than the reading is clinically current. A test asserts the values do not
+  appear in the row.
+- **A correction overwrites rather than appends.** A stale pulse left
+  beside a corrected temperature reads as both having been measured. Visit-
+  level history is not kept here; the consultation snapshot is the durable
+  clinical record.
+- **The backfill was verified separately, because it had nothing to do.**
+  It copies the latest non-deleted consultation revision's vitals onto its
+  queue entry, but no seeded consultation carries vitals, so the migration
+  ran against zero rows. The UPDATE was replayed against purpose-built rows
+  to confirm it picks the highest revision and ignores a soft-deleted later
+  one — a backfill that silently picked the wrong revision would be
+  invisible until someone opened an old visit.
+- **Not verified in a browser.** The dev session had expired and signing in
+  means typing a password, which is not something to do on the owner's
+  behalf. The queue board's vitals form typechecks and the server compiles
+  clean, but nobody has clicked it.
+
+## 2026-08-29 — Issuing a replacement temporary password
+
+An account created through the console gets a generated password shown
+exactly once and stored only as a bcrypt hash. Lose that, and the account
+was unreachable: the only remedy was deleting and recreating it, which
+stops being available the moment anything references the row. Surfaced by
+a real account in the dev database — created, never signed into, password
+gone.
+
+- **`forcePasswordReset` looked like the recovery path and was not.** It
+  raises `mustChangePassword` and nothing else, so the account still needs
+  its *current* password to sign in and change it — exactly what is
+  missing. The name and its placement next to "Unlock account" both
+  suggest otherwise, which is how it went unnoticed. Both actions are kept:
+  forcing a change on a password the holder still knows is a different
+  operation from replacing one nobody knows.
+- **Refused for the actor's own account, and this is a real boundary.**
+  `changeOwnPassword` requires the current password, so a stolen session
+  cannot rotate its own credentials today. Allowing self-service here would
+  hand it precisely that, letting an attacker lock the genuine owner out of
+  their own account. An admin who has lost their own password needs another
+  admin, which is the same shape as `setUserActive` refusing self-
+  deactivation — checked before `canManageTarget` for the same reason, so
+  the answer is the real one rather than a misleading "not found".
+- **Issuing a password clears the lockout.** A lockout counts failed
+  attempts against the *old* password; leaving it would block the new one
+  too and make the action appear not to have worked. Bundled into the same
+  update rather than left as a second button the admin has to know to press.
+- **The audit row records that a password was issued, never its value.**
+  `audit_logs` is readable by every holding admin in the company and
+  retained far longer than a temporary password stays valid. A test asserts
+  the serialized row does not contain the plaintext, so this cannot regress
+  quietly.
+- **The test asserts the returned password actually authenticates**
+  (`bcrypt.compare` against the stored hash) and that the previous one no
+  longer does. Checking only that a string came back would pass against a
+  function that generated one password and stored a different one — and
+  against one that added a second valid credential instead of replacing the
+  first.
+- **Not verified in a browser.** The dev session had expired, and signing
+  in means typing a password, which is not something to do on the owner's
+  behalf. Covered at the query and type layers instead; the button itself
+  is unexercised.
+
+## 2026-08-29 — Administration page, and staff management by clinic and branch
+
+The console could create branches but had no way to see or staff them.
+`/console/clinics` listed clinic names with no sense of size, and
+`/console/users` listed every account in the company with no sense of
+where it sat. Neither answered the questions someone opening the console
+actually has.
+
+- **A user attaches to a branch, not a clinic**, so "this clinic's staff"
+  is the union across its branches (`listUsersForClinic`) and there is no
+  `clinicId` on the row to filter by. Holding admins are structurally
+  absent from that list — their `branchId` is null, so they match no
+  clinic and would otherwise appear identically under every one of them.
+  `/console/admin` has a dedicated section for them; before it, the flat
+  user list was the only place they existed.
+- **Moving a user between branches updates `Doctor.branch_id` in the same
+  transaction.** It is a second non-nullable column, not a view of the
+  user's — leaving it behind would list a doctor in one branch's
+  assignment picker while their account lived in another. Holding-admin
+  only: `canManageTarget` already confines a clinic admin to their own
+  branch, so letting them move someone out of it would be a one-way exit
+  from their own scope.
+- **A doctor with unfinished queue entries cannot change branch.**
+  `assignDoctor` only ever attaches an in-branch doctor, so moving one out
+  from under a live entry strands it. The first version of this guard
+  could never fire: it counted on the bare Prisma client, and
+  `queue_entries` is RLS-protected, so with no GUCs set the policy matched
+  nothing and the count was always zero. It now runs inside `runWithRls`.
+  Both halves are tested — refuses while the entry is live, allows once it
+  is finished — because a guard that blocks everything and one that blocks
+  nothing are indistinguishable from a single passing assertion.
+- **The admin page reports gaps, and adds no mutations of its own.**
+  Every row links into a page that already does the work. Three of the
+  gaps are joins no existing screen makes; *active accounts still attached
+  to a deactivated branch* is one the app previously could not express at
+  all, since the clinic pages never load users and `UserDTO` carries
+  `branchName` but not the branch's `isActive`. Those people can still
+  sign in while their branch is closed.
+- **Locked-out is queried against `lockedUntil` directly.** `isLockedOut`
+  is derived in JS inside `toUserDTO`, so it is not filterable or
+  countable through that surface at any layer. Every gap and every count
+  in one overview share a single `now` so they cannot disagree with each
+  other.
+- **The gate throws `ForbiddenError`, not `requireHoldingCompanyId`'s
+  plain `Error`.** This backs a top-level nav destination, and an account
+  not attached to a company is a data state to refuse cleanly rather than
+  a 500. The attention lists are capped while their counts are not, so
+  "showing 8 of 20" is correct rather than inconsistent.
+- **The stat tile says "Accounts", not "Staff".** It counts company-level
+  admins too, so it is deliberately larger than the per-clinic numbers
+  below it — noticed only by checking that the clinic counts summed to one
+  less than the total.
+- **Replaced the holding admin's dashboard stub**, which still promised
+  "Consolidated reporting lands in M6" long after `/console/reports`
+  shipped it. Three lines, and it removes a false statement from the first
+  page that role sees.
+- **Verified live**, since query tests cannot prove a page renders: the
+  attention panel found real problems in seeded data (two active branches
+  with no staff, one account still on its temporary password), and the
+  stranded-account panel was confirmed by closing a staffed branch,
+  observing all six accounts surface, and reopening it.
+- **Noted, not fixed:** `User` has no index on `branchId` or `role`, and
+  the new admin and staff queries filter on both. Irrelevant at current
+  data size, a migration when it isn't.
+
+## 2026-08-29 — Holding-company scoping on cross-branch reads
+
+A holding admin of one company could read *and manage* every other
+company's clinics, branches and accounts. `listClinics` issued a bare
+`findMany` with no `where`; `listBranches` filtered only on an optional
+`clinicId`; `listUsers` used `where: {}` for that role; and because
+`canManageTarget` returns plain `true` for a holding admin, the five
+single-user lookups behind it went by id alone — so the reach was write
+access, not only disclosure.
+
+- **This is the same bug the audit log viewer already had, in the same
+  week.** That entry (2026-08-23) records it being caught in review and
+  spells out the hazard exactly: an unfiltered read "would list every
+  account name and every branch in the entire database to any holding
+  admin". The fix was applied to `audit-log.ts` and never to its
+  neighbours. Worth treating as a pattern rather than two incidents —
+  these tables carry no RLS, so *every* cross-branch read needs the
+  predicate written by hand, and nothing in the type system asks for it.
+- **Writes were already correct.** `createClinic` and `createUser` stamp
+  `holdingCompanyId`. The tenant was recorded faithfully and then ignored
+  on the way back out, which is why nothing looked wrong in the data.
+- **The bound is a where-clause, not a check after the fetch**, so
+  another company's row reads as "not found" — the answer
+  `getManagedUserById` already gives for "exists but not yours" — and a
+  caller-supplied `clinicId` narrows within the company without ever
+  reaching past it.
+- **`requireHoldingCompanyId` throws rather than returning null**, so a
+  company-less holding admin fails loudly instead of silently widening to
+  the whole database. With no RLS underneath, a quiet empty scope and a
+  quiet unbounded one look the same from the call site.
+- **The entire suite passed before and after the fix.** Every fixture in
+  the repo builds a single holding company, where "every row" and "my
+  company's rows" are the same set, so no existing test could observe the
+  difference. `tenant-isolation.test.ts` builds two. Its first test is the
+  control — company B's own admin *can* see B's data — because otherwise
+  every "A cannot see B" assertion would also hold against a query that
+  returned nothing to anyone.
+
+## 2026-08-29 — Branch tier between clinic and operational data
+
+A clinic can run more than one physical location, but every operational
+table hung off `clinic_id` directly, so a second location meant creating
+a second "clinic" and a fake holding company to group them. `Branch` now
+sits between them: `Clinic` keeps the shape `HoldingCompany` already had
+and becomes purely organizational, while `Branch` takes the operational
+fields (`slug`, `address`, `city`, `phone`, `facebookPageUrl`,
+`timezone`, `operatingHours`, `isActive`) and the `branch_id` that
+patients, queues, consultations, inventory and money are scoped by.
+
+- **Six migrations, expand/backfill/contract**, so it runs against
+  existing data rather than only a fresh database. Steps 5 and 6 are
+  destructive, and step 4 (the RLS rewrite) has to land before step 5
+  because Postgres refuses to drop a column a live policy depends on.
+- **The backfill copies each clinic's slug verbatim onto its default
+  branch**, which is what keeps `/book/{slug}` and `/display/{slug}`
+  resolving unchanged for links already shared publicly. It reads the
+  `clinics` table rather than hardcoding any known clinic, so dev and prod
+  take the same path.
+- **`branches` deliberately gets no RLS policy**, matching `clinics`
+  before it: the public booking and display routes resolve a branch with
+  no session and therefore no GUCs, so a policy there would make that
+  unauthenticated lookup return nothing.
+- **The RLS rewrite is table-for-table and command-for-command identical**
+  to what it replaces — same 11 tables, same SELECT/INSERT/UPDATE shape,
+  and the four append-only tables still deliberately get no UPDATE policy.
+  Checked by reading both migrations side by side rather than by trusting
+  the diff.
+- **Tests now cover the boundary the refactor introduces: two branches
+  under the *same* clinic.** The previous suite only proved cross-clinic
+  isolation, which a regression that scoped to clinic instead of branch
+  would have passed. Every RLS test carries a positive control — the same
+  unfiltered query with only `app.branch_id` changed — because without it
+  a policy that hid every row would read as correct isolation.
+- **The app-layer 403 tests cannot fail on their own.** With RLS intact,
+  dropping a `branchId` predicate still yields a null lookup and the same
+  `ForbiddenError`, so they prove *the system* denies rather than that
+  *the app layer* does. The two layers mask each other by design; this is
+  a limit on what that half of the suite can detect, recorded so it is not
+  mistaken for per-layer coverage.
+- **No table defines a `FOR DELETE` policy**, so a cross-branch DELETE has
+  no possible positive control — the app role cannot delete its own rows
+  either. Left untested rather than asserted vacuously.
+- **`prisma generate` had to be added to the build.** Vercel installs
+  clean and ran `next build` directly, so it type-checked against a client
+  generated from the pre-Branch schema — roughly 90 errors that appeared
+  nowhere else, because every other machine had a generated client lying
+  around.
+- **Noted, not fixed:** `getConsultationScreenData`'s prior-history query
+  has no app-layer branch predicate and rests on RLS alone, and it returns
+  the most sensitive PHI in the system. Several denials are also silent or
+  untraced — `getMedicineWithLedger` returns null with no audit row,
+  `listPatientConsultationHistory` returns `[]`, and
+  `sendFollowUpReminder` throws from inside its transaction so its audit
+  row rolls back with it.
+
 ## 2026-08-23 — Audit log viewer (holding admin only, read-only)
 
 The last unbuilt item in §9's Holding Admin route list. `lib/nav.ts`

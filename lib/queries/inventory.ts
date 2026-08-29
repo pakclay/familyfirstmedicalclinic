@@ -1,5 +1,5 @@
 import { runWithRls } from "@/lib/db/rls"
-import { requireClinicId, type AbilitySubject } from "@/lib/permissions/ability"
+import { requireBranchId, type AbilitySubject } from "@/lib/permissions/ability"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import { toMedicineDetailDTO, type MedicineDetailDTO, type StockMovementDTO } from "@/lib/dto/medicine"
 import { medicineCatalogSchema, receiveStockSchema, physicalCountSchema } from "@/lib/validation/medicine"
@@ -17,11 +17,11 @@ export async function listMedicines(
   user: AbilitySubject,
   opts: { search?: string; filter?: InventoryFilter; includeInactive?: boolean } = {}
 ): Promise<MedicineDetailDTO[]> {
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   return runWithRls(user, async (tx) => {
     const medicines = await tx.medicine.findMany({
       where: {
-        clinicId,
+        branchId,
         isActive: opts.includeInactive ? undefined : true,
         ...(opts.search
           ? {
@@ -46,13 +46,13 @@ export type MedicineWithLedger = { medicine: MedicineDetailDTO; ledger: StockMov
 
 /** One medicine's detail plus its full movement ledger — §9 "medicine movement ledger." */
 export async function getMedicineWithLedger(user: AbilitySubject, medicineId: string): Promise<MedicineWithLedger | null> {
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   return runWithRls(user, async (tx) => {
-    const medicine = await tx.medicine.findFirst({ where: { id: medicineId, clinicId } })
+    const medicine = await tx.medicine.findFirst({ where: { id: medicineId, branchId } })
     if (!medicine) return null
 
     const movements = await tx.stockMovement.findMany({
-      where: { medicineId, clinicId },
+      where: { medicineId, branchId },
       include: { performedByUser: { select: { name: true } } },
       orderBy: { createdAt: "desc" },
     })
@@ -76,13 +76,13 @@ export async function getMedicineWithLedger(user: AbilitySubject, medicineId: st
 /** §9 Clinic Admin: "manage medicine catalog (add, edit, set reorder level and prices, deactivate)." */
 export async function createMedicine(user: AbilitySubject, input: unknown): Promise<MedicineDetailDTO> {
   requireClinicAdmin(user)
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   const parsed = medicineCatalogSchema.parse(input)
 
   return runWithRls(user, async (tx) => {
     const medicine = await tx.medicine.create({
       data: {
-        clinicId,
+        branchId,
         name: parsed.name,
         genericName: parsed.genericName || null,
         form: parsed.form,
@@ -96,7 +96,7 @@ export async function createMedicine(user: AbilitySubject, input: unknown): Prom
       },
     })
     await tx.auditLog.create({
-      data: { clinicId, userId: user.id, action: "medicine.create", entityType: "Medicine", entityId: medicine.id },
+      data: { branchId, userId: user.id, action: "medicine.create", entityType: "Medicine", entityId: medicine.id },
     })
     return toMedicineDetailDTO(medicine)
   })
@@ -105,12 +105,12 @@ export async function createMedicine(user: AbilitySubject, input: unknown): Prom
 /** Catalog fields only — never `currentStock`, which changes exclusively through a StockMovement (§6). */
 export async function updateMedicine(user: AbilitySubject, medicineId: string, input: unknown): Promise<MedicineDetailDTO> {
   requireClinicAdmin(user)
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   const parsed = medicineCatalogSchema.parse(input)
 
   return runWithRls(user, async (tx) => {
-    const existing = await tx.medicine.findFirst({ where: { id: medicineId, clinicId } })
-    if (!existing) throw new ForbiddenError("Medicine not found in your clinic")
+    const existing = await tx.medicine.findFirst({ where: { id: medicineId, branchId } })
+    if (!existing) throw new ForbiddenError("Medicine not found in your branch")
 
     const medicine = await tx.medicine.update({
       where: { id: medicineId },
@@ -127,7 +127,7 @@ export async function updateMedicine(user: AbilitySubject, medicineId: string, i
       },
     })
     await tx.auditLog.create({
-      data: { clinicId, userId: user.id, action: "medicine.update", entityType: "Medicine", entityId: medicine.id },
+      data: { branchId, userId: user.id, action: "medicine.update", entityType: "Medicine", entityId: medicine.id },
     })
     return toMedicineDetailDTO(medicine)
   })
@@ -138,17 +138,17 @@ export async function receiveStock(user: AbilitySubject, input: unknown): Promis
   if (user.role !== "CLINIC_ADMIN" && user.role !== "FRONT_DESK") {
     throw new ForbiddenError("Only clinic staff can receive stock")
   }
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   const parsed = receiveStockSchema.parse(input)
 
   return runWithRls(user, async (tx) => {
-    const medicine = await tx.medicine.findFirst({ where: { id: parsed.medicineId, clinicId } })
-    if (!medicine) throw new ForbiddenError("Medicine not found in your clinic")
+    const medicine = await tx.medicine.findFirst({ where: { id: parsed.medicineId, branchId } })
+    if (!medicine) throw new ForbiddenError("Medicine not found in your branch")
 
     const newStock = medicine.currentStock + parsed.quantity
     await tx.stockMovement.create({
       data: {
-        clinicId,
+        branchId,
         medicineId: medicine.id,
         movementType: "RECEIPT",
         quantityChange: parsed.quantity,
@@ -172,7 +172,7 @@ export async function receiveStock(user: AbilitySubject, input: unknown): Promis
 
     await tx.auditLog.create({
       data: {
-        clinicId,
+        branchId,
         userId: user.id,
         action: "medicine.receive_stock",
         entityType: "Medicine",
@@ -192,12 +192,12 @@ export async function submitPhysicalCount(user: AbilitySubject, input: unknown):
   if (user.role !== "CLINIC_ADMIN" && user.role !== "FRONT_DESK") {
     throw new ForbiddenError("Only clinic staff can submit a physical count")
   }
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   const parsed = physicalCountSchema.parse(input)
 
   return runWithRls(user, async (tx) => {
     const medicineIds = parsed.counts.map((c) => c.medicineId)
-    const medicines = await tx.medicine.findMany({ where: { id: { in: medicineIds }, clinicId } })
+    const medicines = await tx.medicine.findMany({ where: { id: { in: medicineIds }, branchId } })
     const medicineById = new Map(medicines.map((m) => [m.id, m]))
 
     let totalVarianceCentavos = 0
@@ -205,7 +205,7 @@ export async function submitPhysicalCount(user: AbilitySubject, input: unknown):
 
     for (const count of parsed.counts) {
       const medicine = medicineById.get(count.medicineId)
-      if (!medicine) continue // not this clinic's medicine — silently skip rather than fail the whole batch
+      if (!medicine) continue // not this branch's medicine — silently skip rather than fail the whole batch
       const variance = count.countedQuantity - medicine.currentStock
       if (variance === 0) continue
 
@@ -214,7 +214,7 @@ export async function submitPhysicalCount(user: AbilitySubject, input: unknown):
 
       await tx.stockMovement.create({
         data: {
-          clinicId,
+          branchId,
           medicineId: medicine.id,
           movementType: "ADJUSTMENT",
           quantityChange: variance,
@@ -228,7 +228,7 @@ export async function submitPhysicalCount(user: AbilitySubject, input: unknown):
 
     await tx.auditLog.create({
       data: {
-        clinicId,
+        branchId,
         userId: user.id,
         action: "medicine.physical_count",
         entityType: "Medicine",
@@ -255,19 +255,19 @@ export async function deleteDispensedMedicine(
   reason: string
 ): Promise<void> {
   requireClinicAdmin(user)
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   if (!reason.trim()) throw new Error("A reason is required to delete a dispensed medicine")
 
   await runWithRls(user, async (tx) => {
-    const dispensed = await tx.medicineDispensed.findFirst({ where: { id: medicineDispensedId, clinicId, deletedAt: null } })
-    if (!dispensed) throw new ForbiddenError("Dispensed medicine not found in your clinic")
+    const dispensed = await tx.medicineDispensed.findFirst({ where: { id: medicineDispensedId, branchId, deletedAt: null } })
+    if (!dispensed) throw new ForbiddenError("Dispensed medicine not found in your branch")
 
     if (dispensed.stockMovementId && dispensed.medicineId) {
-      const medicine = await tx.medicine.findFirstOrThrow({ where: { id: dispensed.medicineId, clinicId } })
+      const medicine = await tx.medicine.findFirstOrThrow({ where: { id: dispensed.medicineId, branchId } })
       const newStock = medicine.currentStock + dispensed.quantity
       await tx.stockMovement.create({
         data: {
-          clinicId,
+          branchId,
           medicineId: dispensed.medicineId,
           movementType: "RETURN",
           quantityChange: dispensed.quantity,
@@ -284,7 +284,7 @@ export async function deleteDispensedMedicine(
     await tx.medicineDispensed.update({ where: { id: dispensed.id }, data: { deletedAt: new Date() } })
     await tx.auditLog.create({
       data: {
-        clinicId,
+        branchId,
         userId: user.id,
         action: "medicine_dispensed.delete",
         entityType: "MedicineDispensed",

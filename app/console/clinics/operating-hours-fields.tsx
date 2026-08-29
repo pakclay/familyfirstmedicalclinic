@@ -1,7 +1,7 @@
 "use client"
 
 import { Input } from "@/components/ui/input"
-import { WEEKDAYS, WEEKDAY_LABEL, type OperatingHours, type Weekday } from "@/lib/validation/clinic"
+import { WEEKDAYS, WEEKDAY_LABEL, type OperatingHours, type Weekday } from "@/lib/validation/operating-hours"
 
 /**
  * A closed day stores no times, but the inputs still need something to show

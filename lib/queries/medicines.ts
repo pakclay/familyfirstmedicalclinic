@@ -1,9 +1,9 @@
 import { runWithRls } from "@/lib/db/rls"
-import { requireClinicId, type AbilitySubject } from "@/lib/permissions/ability"
+import { requireBranchId, type AbilitySubject } from "@/lib/permissions/ability"
 import { toMedicineOptionDTO, type MedicineOptionDTO } from "@/lib/dto/medicine"
 
 /**
- * The clinic's dispensable catalog for the consultation screen's picker.
+ * The branch's dispensable catalog for the consultation screen's picker.
  * §7.5: "Expired medicines are excluded from the consultation picker by
  * default" — deactivated (`isActive: false`) medicines are excluded for
  * the same reason (a discontinued item shouldn't be offered for a new
@@ -11,11 +11,11 @@ import { toMedicineOptionDTO, type MedicineOptionDTO } from "@/lib/dto/medicine"
  * keep reading correctly via the denormalized `medicineName`).
  */
 export async function listDispensableMedicines(user: AbilitySubject): Promise<MedicineOptionDTO[]> {
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   return runWithRls(user, async (tx) => {
     const medicines = await tx.medicine.findMany({
       where: {
-        clinicId,
+        branchId,
         isActive: true,
         OR: [{ expiryDate: null }, { expiryDate: { gte: new Date() } }],
       },

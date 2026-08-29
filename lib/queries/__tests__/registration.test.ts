@@ -19,8 +19,10 @@ import type { PatientIntakeInput } from "@/lib/validation/patient"
  * checking in a patient the search already found.
  */
 describe("walk-in registration", () => {
-  let clinicA: { id: string }
-  let clinicB: { id: string }
+  let clinicIdA: string
+  let clinicIdB: string
+  let branchA: { id: string }
+  let branchB: { id: string }
   let frontDeskA: AbilitySubject
   let frontDeskB: AbilitySubject
 
@@ -44,11 +46,15 @@ describe("walk-in registration", () => {
 
   beforeAll(async () => {
     const holding = await superuserPrisma.holdingCompany.create({ data: { name: "Reg Test Holding" } })
-    clinicA = await superuserPrisma.clinic.create({
+    const clinicA = await superuserPrisma.clinic.create({ data: { holdingCompanyId: holding.id, name: "Reg Clinic A" } })
+    const clinicB = await superuserPrisma.clinic.create({ data: { holdingCompanyId: holding.id, name: "Reg Clinic B" } })
+    clinicIdA = clinicA.id
+    clinicIdB = clinicB.id
+    branchA = await superuserPrisma.branch.create({
       data: {
-        holdingCompanyId: holding.id,
-        name: "Reg Clinic A",
-        slug: `reg-clinic-a-${Date.now()}`,
+        clinicId: clinicA.id,
+        name: "Reg Branch A",
+        slug: `reg-branch-a-${Date.now()}`,
         address: "1 Test St",
         city: "Test City",
         phone: "0000",
@@ -56,11 +62,11 @@ describe("walk-in registration", () => {
         operatingHours: {},
       },
     })
-    clinicB = await superuserPrisma.clinic.create({
+    branchB = await superuserPrisma.branch.create({
       data: {
-        holdingCompanyId: holding.id,
-        name: "Reg Clinic B",
-        slug: `reg-clinic-b-${Date.now()}`,
+        clinicId: clinicB.id,
+        name: "Reg Branch B",
+        slug: `reg-branch-b-${Date.now()}`,
         address: "2 Test St",
         city: "Test City",
         phone: "0000",
@@ -70,7 +76,7 @@ describe("walk-in registration", () => {
     })
     const userA = await superuserPrisma.user.create({
       data: {
-        clinicId: clinicA.id,
+        branchId: branchA.id,
         name: "Front Desk A",
         email: `fd-a-${Date.now()}@test.local`,
         passwordHash: "unused",
@@ -79,23 +85,24 @@ describe("walk-in registration", () => {
     })
     const userB = await superuserPrisma.user.create({
       data: {
-        clinicId: clinicB.id,
+        branchId: branchB.id,
         name: "Front Desk B",
         email: `fd-b-${Date.now()}@test.local`,
         passwordHash: "unused",
         role: Role.FRONT_DESK,
       },
     })
-    frontDeskA = { id: userA.id, role: Role.FRONT_DESK, clinicId: clinicA.id, holdingCompanyId: null }
-    frontDeskB = { id: userB.id, role: Role.FRONT_DESK, clinicId: clinicB.id, holdingCompanyId: null }
+    frontDeskA = { id: userA.id, role: Role.FRONT_DESK, branchId: branchA.id, holdingCompanyId: null }
+    frontDeskB = { id: userB.id, role: Role.FRONT_DESK, branchId: branchB.id, holdingCompanyId: null }
   })
 
   afterAll(async () => {
-    await superuserPrisma.auditLog.deleteMany({ where: { clinicId: { in: [clinicA.id, clinicB.id] } } })
-    await superuserPrisma.queueEntry.deleteMany({ where: { clinicId: { in: [clinicA.id, clinicB.id] } } })
-    await superuserPrisma.patient.deleteMany({ where: { clinicId: { in: [clinicA.id, clinicB.id] } } })
-    await superuserPrisma.user.deleteMany({ where: { clinicId: { in: [clinicA.id, clinicB.id] } } })
-    await superuserPrisma.clinic.deleteMany({ where: { id: { in: [clinicA.id, clinicB.id] } } })
+    await superuserPrisma.auditLog.deleteMany({ where: { branchId: { in: [branchA.id, branchB.id] } } })
+    await superuserPrisma.queueEntry.deleteMany({ where: { branchId: { in: [branchA.id, branchB.id] } } })
+    await superuserPrisma.patient.deleteMany({ where: { branchId: { in: [branchA.id, branchB.id] } } })
+    await superuserPrisma.user.deleteMany({ where: { branchId: { in: [branchA.id, branchB.id] } } })
+    await superuserPrisma.branch.deleteMany({ where: { id: { in: [branchA.id, branchB.id] } } })
+    await superuserPrisma.clinic.deleteMany({ where: { id: { in: [clinicIdA, clinicIdB] } } })
     await superuserPrisma.holdingCompany.deleteMany({ where: { name: "Reg Test Holding" } })
     await superuserPrisma.$disconnect()
     await prisma.$disconnect()
@@ -103,7 +110,7 @@ describe("walk-in registration", () => {
 
   it("registers a new patient and checks them in with queue number 1", async () => {
     const { patient, queueEntry } = await registerWalkIn(frontDeskA, basePatient)
-    expect(patient.clinicId).toBe(clinicA.id)
+    expect(patient.branchId).toBe(branchA.id)
     expect(patient.firstName).toBe("Juan")
     expect(queueEntry.queueNumber).toBe(1)
     expect(queueEntry.status).toBe("CHECKED_IN")
@@ -116,7 +123,7 @@ describe("walk-in registration", () => {
     expect(log).toBeTruthy()
   })
 
-  it("assigns sequential queue numbers within the same clinic/day", async () => {
+  it("assigns sequential queue numbers within the same branch/day", async () => {
     const { queueEntry: second } = await registerWalkIn(frontDeskA, {
       ...basePatient,
       firstName: "Pedro",
@@ -143,30 +150,30 @@ describe("walk-in registration", () => {
     expect(patient.isMinor).toBe(true)
   })
 
-  it("finds an existing patient by phone regardless of formatting, scoped to the searcher's clinic", async () => {
+  it("finds an existing patient by phone regardless of formatting, scoped to the searcher's branch", async () => {
     const found = await searchPatientsByPhone(frontDeskA, "09175550001")
     expect(found.map((p) => p.firstName)).toContain("Juan")
 
-    const foundFromOtherClinic = await searchPatientsByPhone(frontDeskB, "09175550001")
-    expect(foundFromOtherClinic).toHaveLength(0)
+    const foundFromOtherBranch = await searchPatientsByPhone(frontDeskB, "09175550001")
+    expect(foundFromOtherBranch).toHaveLength(0)
   })
 
   it("checks in an existing patient without creating a duplicate Patient row", async () => {
     const [existing] = await searchPatientsByPhone(frontDeskA, "09175550001")
-    const patientsBefore = await superuserPrisma.patient.count({ where: { clinicId: clinicA.id } })
+    const patientsBefore = await superuserPrisma.patient.count({ where: { branchId: branchA.id } })
 
     const queueEntry = await checkInExistingPatient(frontDeskA, existing.id, {
       reasonForVisit: "Follow-up",
       priority: true,
     })
 
-    const patientsAfter = await superuserPrisma.patient.count({ where: { clinicId: clinicA.id } })
+    const patientsAfter = await superuserPrisma.patient.count({ where: { branchId: branchA.id } })
     expect(patientsAfter).toBe(patientsBefore)
     expect(queueEntry.priority).toBe("PRIORITY")
     expect(queueEntry.reasonForVisit).toBe("Follow-up")
   })
 
-  it("won't check in a patient that belongs to a different clinic", async () => {
+  it("won't check in a patient that belongs to a different branch", async () => {
     const [patientInA] = await searchPatientsByPhone(frontDeskA, "09175550001")
     await expect(
       checkInExistingPatient(frontDeskB, patientInA.id, { reasonForVisit: "x", priority: false })

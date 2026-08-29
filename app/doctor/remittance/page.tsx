@@ -16,7 +16,7 @@ export default async function DoctorRemittancePage() {
   const user: AbilitySubject = {
     id: session.user.id,
     role: session.user.role,
-    clinicId: session.user.clinicId,
+    branchId: session.user.branchId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const status = await getMyRemittanceStatus(user)

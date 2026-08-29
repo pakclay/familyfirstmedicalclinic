@@ -19,7 +19,7 @@ type AuditLogSearchParams = {
   action?: string
   entityType?: string
   userId?: string
-  clinicId?: string
+  branchId?: string
   q?: string
   page?: string
   pageSize?: string
@@ -72,7 +72,7 @@ export default async function AuditLogPage({ searchParams }: { searchParams: Pro
   const user: AbilitySubject = {
     id: session.user.id,
     role: session.user.role,
-    clinicId: session.user.clinicId,
+    branchId: session.user.branchId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
 
@@ -118,11 +118,11 @@ export default async function AuditLogPage({ searchParams }: { searchParams: Pro
           </select>
         </div>
         <div className="flex flex-col gap-1.5">
-          <label className="text-xs text-muted-foreground" htmlFor="clinicId">Clinic</label>
-          <select id="clinicId" name="clinicId" defaultValue={applied.clinicId} className={SELECT_CLASS}>
-            <option value="">Any clinic</option>
-            {options.clinics.map((clinic) => (
-              <option key={clinic.id} value={clinic.id}>{clinic.name}</option>
+          <label className="text-xs text-muted-foreground" htmlFor="branchId">Branch</label>
+          <select id="branchId" name="branchId" defaultValue={applied.branchId} className={SELECT_CLASS}>
+            <option value="">Any branch</option>
+            {options.branches.map((branch) => (
+              <option key={branch.id} value={branch.id}>{branch.clinicName} — {branch.name}</option>
             ))}
           </select>
         </div>
@@ -170,7 +170,7 @@ export default async function AuditLogPage({ searchParams }: { searchParams: Pro
             <tr className="border-b border-border text-left text-xs text-muted-foreground">
               <th className="py-2 pr-3">When</th>
               <th className="py-2 pr-3">Who</th>
-              <th className="py-2 pr-3">Clinic</th>
+              <th className="py-2 pr-3">Branch</th>
               <th className="py-2 pr-3">Action</th>
               <th className="py-2 pr-3">Entity</th>
               <th className="py-2">Changes</th>
@@ -192,7 +192,7 @@ export default async function AuditLogPage({ searchParams }: { searchParams: Pro
                   )}
                 </td>
                 <td className="py-2 pr-3">
-                  {row.clinicName ?? <span className="text-muted-foreground">—</span>}
+                  {row.branchName ?? <span className="text-muted-foreground">—</span>}
                 </td>
                 <td className="py-2 pr-3 break-words">{row.action}</td>
                 <td className="py-2 pr-3">

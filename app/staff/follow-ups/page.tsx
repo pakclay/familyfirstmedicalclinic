@@ -21,7 +21,7 @@ export default async function FollowUpsPage() {
   const user: AbilitySubject = {
     id: session.user.id,
     role: session.user.role,
-    clinicId: session.user.clinicId,
+    branchId: session.user.branchId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const items = await listDueFollowUps(user)

@@ -1,5 +1,5 @@
 import { runWithRls } from "@/lib/db/rls"
-import { requireClinicId, type AbilitySubject } from "@/lib/permissions/ability"
+import { requireBranchId, type AbilitySubject } from "@/lib/permissions/ability"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import { toPatientDTO, type PatientDTO } from "@/lib/dto/patient"
 import type { ConsultationSummaryDTO } from "@/lib/dto/consultation"
@@ -16,6 +16,8 @@ export type ConsultationScreenData = {
   history: ConsultationSummaryDTO[]
   medicines: MedicineOptionDTO[]
   consultationFee: number
+  /** Vitals triage already recorded on this visit, so the doctor sees them rather than re-taking them. */
+  triageVitals: { values: Record<string, string>; recordedAt: Date | null; recordedByName: string | null }
 }
 
 export async function getConsultationScreenData(
@@ -23,17 +25,17 @@ export async function getConsultationScreenData(
   queueEntryId: string
 ): Promise<ConsultationScreenData> {
   if (user.role !== "DOCTOR") throw new ForbiddenError("Only doctors open the consultation screen")
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
 
   return runWithRls(user, async (tx) => {
     const doctor = await tx.doctor.findUnique({ where: { userId: user.id } })
     if (!doctor) throw new ForbiddenError("No doctor profile for this account")
 
     const entry = await tx.queueEntry.findFirst({
-      where: { id: queueEntryId, clinicId },
-      include: { patient: true },
+      where: { id: queueEntryId, branchId },
+      include: { patient: true, vitalsRecordedBy: { select: { name: true } } },
     })
-    if (!entry) throw new ForbiddenError("Queue entry not found in your clinic")
+    if (!entry) throw new ForbiddenError("Queue entry not found in your branch")
     if (entry.doctorId !== doctor.id) throw new ForbiddenError("This patient isn't assigned to you")
     if (entry.status !== "CALLED" && entry.status !== "IN_CONSULTATION") {
       throw new Error(`Cannot open a consultation for a queue entry with status ${entry.status}`)
@@ -50,7 +52,7 @@ export async function getConsultationScreenData(
     })
 
     const medicines = await tx.medicine.findMany({
-      where: { clinicId, isActive: true, OR: [{ expiryDate: null }, { expiryDate: { gte: new Date() } }] },
+      where: { branchId, isActive: true, OR: [{ expiryDate: null }, { expiryDate: { gte: new Date() } }] },
       orderBy: { name: "asc" },
     })
 
@@ -79,6 +81,21 @@ export async function getConsultationScreenData(
       })),
       medicines: medicines.map(toMedicineOptionDTO),
       consultationFee: doctor.consultationFee,
+      triageVitals: {
+        // Free-form JSON column — a row written before the vitals schema
+        // existed could be any shape, so anything that is not an object of
+        // strings is treated as absent rather than trusted onto the screen.
+        values:
+          entry.vitals && typeof entry.vitals === "object" && !Array.isArray(entry.vitals)
+            ? Object.fromEntries(
+                Object.entries(entry.vitals as Record<string, unknown>)
+                  .filter(([, v]) => typeof v === "string" && v !== "")
+                  .map(([k, v]) => [k, v as string])
+              )
+            : {},
+        recordedAt: entry.vitalsRecordedAt,
+        recordedByName: entry.vitalsRecordedBy?.name ?? null,
+      },
     }
   })
 }
@@ -93,7 +110,7 @@ export async function listPatientConsultationHistory(
       where: {
         patientId,
         deletedAt: null,
-        ...(user.role === "HOLDING_ADMIN" ? {} : { clinicId: user.clinicId! }),
+        ...(user.role === "HOLDING_ADMIN" ? {} : { branchId: user.branchId! }),
       },
       include: {
         doctor: { include: { user: { select: { name: true } } } },
@@ -143,15 +160,15 @@ export async function saveConsultation(
   input: unknown
 ): Promise<{ consultationId: string }> {
   if (user.role !== "DOCTOR") throw new ForbiddenError("Only doctors save consultations")
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   const parsed = consultationSchema.parse(input)
 
   return runWithRls(user, async (tx) => {
     const doctor = await tx.doctor.findUnique({ where: { userId: user.id } })
     if (!doctor) throw new ForbiddenError("No doctor profile for this account")
 
-    const entry = await tx.queueEntry.findFirst({ where: { id: queueEntryId, clinicId } })
-    if (!entry) throw new ForbiddenError("Queue entry not found in your clinic")
+    const entry = await tx.queueEntry.findFirst({ where: { id: queueEntryId, branchId } })
+    if (!entry) throw new ForbiddenError("Queue entry not found in your branch")
     if (entry.doctorId !== doctor.id) throw new ForbiddenError("This patient isn't assigned to you")
     if (entry.status !== "CALLED" && entry.status !== "IN_CONSULTATION") {
       throw new Error(`Cannot save a consultation for a queue entry with status ${entry.status}`)
@@ -163,7 +180,7 @@ export async function saveConsultation(
     const stockRows = parsed.medicines.filter((m) => m.dispensedFromStock && m.medicineId)
     const medicineIds = [...new Set(stockRows.map((m) => m.medicineId!))]
     const medicines = medicineIds.length
-      ? await tx.medicine.findMany({ where: { id: { in: medicineIds }, clinicId } })
+      ? await tx.medicine.findMany({ where: { id: { in: medicineIds }, branchId } })
       : []
     const medicineById = new Map(medicines.map((m) => [m.id, m]))
 
@@ -198,7 +215,7 @@ export async function saveConsultation(
         queueEntryId,
         patientId: entry.patientId,
         doctorId: doctor.id,
-        clinicId,
+        branchId,
         chiefComplaint: parsed.chiefComplaint,
         vitals: parsed.vitals ?? undefined,
         findings: parsed.findings || null,
@@ -222,7 +239,7 @@ export async function saveConsultation(
 
         const movement = await tx.stockMovement.create({
           data: {
-            clinicId,
+            branchId,
             medicineId: row.medicineId,
             movementType: "DISPENSE",
             quantityChange: -row.quantity,
@@ -240,7 +257,7 @@ export async function saveConsultation(
       await tx.medicineDispensed.create({
         data: {
           consultationId: consultation.id,
-          clinicId,
+          branchId,
           medicineId: row.dispensedFromStock ? row.medicineId : null,
           medicineName: row.medicineName,
           dosage: row.dosage || null,
@@ -254,7 +271,7 @@ export async function saveConsultation(
 
     const payment = await tx.payment.create({
       data: {
-        clinicId,
+        branchId,
         consultationId: consultation.id,
         patientId: entry.patientId,
         amount: parsed.payment.amount,
@@ -273,10 +290,10 @@ export async function saveConsultation(
     // here — Consultation (clinical) and Payment (financial) are the two
     // §10 calls out explicitly.
     await tx.auditLog.create({
-      data: { clinicId, userId: user.id, action: "consultation.create", entityType: "Consultation", entityId: consultation.id },
+      data: { branchId, userId: user.id, action: "consultation.create", entityType: "Consultation", entityId: consultation.id },
     })
     await tx.auditLog.create({
-      data: { clinicId, userId: user.id, action: "payment.create", entityType: "Payment", entityId: payment.id, changes: { amount: payment.amount } },
+      data: { branchId, userId: user.id, action: "payment.create", entityType: "Payment", entityId: payment.id, changes: { amount: payment.amount } },
     })
     if (overrodeShortfall) {
       // §7.5 DECISION: the override "writes an audit log entry naming the
@@ -285,7 +302,7 @@ export async function saveConsultation(
       // block was bypassed*, not just that stock changed.
       await tx.auditLog.create({
         data: {
-          clinicId,
+          branchId,
           userId: user.id,
           action: "medicine.dispense_override",
           entityType: "Consultation",

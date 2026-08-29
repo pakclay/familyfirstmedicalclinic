@@ -28,7 +28,18 @@ function newRow(): MedicineRowState {
 export function ConsultationForm({ data }: { data: ConsultationScreenData }) {
   const router = useRouter()
   const [chiefComplaint, setChiefComplaint] = useState("")
-  const [vitals, setVitals] = useState({ bp: "", temp: "", weight: "", height: "", pulse: "" })
+  // Seeded from whatever triage recorded at check-in rather than starting
+  // blank, so the doctor confirms or corrects a reading instead of taking it
+  // again. Editing here does not write back to the visit: the queue entry
+  // keeps triage's measurement and the consultation records the doctor's,
+  // which is why the two are allowed to differ.
+  const [vitals, setVitals] = useState({
+    bp: data.triageVitals.values.bp ?? "",
+    temp: data.triageVitals.values.temp ?? "",
+    weight: data.triageVitals.values.weight ?? "",
+    height: data.triageVitals.values.height ?? "",
+    pulse: data.triageVitals.values.pulse ?? "",
+  })
   const [findings, setFindings] = useState("")
   const [diagnosis, setDiagnosis] = useState("")
   const [treatmentPlan, setTreatmentPlan] = useState("")
@@ -152,7 +163,15 @@ export function ConsultationForm({ data }: { data: ConsultationScreenData }) {
               <Input value={chiefComplaint} onChange={(e) => setChiefComplaint(e.target.value)} required className="h-10" />
             </Field>
             <div>
-              <Label className="mb-1.5 block text-xs text-muted-foreground">Vitals</Label>
+              <Label className="mb-1.5 block text-xs text-muted-foreground">
+                Vitals
+                {data.triageVitals.recordedAt && (
+                  <span className="ml-2 font-normal">
+                    prefilled from check-in
+                    {data.triageVitals.recordedByName ? ` by ${data.triageVitals.recordedByName}` : ""}
+                  </span>
+                )}
+              </Label>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
                 <Input placeholder="BP" value={vitals.bp} onChange={(e) => setVitals((v) => ({ ...v, bp: e.target.value }))} className="h-9" />
                 <Input placeholder="Temp" value={vitals.temp} onChange={(e) => setVitals((v) => ({ ...v, temp: e.target.value }))} className="h-9" />

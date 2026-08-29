@@ -5,20 +5,22 @@ import { auth } from "@/auth"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import type { AbilitySubject } from "@/lib/permissions/ability"
 import { createClinicSchema, editClinicSchema } from "@/lib/validation/clinic"
+import { createBranchSchema, editBranchSchema } from "@/lib/validation/branch"
+import { createClinic, updateClinic, type CreateClinicResult, type ManageClinicResult } from "@/lib/queries/clinics"
 import {
-  createClinic,
-  updateClinic,
-  setClinicActive,
-  type CreateClinicResult,
-  type ManageClinicResult,
-} from "@/lib/queries/clinics"
+  createBranch,
+  updateBranch,
+  setBranchActive,
+  type CreateBranchResult,
+  type ManageBranchResult,
+} from "@/lib/queries/branches"
 
 /**
  * Holding admin only — unlike user management, a clinic admin has no
  * access here at all. proxy.ts's /console gate lets both admin roles
  * through, so this is the first place the distinction is made (the page
- * components gate themselves the same way, and lib/queries/clinics.ts
- * re-checks independently).
+ * components gate themselves the same way, and lib/queries/clinics.ts and
+ * lib/queries/branches.ts re-check independently).
  */
 async function actingUser(): Promise<AbilitySubject> {
   const session = await auth()
@@ -29,7 +31,7 @@ async function actingUser(): Promise<AbilitySubject> {
   return {
     id: session.user.id,
     role: session.user.role,
-    clinicId: session.user.clinicId,
+    branchId: session.user.branchId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
 }
@@ -59,9 +61,42 @@ export async function updateClinicAction(
   return result
 }
 
-export async function setClinicActiveAction(id: string, isActive: boolean): Promise<ManageClinicResult> {
+export async function createBranchAction(
+  clinicId: string,
+  formData: Record<string, unknown>
+): Promise<CreateBranchResult> {
   const user = await actingUser()
-  const result = await setClinicActive(user, id, isActive)
-  if (result.ok) revalidatePath("/console/clinics")
+  const parsed = createBranchSchema.safeParse(formData)
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Check the form for errors." }
+  }
+  const result = await createBranch(user, clinicId, parsed.data)
+  if (result.ok) revalidatePath(`/console/clinics/${clinicId}`)
+  return result
+}
+
+export async function updateBranchAction(
+  clinicId: string,
+  id: string,
+  formData: Record<string, unknown>
+): Promise<ManageBranchResult> {
+  const user = await actingUser()
+  const parsed = editBranchSchema.safeParse(formData)
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Check the form for errors." }
+  }
+  const result = await updateBranch(user, id, parsed.data)
+  if (result.ok) revalidatePath(`/console/clinics/${clinicId}`)
+  return result
+}
+
+export async function setBranchActiveAction(
+  clinicId: string,
+  id: string,
+  isActive: boolean
+): Promise<ManageBranchResult> {
+  const user = await actingUser()
+  const result = await setBranchActive(user, id, isActive)
+  if (result.ok) revalidatePath(`/console/clinics/${clinicId}`)
   return result
 }

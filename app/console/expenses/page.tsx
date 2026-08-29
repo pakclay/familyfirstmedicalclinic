@@ -27,7 +27,7 @@ export default async function ExpensesPage({
   const user: AbilitySubject = {
     id: session.user.id,
     role: session.user.role,
-    clinicId: session.user.clinicId,
+    branchId: session.user.branchId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const { expenses, startLabel, endLabel } = await listExpenses(user, { start, end })

@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   const user: AbilitySubject = {
     id: session.user.id,
     role: session.user.role,
-    clinicId: session.user.clinicId,
+    branchId: session.user.branchId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const params = Object.fromEntries(req.nextUrl.searchParams)

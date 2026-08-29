@@ -1,10 +1,10 @@
 import { toZonedTime } from "date-fns-tz"
 import { runWithRls } from "@/lib/db/rls"
-import { requireClinicId, type AbilitySubject } from "@/lib/permissions/ability"
+import { requireBranchId, type AbilitySubject } from "@/lib/permissions/ability"
 import { resolveReportInstantRange, resolveReportDateOnlyRange, type DateRangeParams } from "@/lib/utils/report-dates"
 
-export type ClinicReportData = {
-  clinicName: string
+export type BranchReportData = {
+  branchName: string
   startLabel: string
   endLabel: string
   visitCount: number
@@ -23,25 +23,26 @@ export type ClinicReportData = {
 }
 
 /**
- * §8 "Clinic level" report. Fetches each dataset with its own targeted
+ * §8 "Clinic level" report — now scoped per branch, the physical location
+ * a Clinic Admin actually runs. Fetches each dataset with its own targeted
  * query and derives everything else in JS — a handful of extra round
- * trips, but each one reads plainly and the data volumes an MVP clinic
+ * trips, but each one reads plainly and the data volumes an MVP branch
  * produces in a month are nowhere near where that would matter.
  */
-export async function getClinicReport(user: AbilitySubject, params: DateRangeParams): Promise<ClinicReportData> {
-  const clinicId = requireClinicId(user)
+export async function getBranchReport(user: AbilitySubject, params: DateRangeParams): Promise<BranchReportData> {
+  const branchId = requireBranchId(user)
 
   return runWithRls(user, async (tx) => {
-    const clinic = await tx.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { name: true, timezone: true } })
-    const { start, end, startLabel, endLabel } = resolveReportInstantRange(params, clinic.timezone)
-    const dateOnlyRange = resolveReportDateOnlyRange(params, clinic.timezone)
+    const branch = await tx.branch.findUniqueOrThrow({ where: { id: branchId }, select: { name: true, timezone: true } })
+    const { start, end, startLabel, endLabel } = resolveReportInstantRange(params, branch.timezone)
+    const dateOnlyRange = resolveReportDateOnlyRange(params, branch.timezone)
 
     // Population: every visit that actually arrived (checked in) in range.
     // markNoShow only accepts CHECKED_IN/WAITING/CALLED entries, so every
     // NO_SHOW row here necessarily has checkedInAt set — a patient who
     // never arrived can't become a no-show, only stay BOOKED or CANCELLED.
     const visits = await tx.queueEntry.findMany({
-      where: { clinicId, checkedInAt: { gte: start, lt: end } },
+      where: { branchId, checkedInAt: { gte: start, lt: end } },
       select: { id: true, patientId: true, status: true, checkedInAt: true, calledAt: true, startedAt: true, completedAt: true },
     })
     const visitCount = visits.length
@@ -57,11 +58,11 @@ export async function getClinicReport(user: AbilitySubject, params: DateRangePar
     const avgConsultationMinutes = consultationTimes.length > 0 ? avgMinutes(consultationTimes) : null
 
     // New vs. returning: a patient is "new" here if their earliest-ever
-    // checked-in visit at this clinic falls inside the selected range.
+    // checked-in visit at this branch falls inside the selected range.
     const distinctPatientIds = [...new Set(visits.map((v) => v.patientId))]
     const priorVisits = distinctPatientIds.length
       ? await tx.queueEntry.findMany({
-          where: { clinicId, patientId: { in: distinctPatientIds }, checkedInAt: { lt: start } },
+          where: { branchId, patientId: { in: distinctPatientIds }, checkedInAt: { lt: start } },
           select: { patientId: true },
           distinct: ["patientId"],
         })
@@ -71,7 +72,7 @@ export async function getClinicReport(user: AbilitySubject, params: DateRangePar
     const returningPatientCount = distinctPatientIds.length - newPatientCount
 
     const payments = await tx.payment.findMany({
-      where: { clinicId, receivedAt: { gte: start, lt: end } },
+      where: { branchId, receivedAt: { gte: start, lt: end } },
       select: {
         amount: true,
         receivedAt: true,
@@ -92,7 +93,7 @@ export async function getClinicReport(user: AbilitySubject, params: DateRangePar
     for (const p of payments) {
       // toZonedTime's result must be read with plain (non-UTC) getters —
       // see todayAsQueueDate in lib/queries/queue.ts for why.
-      const zoned = toZonedTime(p.receivedAt, clinic.timezone)
+      const zoned = toZonedTime(p.receivedAt, branch.timezone)
       const dayLabel = `${zoned.getFullYear()}-${String(zoned.getMonth() + 1).padStart(2, "0")}-${String(zoned.getDate()).padStart(2, "0")}`
       dailyRevenueMap.set(dayLabel, (dailyRevenueMap.get(dayLabel) ?? 0) + p.amount)
     }
@@ -101,7 +102,7 @@ export async function getClinicReport(user: AbilitySubject, params: DateRangePar
       .sort((a, b) => a.date.localeCompare(b.date))
 
     const consultations = await tx.consultation.findMany({
-      where: { clinicId, createdAt: { gte: start, lt: end }, deletedAt: null },
+      where: { branchId, createdAt: { gte: start, lt: end }, deletedAt: null },
       select: { id: true, diagnosis: true },
     })
     const diagnosisCounts = new Map<string, number>()
@@ -117,7 +118,7 @@ export async function getClinicReport(user: AbilitySubject, params: DateRangePar
     const consultationIds = consultations.map((c) => c.id)
     const dispensed = consultationIds.length
       ? await tx.medicineDispensed.findMany({
-          where: { clinicId, consultationId: { in: consultationIds }, deletedAt: null },
+          where: { branchId, consultationId: { in: consultationIds }, deletedAt: null },
           select: { medicineName: true, quantity: true },
         })
       : []
@@ -131,13 +132,13 @@ export async function getClinicReport(user: AbilitySubject, params: DateRangePar
       .slice(0, 5)
 
     const expenses = await tx.expense.findMany({
-      where: { clinicId, expenseDate: { gte: dateOnlyRange.start, lte: dateOnlyRange.end } },
+      where: { branchId, expenseDate: { gte: dateOnlyRange.start, lte: dateOnlyRange.end } },
       select: { amount: true },
     })
     const expensesTotal = expenses.reduce((sum, e) => sum + e.amount, 0)
 
     return {
-      clinicName: clinic.name,
+      branchName: branch.name,
       startLabel,
       endLabel,
       visitCount,

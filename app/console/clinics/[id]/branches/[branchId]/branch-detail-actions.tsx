@@ -2,9 +2,17 @@
 
 import { useState, useTransition } from "react"
 import { Button } from "@/components/ui/button"
-import { setClinicActiveAction } from "../actions"
+import { setBranchActiveAction } from "../../../actions"
 
-export function ClinicDetailActions({ clinicId, isActive }: { clinicId: string; isActive: boolean }) {
+export function BranchDetailActions({
+  clinicId,
+  branchId,
+  isActive,
+}: {
+  clinicId: string
+  branchId: string
+  isActive: boolean
+}) {
   const [pending, startTransition] = useTransition()
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -24,7 +32,7 @@ export function ClinicDetailActions({ clinicId, isActive }: { clinicId: string; 
 
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-xs font-medium uppercase text-muted-foreground">Clinic actions</p>
+      <p className="text-xs font-medium uppercase text-muted-foreground">Branch actions</p>
       <div className="flex flex-wrap gap-2">
         <Button
           type="button"
@@ -32,7 +40,7 @@ export function ClinicDetailActions({ clinicId, isActive }: { clinicId: string; 
           size="sm"
           disabled={pending}
           onClick={() =>
-            run(() => setClinicActiveAction(clinicId, !isActive), isActive ? "Deactivated." : "Reactivated.")
+            run(() => setBranchActiveAction(clinicId, branchId, !isActive), isActive ? "Deactivated." : "Reactivated.")
           }
         >
           {isActive ? "Deactivate" : "Reactivate"}

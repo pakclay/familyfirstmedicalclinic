@@ -7,20 +7,14 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent } from "@/components/ui/card"
 import { createUserAction } from "../actions"
-
-const ROLE_LABEL: Record<string, string> = {
-  FRONT_DESK: "Front desk",
-  DOCTOR: "Doctor",
-  CLINIC_ADMIN: "Clinic admin",
-  HOLDING_ADMIN: "Holding admin",
-}
+import { ROLE_LABEL } from "@/lib/dto/user"
 
 type Form = {
   name: string
   email: string
   phone: string
   role: string
-  clinicId: string
+  branchId: string
   licenseNumber: string
   specialization: string
   consultationFeePesos: string
@@ -31,7 +25,7 @@ const initial: Form = {
   email: "",
   phone: "",
   role: "",
-  clinicId: "",
+  branchId: "",
   licenseNumber: "",
   specialization: "",
   consultationFeePesos: "",
@@ -39,14 +33,17 @@ const initial: Form = {
 
 export function NewUserForm({
   roles,
-  clinics,
-  showClinicPicker,
+  branches,
+  showBranchPicker,
+  defaultBranchId,
 }: {
   roles: string[]
-  clinics: { id: string; name: string }[]
-  showClinicPicker: boolean
+  branches: { id: string; name: string; clinic: { name: string } }[]
+  showBranchPicker: boolean
+  /** Preselected when arriving from a branch's staff section. */
+  defaultBranchId?: string
 }) {
-  const [form, setForm] = useState<Form>(initial)
+  const [form, setForm] = useState<Form>({ ...initial, branchId: defaultBranchId ?? "" })
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [created, setCreated] = useState<{ name: string; tempPassword: string } | null>(null)
@@ -98,7 +95,7 @@ export function NewUserForm({
   }
 
   const showDoctorFields = form.role === "DOCTOR"
-  const needsClinic = showClinicPicker && form.role !== "" && form.role !== "HOLDING_ADMIN"
+  const needsBranch = showBranchPicker && form.role !== "" && form.role !== "HOLDING_ADMIN"
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -133,21 +130,21 @@ export function NewUserForm({
         </select>
       </div>
 
-      {needsClinic && (
+      {needsBranch && (
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="clinicId">Clinic</Label>
+          <Label htmlFor="branchId">Branch</Label>
           <select
-            id="clinicId"
-            name="clinicId"
+            id="branchId"
+            name="branchId"
             required
-            value={form.clinicId}
-            onChange={(e) => set("clinicId", e.target.value)}
+            value={form.branchId}
+            onChange={(e) => set("branchId", e.target.value)}
             className="h-10 rounded-md border border-input bg-transparent px-3 text-sm"
           >
             <option value="">Select…</option>
-            {clinics.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
+            {branches.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.clinic.name} — {b.name}
               </option>
             ))}
           </select>

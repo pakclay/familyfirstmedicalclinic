@@ -23,7 +23,7 @@ export default async function MedicineDetailPage({ params }: { params: Promise<{
   const user: AbilitySubject = {
     id: session.user.id,
     role: session.user.role,
-    clinicId: session.user.clinicId,
+    branchId: session.user.branchId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const result = await getMedicineWithLedger(user, medicineId)

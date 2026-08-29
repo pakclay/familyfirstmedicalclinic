@@ -4,15 +4,18 @@ import { revalidatePath } from "next/cache"
 import { auth } from "@/auth"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import type { AbilitySubject } from "@/lib/permissions/ability"
-import { createUserSchema, editUserSchema } from "@/lib/validation/user"
+import { createUserSchema, editUserSchema, changeRoleSchema } from "@/lib/validation/user"
 import {
   createUser,
   updateUser,
   setUserActive,
   forcePasswordReset,
+  changeUserRole,
+  regenerateTempPassword,
   unlockAccount,
   type CreateUserResult,
   type ManageUserResult,
+  type RegenerateTempPasswordResult,
 } from "@/lib/queries/users"
 
 async function actingUser(): Promise<AbilitySubject> {
@@ -24,9 +27,22 @@ async function actingUser(): Promise<AbilitySubject> {
   return {
     id: session.user.id,
     role: session.user.role,
-    clinicId: session.user.clinicId,
+    branchId: session.user.branchId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
+}
+
+/**
+ * A user row is rendered in two places — the flat /console/users list and
+ * the staff section of its clinic's detail page — so every mutation has to
+ * revalidate both or the clinic page keeps showing a deactivated account as
+ * active. "layout" revalidates the whole /console/clinics subtree because
+ * the affected clinic's id isn't known here (the action only receives a
+ * user id) and a user can be moved between branches by updateUser.
+ */
+function revalidateUserViews(): void {
+  revalidatePath("/console/users")
+  revalidatePath("/console/clinics", "layout")
 }
 
 export async function createUserAction(formData: Record<string, unknown>): Promise<CreateUserResult> {
@@ -36,7 +52,7 @@ export async function createUserAction(formData: Record<string, unknown>): Promi
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Check the form for errors." }
   }
   const result = await createUser(user, parsed.data)
-  if (result.ok) revalidatePath("/console/users")
+  if (result.ok) revalidateUserViews()
   return result
 }
 
@@ -47,27 +63,53 @@ export async function updateUserAction(id: string, formData: Record<string, unkn
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Check the form for errors." }
   }
   const result = await updateUser(user, id, parsed.data)
-  if (result.ok) revalidatePath("/console/users")
+  if (result.ok) revalidateUserViews()
   return result
 }
 
 export async function setUserActiveAction(id: string, isActive: boolean): Promise<ManageUserResult> {
   const user = await actingUser()
   const result = await setUserActive(user, id, isActive)
-  if (result.ok) revalidatePath("/console/users")
+  if (result.ok) revalidateUserViews()
+  return result
+}
+
+export async function changeUserRoleAction(
+  id: string,
+  formData: Record<string, unknown>
+): Promise<ManageUserResult> {
+  const user = await actingUser()
+  const parsed = changeRoleSchema.safeParse(formData)
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Check the form for errors." }
+  }
+  const result = await changeUserRole(user, id, parsed.data)
+  if (result.ok) {
+    revalidateUserViews()
+    // A role change moves someone in or out of the doctor picker and the
+    // branch's staff list, neither of which lives under the paths above.
+    revalidatePath("/staff/queue", "layout")
+  }
+  return result
+}
+
+export async function regenerateTempPasswordAction(id: string): Promise<RegenerateTempPasswordResult> {
+  const user = await actingUser()
+  const result = await regenerateTempPassword(user, id)
+  if (result.ok) revalidateUserViews()
   return result
 }
 
 export async function forcePasswordResetAction(id: string): Promise<ManageUserResult> {
   const user = await actingUser()
   const result = await forcePasswordReset(user, id)
-  if (result.ok) revalidatePath("/console/users")
+  if (result.ok) revalidateUserViews()
   return result
 }
 
 export async function unlockAccountAction(id: string): Promise<ManageUserResult> {
   const user = await actingUser()
   const result = await unlockAccount(user, id)
-  if (result.ok) revalidatePath("/console/users")
+  if (result.ok) revalidateUserViews()
   return result
 }

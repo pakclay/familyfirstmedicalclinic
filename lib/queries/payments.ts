@@ -1,6 +1,6 @@
 import { runWithRls } from "@/lib/db/rls"
-import { requireClinicId, type AbilitySubject } from "@/lib/permissions/ability"
-import { todayInstantRange, clinicTimezone } from "@/lib/queries/queue"
+import { requireBranchId, type AbilitySubject } from "@/lib/permissions/ability"
+import { todayInstantRange, branchTimezone } from "@/lib/queries/queue"
 
 export type CollectionEntry = {
   id: string
@@ -12,13 +12,13 @@ export type CollectionEntry = {
 
 /** §9 doctor screen "my collections today" — also how M4's accept bar ("today's revenue... attributed to the correct collector") is actually checked. */
 export async function listMyCollectionsToday(user: AbilitySubject): Promise<{ entries: CollectionEntry[]; total: number }> {
-  const clinicId = requireClinicId(user)
+  const branchId = requireBranchId(user)
   return runWithRls(user, async (tx) => {
-    const timezone = await clinicTimezone(tx, clinicId)
+    const timezone = await branchTimezone(tx, branchId)
     const { start, end } = todayInstantRange(timezone)
 
     const payments = await tx.payment.findMany({
-      where: { clinicId, collectedByUserId: user.id, receivedAt: { gte: start, lt: end } },
+      where: { branchId, collectedByUserId: user.id, receivedAt: { gte: start, lt: end } },
       include: { patient: { select: { firstName: true, lastName: true } } },
       orderBy: { receivedAt: "desc" },
     })

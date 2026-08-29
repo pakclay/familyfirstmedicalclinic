@@ -45,7 +45,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           name: user.name,
           email: user.email,
           role: user.role,
-          clinicId: user.clinicId,
+          branchId: user.branchId,
           holdingCompanyId: user.holdingCompanyId,
           mustChangePassword: user.mustChangePassword,
         }
@@ -60,7 +60,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         // type just declares it optional for providers that don't.
         token.id = user.id!
         token.role = user.role
-        token.clinicId = user.clinicId
+        token.branchId = user.branchId
         token.holdingCompanyId = user.holdingCompanyId
         token.mustChangePassword = user.mustChangePassword
         return token
@@ -80,7 +80,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         return null
       }
       token.role = current.role
-      token.clinicId = current.clinicId
+      token.branchId = current.branchId
       token.holdingCompanyId = current.holdingCompanyId
       token.mustChangePassword = current.mustChangePassword
       return token

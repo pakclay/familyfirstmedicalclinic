@@ -12,26 +12,28 @@ export async function GET(req: NextRequest) {
   const user: AbilitySubject = {
     id: session.user.id,
     role: session.user.role,
-    clinicId: session.user.clinicId,
+    branchId: session.user.branchId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const params = Object.fromEntries(req.nextUrl.searchParams)
   const report = await getHoldingConsolidatedReport(user, params)
 
   const rows = [
-    ...report.clinics.map((c) => ({
-      clinic: c.clinicName,
-      revenuePHP: (c.revenueTotal / 100).toFixed(2),
-      expensesPHP: (c.expensesTotal / 100).toFixed(2),
-      netPHP: (c.net / 100).toFixed(2),
-      visits: c.visitCount,
+    ...report.branches.map((b) => ({
+      clinic: b.clinicName,
+      branch: b.branchName,
+      revenuePHP: (b.revenueTotal / 100).toFixed(2),
+      expensesPHP: (b.expensesTotal / 100).toFixed(2),
+      netPHP: (b.net / 100).toFixed(2),
+      visits: b.visitCount,
     })),
     {
-      clinic: "Consolidated (all clinics)",
+      clinic: "Consolidated (all branches)",
+      branch: "",
       revenuePHP: (report.consolidated.revenueTotal / 100).toFixed(2),
       expensesPHP: (report.consolidated.expensesTotal / 100).toFixed(2),
       netPHP: (report.consolidated.net / 100).toFixed(2),
-      visits: report.clinics.reduce((sum, c) => sum + c.visitCount, 0),
+      visits: report.branches.reduce((sum, b) => sum + b.visitCount, 0),
     },
   ]
 

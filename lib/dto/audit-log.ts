@@ -5,8 +5,8 @@ import type { AuditLog, Prisma } from "@prisma/client"
  * passthrough. Almost everything here is nullable on purpose and the UI has
  * to survive all of it:
  *
- *  - `clinicId`/`clinicName` are null for holding-level actions that aren't
- *    tied to one clinic (the RLS migration calls this case out by name).
+ *  - `branchId`/`branchName` are null for holding-level actions that aren't
+ *    tied to one branch (the RLS migration calls this case out by name).
  *  - `userId` is null for rows written by a system/background path with no
  *    acting user; `userName` is *additionally* null when the user row is no
  *    longer joinable (deleted, or invisible to the reader). A row whose
@@ -16,8 +16,8 @@ import type { AuditLog, Prisma } from "@prisma/client"
  */
 export type AuditLogDTO = {
   id: string
-  clinicId: string | null
-  clinicName: string | null
+  branchId: string | null
+  branchName: string | null
   userId: string | null
   userName: string | null
   action: string
@@ -35,9 +35,9 @@ export type AuditLogDTO = {
  */
 export type AuditLogRow = Pick<
   AuditLog,
-  "id" | "clinicId" | "userId" | "action" | "entityType" | "entityId" | "changes" | "ipAddress" | "createdAt"
+  "id" | "branchId" | "userId" | "action" | "entityType" | "entityId" | "changes" | "ipAddress" | "createdAt"
 > & {
-  clinic: { name: string } | null
+  branch: { name: string } | null
   user: { name: string } | null
 }
 
@@ -76,8 +76,8 @@ export function normalizeChanges(value: Prisma.JsonValue | null | undefined): st
 export function toAuditLogDTO(row: AuditLogRow): AuditLogDTO {
   return {
     id: row.id,
-    clinicId: row.clinicId,
-    clinicName: row.clinic?.name ?? null,
+    branchId: row.branchId,
+    branchName: row.branch?.name ?? null,
     userId: row.userId,
     userName: row.user?.name ?? null,
     action: row.action,

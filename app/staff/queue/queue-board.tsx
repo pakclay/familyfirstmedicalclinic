@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
+import { VitalsForm, VitalsSummary } from "./vitals-form"
 import { Badge } from "@/components/ui/badge"
 import type { StaffQueueEntryDTO } from "@/lib/queries/queue"
 import type { DoctorOption } from "@/lib/queries/doctors"
@@ -25,6 +26,9 @@ export function QueueBoard({ initialEntries, doctors }: { initialEntries: StaffQ
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
+  // Which row has its vitals form open. One at a time: the form is wide, and
+  // several open at once turns the board into a wall of inputs.
+  const [vitalsFor, setVitalsFor] = useState<string | null>(null)
 
   useEffect(() => {
     const id = setInterval(() => router.refresh(), POLL_MS)
@@ -52,6 +56,30 @@ export function QueueBoard({ initialEntries, doctors }: { initialEntries: StaffQ
     })
   }
 
+  /** The vitals button and, when open, the form — shared by every section whose patients are physically present. */
+  function vitalsButton(e: StaffQueueEntryDTO) {
+    return (
+      <Button size="sm" variant="outline" disabled={pending} onClick={() => setVitalsFor(vitalsFor === e.id ? null : e.id)}>
+        {Object.keys(e.vitals).length > 0 ? "Edit vitals" : "Vitals"}
+      </Button>
+    )
+  }
+
+  function vitalsFooter(e: StaffQueueEntryDTO) {
+    if (vitalsFor !== e.id) return null
+    return (
+      <VitalsForm
+        queueEntryId={e.id}
+        patientName={e.patientName}
+        initial={e.vitals}
+        onDone={() => {
+          setVitalsFor(null)
+          router.refresh()
+        }}
+      />
+    )
+  }
+
   return (
     <div className="mx-auto max-w-3xl">
       <div className="flex items-center justify-between">
@@ -68,10 +96,11 @@ export function QueueBoard({ initialEntries, doctors }: { initialEntries: StaffQ
       {called.length > 0 && (
         <Section title="Called">
           {called.map((e) => (
-            <Row key={e.id} entry={e}>
+            <Row key={e.id} entry={e} footer={vitalsFooter(e)}>
               {!e.doctorId && (
                 <DoctorSelect doctors={doctors} disabled={pending} onSelect={(doctorId) => run(() => assignDoctorAction(e.id, doctorId))} />
               )}
+              {vitalsButton(e)}
               <Button size="sm" variant="outline" disabled={pending} onClick={() => run(() => recallAction(e.id))}>
                 Recall
               </Button>
@@ -94,14 +123,16 @@ export function QueueBoard({ initialEntries, doctors }: { initialEntries: StaffQ
       {inConsultation.length > 0 && (
         <Section title="In consultation">
           {inConsultation.map((e) => (
-            <Row key={e.id} entry={e} />
+            <Row key={e.id} entry={e} footer={vitalsFooter(e)}>
+              {vitalsButton(e)}
+            </Row>
           ))}
         </Section>
       )}
 
       <Section title={`Waiting (${active.length})`}>
         {active.map((e, i) => (
-          <Row key={e.id} entry={e}>
+          <Row key={e.id} entry={e} footer={vitalsFooter(e)}>
             <div className="flex items-center gap-1">
               <Button
                 size="icon-sm"
@@ -128,6 +159,7 @@ export function QueueBoard({ initialEntries, doctors }: { initialEntries: StaffQ
               disabled={pending}
               onSelect={(doctorId) => run(() => assignDoctorAction(e.id, doctorId))}
             />
+            {vitalsButton(e)}
             <Button size="sm" variant="outline" disabled={pending} onClick={() => run(() => noShowAction(e.id))}>
               No-show
             </Button>
@@ -188,27 +220,40 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
-function Row({ entry, children }: { entry: StaffQueueEntryDTO; children?: React.ReactNode }) {
+function Row({
+  entry,
+  children,
+  footer,
+}: {
+  entry: StaffQueueEntryDTO
+  children?: React.ReactNode
+  /** Rendered full-width beneath the row — the vitals form needs the whole width, not the action strip. */
+  footer?: React.ReactNode
+}) {
   return (
-    <li className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-      <div className="flex items-center gap-3">
-        <span className="font-numeric w-8 text-lg font-semibold">{entry.queueNumber}</span>
-        <div>
-          <p className="text-sm">
-            {entry.patientName}
-            {entry.priority === "PRIORITY" && (
-              <Badge variant="outline" className="ml-2 border-priority text-priority">
-                Priority
-              </Badge>
-            )}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {entry.patientAge}y · {entry.reasonForVisit}
-            {entry.doctorName && ` · ${entry.doctorName}`}
-          </p>
+    <li className="px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-3">
+          <span className="font-numeric w-8 text-lg font-semibold">{entry.queueNumber}</span>
+          <div>
+            <p className="text-sm">
+              {entry.patientName}
+              {entry.priority === "PRIORITY" && (
+                <Badge variant="outline" className="ml-2 border-priority text-priority">
+                  Priority
+                </Badge>
+              )}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {entry.patientAge}y · {entry.reasonForVisit}
+              {entry.doctorName && ` · ${entry.doctorName}`}
+            </p>
+            <VitalsSummary vitals={entry.vitals} />
+          </div>
         </div>
+        {children && <div className="flex flex-wrap items-center gap-2">{children}</div>}
       </div>
-      {children && <div className="flex flex-wrap items-center gap-2">{children}</div>}
+      {footer}
     </li>
   )
 }

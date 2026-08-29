@@ -1,14 +1,11 @@
 import { z } from "zod"
+import { vitalsSchema as sharedVitalsSchema } from "./vitals"
 
-const vitalsSchema = z
-  .object({
-    bp: z.string().trim().optional(),
-    temp: z.string().trim().optional(),
-    weight: z.string().trim().optional(),
-    height: z.string().trim().optional(),
-    pulse: z.string().trim().optional(),
-  })
-  .optional()
+// Shared with the front-desk capture form (lib/validation/vitals.ts) so a
+// reading cannot be accepted at triage and rejected in the consultation
+// room, or the reverse. Optional here because a consultation can be saved
+// without re-recording vitals the doctor did not retake.
+const vitalsSchema = sharedVitalsSchema.optional()
 
 /**
  * One medicine row. §7.4: a row is either "dispensed from clinic stock"
