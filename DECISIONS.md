@@ -9,6 +9,166 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-08-29 — Administration page, and staff management by clinic and branch
+
+The console could create branches but had no way to see or staff them.
+`/console/clinics` listed clinic names with no sense of size, and
+`/console/users` listed every account in the company with no sense of
+where it sat. Neither answered the questions someone opening the console
+actually has.
+
+- **A user attaches to a branch, not a clinic**, so "this clinic's staff"
+  is the union across its branches (`listUsersForClinic`) and there is no
+  `clinicId` on the row to filter by. Holding admins are structurally
+  absent from that list — their `branchId` is null, so they match no
+  clinic and would otherwise appear identically under every one of them.
+  `/console/admin` has a dedicated section for them; before it, the flat
+  user list was the only place they existed.
+- **Moving a user between branches updates `Doctor.branch_id` in the same
+  transaction.** It is a second non-nullable column, not a view of the
+  user's — leaving it behind would list a doctor in one branch's
+  assignment picker while their account lived in another. Holding-admin
+  only: `canManageTarget` already confines a clinic admin to their own
+  branch, so letting them move someone out of it would be a one-way exit
+  from their own scope.
+- **A doctor with unfinished queue entries cannot change branch.**
+  `assignDoctor` only ever attaches an in-branch doctor, so moving one out
+  from under a live entry strands it. The first version of this guard
+  could never fire: it counted on the bare Prisma client, and
+  `queue_entries` is RLS-protected, so with no GUCs set the policy matched
+  nothing and the count was always zero. It now runs inside `runWithRls`.
+  Both halves are tested — refuses while the entry is live, allows once it
+  is finished — because a guard that blocks everything and one that blocks
+  nothing are indistinguishable from a single passing assertion.
+- **The admin page reports gaps, and adds no mutations of its own.**
+  Every row links into a page that already does the work. Three of the
+  gaps are joins no existing screen makes; *active accounts still attached
+  to a deactivated branch* is one the app previously could not express at
+  all, since the clinic pages never load users and `UserDTO` carries
+  `branchName` but not the branch's `isActive`. Those people can still
+  sign in while their branch is closed.
+- **Locked-out is queried against `lockedUntil` directly.** `isLockedOut`
+  is derived in JS inside `toUserDTO`, so it is not filterable or
+  countable through that surface at any layer. Every gap and every count
+  in one overview share a single `now` so they cannot disagree with each
+  other.
+- **The gate throws `ForbiddenError`, not `requireHoldingCompanyId`'s
+  plain `Error`.** This backs a top-level nav destination, and an account
+  not attached to a company is a data state to refuse cleanly rather than
+  a 500. The attention lists are capped while their counts are not, so
+  "showing 8 of 20" is correct rather than inconsistent.
+- **The stat tile says "Accounts", not "Staff".** It counts company-level
+  admins too, so it is deliberately larger than the per-clinic numbers
+  below it — noticed only by checking that the clinic counts summed to one
+  less than the total.
+- **Replaced the holding admin's dashboard stub**, which still promised
+  "Consolidated reporting lands in M6" long after `/console/reports`
+  shipped it. Three lines, and it removes a false statement from the first
+  page that role sees.
+- **Verified live**, since query tests cannot prove a page renders: the
+  attention panel found real problems in seeded data (two active branches
+  with no staff, one account still on its temporary password), and the
+  stranded-account panel was confirmed by closing a staffed branch,
+  observing all six accounts surface, and reopening it.
+- **Noted, not fixed:** `User` has no index on `branchId` or `role`, and
+  the new admin and staff queries filter on both. Irrelevant at current
+  data size, a migration when it isn't.
+
+## 2026-08-29 — Holding-company scoping on cross-branch reads
+
+A holding admin of one company could read *and manage* every other
+company's clinics, branches and accounts. `listClinics` issued a bare
+`findMany` with no `where`; `listBranches` filtered only on an optional
+`clinicId`; `listUsers` used `where: {}` for that role; and because
+`canManageTarget` returns plain `true` for a holding admin, the five
+single-user lookups behind it went by id alone — so the reach was write
+access, not only disclosure.
+
+- **This is the same bug the audit log viewer already had, in the same
+  week.** That entry (2026-08-23) records it being caught in review and
+  spells out the hazard exactly: an unfiltered read "would list every
+  account name and every branch in the entire database to any holding
+  admin". The fix was applied to `audit-log.ts` and never to its
+  neighbours. Worth treating as a pattern rather than two incidents —
+  these tables carry no RLS, so *every* cross-branch read needs the
+  predicate written by hand, and nothing in the type system asks for it.
+- **Writes were already correct.** `createClinic` and `createUser` stamp
+  `holdingCompanyId`. The tenant was recorded faithfully and then ignored
+  on the way back out, which is why nothing looked wrong in the data.
+- **The bound is a where-clause, not a check after the fetch**, so
+  another company's row reads as "not found" — the answer
+  `getManagedUserById` already gives for "exists but not yours" — and a
+  caller-supplied `clinicId` narrows within the company without ever
+  reaching past it.
+- **`requireHoldingCompanyId` throws rather than returning null**, so a
+  company-less holding admin fails loudly instead of silently widening to
+  the whole database. With no RLS underneath, a quiet empty scope and a
+  quiet unbounded one look the same from the call site.
+- **The entire suite passed before and after the fix.** Every fixture in
+  the repo builds a single holding company, where "every row" and "my
+  company's rows" are the same set, so no existing test could observe the
+  difference. `tenant-isolation.test.ts` builds two. Its first test is the
+  control — company B's own admin *can* see B's data — because otherwise
+  every "A cannot see B" assertion would also hold against a query that
+  returned nothing to anyone.
+
+## 2026-08-29 — Branch tier between clinic and operational data
+
+A clinic can run more than one physical location, but every operational
+table hung off `clinic_id` directly, so a second location meant creating
+a second "clinic" and a fake holding company to group them. `Branch` now
+sits between them: `Clinic` keeps the shape `HoldingCompany` already had
+and becomes purely organizational, while `Branch` takes the operational
+fields (`slug`, `address`, `city`, `phone`, `facebookPageUrl`,
+`timezone`, `operatingHours`, `isActive`) and the `branch_id` that
+patients, queues, consultations, inventory and money are scoped by.
+
+- **Six migrations, expand/backfill/contract**, so it runs against
+  existing data rather than only a fresh database. Steps 5 and 6 are
+  destructive, and step 4 (the RLS rewrite) has to land before step 5
+  because Postgres refuses to drop a column a live policy depends on.
+- **The backfill copies each clinic's slug verbatim onto its default
+  branch**, which is what keeps `/book/{slug}` and `/display/{slug}`
+  resolving unchanged for links already shared publicly. It reads the
+  `clinics` table rather than hardcoding any known clinic, so dev and prod
+  take the same path.
+- **`branches` deliberately gets no RLS policy**, matching `clinics`
+  before it: the public booking and display routes resolve a branch with
+  no session and therefore no GUCs, so a policy there would make that
+  unauthenticated lookup return nothing.
+- **The RLS rewrite is table-for-table and command-for-command identical**
+  to what it replaces — same 11 tables, same SELECT/INSERT/UPDATE shape,
+  and the four append-only tables still deliberately get no UPDATE policy.
+  Checked by reading both migrations side by side rather than by trusting
+  the diff.
+- **Tests now cover the boundary the refactor introduces: two branches
+  under the *same* clinic.** The previous suite only proved cross-clinic
+  isolation, which a regression that scoped to clinic instead of branch
+  would have passed. Every RLS test carries a positive control — the same
+  unfiltered query with only `app.branch_id` changed — because without it
+  a policy that hid every row would read as correct isolation.
+- **The app-layer 403 tests cannot fail on their own.** With RLS intact,
+  dropping a `branchId` predicate still yields a null lookup and the same
+  `ForbiddenError`, so they prove *the system* denies rather than that
+  *the app layer* does. The two layers mask each other by design; this is
+  a limit on what that half of the suite can detect, recorded so it is not
+  mistaken for per-layer coverage.
+- **No table defines a `FOR DELETE` policy**, so a cross-branch DELETE has
+  no possible positive control — the app role cannot delete its own rows
+  either. Left untested rather than asserted vacuously.
+- **`prisma generate` had to be added to the build.** Vercel installs
+  clean and ran `next build` directly, so it type-checked against a client
+  generated from the pre-Branch schema — roughly 90 errors that appeared
+  nowhere else, because every other machine had a generated client lying
+  around.
+- **Noted, not fixed:** `getConsultationScreenData`'s prior-history query
+  has no app-layer branch predicate and rests on RLS alone, and it returns
+  the most sensitive PHI in the system. Several denials are also silent or
+  untraced — `getMedicineWithLedger` returns null with no audit row,
+  `listPatientConsultationHistory` returns `[]`, and
+  `sendFollowUpReminder` throws from inside its transaction so its audit
+  row rolls back with it.
+
 ## 2026-08-23 — Audit log viewer (holding admin only, read-only)
 
 The last unbuilt item in §9's Holding Admin route list. `lib/nav.ts`
