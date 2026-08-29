@@ -15,6 +15,10 @@ const CLINIC_ADMIN_NAV: NavItem[] = [
 
 const HOLDING_ADMIN_NAV: NavItem[] = [
   { label: "Dashboard", href: "/console/dashboard" },
+  // Sits above Clinics/Users because it is the way into both: the org tree
+  // with staff counts, plus whatever currently needs acting on. Those two
+  // stay as the places to work once you know where you are going.
+  { label: "Administration", href: "/console/admin" },
   { label: "Reports", href: "/console/reports" },
   { label: "Clinics", href: "/console/clinics" },
   { label: "Users", href: "/console/users" },
