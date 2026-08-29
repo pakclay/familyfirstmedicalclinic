@@ -11,7 +11,7 @@ import {
   type AbilitySubject,
 } from "@/lib/permissions/ability"
 import { toUserDTO, type UserDTO } from "@/lib/dto/user"
-import type { CreateUserInput, EditUserInput } from "@/lib/validation/user"
+import type { CreateUserInput, EditUserInput, ChangeRoleInput } from "@/lib/validation/user"
 
 /** After this many consecutive failed attempts, the account locks out. */
 export const LOGIN_LOCKOUT_THRESHOLD = 5
@@ -439,6 +439,145 @@ export async function setUserActive(actor: AbilitySubject, id: string, isActive:
       },
     })
   })
+  return { ok: true }
+}
+
+/**
+ * Changing an existing account's role — holding-admin only, and the most
+ * consequential mutation in this file.
+ *
+ * Kept out of updateUser deliberately. That function is what an admin uses
+ * to fix a typo in someone's name; folding a privilege change into the same
+ * call would mean every rename carried the machinery to grant company-wide
+ * access, and a caller that forgot to omit `role` would escalate silently.
+ *
+ * A Doctor row is never deleted here. consultations.doctor_id is NOT NULL
+ * with no ON DELETE, so a doctor who has ever recorded a consultation has a
+ * row the database physically refuses to remove — and should, since the
+ * clinical record points at it. Demotion leaves it dormant and re-promotion
+ * reuses it, which also preserves the licence number rather than asking for
+ * it again.
+ */
+export async function changeUserRole(
+  actor: AbilitySubject,
+  id: string,
+  input: ChangeRoleInput
+): Promise<ManageUserResult> {
+  if (!isHoldingAdmin(actor)) {
+    return { ok: false, error: "Only a holding admin can change a role." }
+  }
+  // Checked before the lookup, like setUserActive's self-check, so the
+  // answer is the real reason rather than a misleading "not found".
+  //
+  // This is also what keeps a company from losing its last holding admin,
+  // which is why there is no separate guard for that. A demotion needs an
+  // acting holding admin and a *different* target, so the actor is always
+  // still an admin afterwards. A count of remaining admins would read as
+  // load-bearing while being unreachable — the failure mode this file has
+  // already been bitten by once.
+  if (id === actor.id) {
+    return { ok: false, error: "You can't change your own role — ask another holding admin." }
+  }
+
+  const target = await prisma.user.findFirst({
+    where: managedUserWhere(actor, id),
+    include: { doctor: true },
+  })
+  if (!target) return { ok: false, error: "User not found." }
+  if (target.role === input.role) return { ok: false, error: "That's already their role." }
+
+  const toHolding = input.role === "HOLDING_ADMIN"
+  const requestedBranchId = input.branchId?.trim() || null
+
+  let branchId: string | null
+  if (toHolding) {
+    // A holding admin has no branch; carrying one would make them appear in
+    // a branch's staff list while their access ignores branches entirely.
+    branchId = null
+  } else {
+    // Moving to a branch-scoped role needs a branch. Reuse their current one
+    // when the caller did not name one, so a straight FRONT_DESK -> DOCTOR
+    // change does not have to restate where they work.
+    branchId = requestedBranchId ?? target.branchId
+    if (!branchId) return { ok: false, error: "Select a branch for this role." }
+    const branch = await prisma.branch.findFirst({
+      where: { id: branchId, clinic: { holdingCompanyId: requireHoldingCompanyId(actor) } },
+    })
+    if (!branch) return { ok: false, error: "Select a branch." }
+    if (!branch.isActive) return { ok: false, error: "That branch is inactive." }
+  }
+
+  // Same reasoning as the branch move: assignDoctor only ever attaches an
+  // in-branch doctor, and a consultation in progress expects its doctor to
+  // still be one. Demoting mid-visit strands the entry.
+  if (target.role === "DOCTOR" && input.role !== "DOCTOR" && target.doctor) {
+    const unfinished = await runWithRls(actor, (tx) =>
+      tx.queueEntry.count({
+        where: { doctorId: target.doctor!.id, status: { in: [...UNFINISHED_QUEUE_STATUSES] } },
+      })
+    )
+    if (unfinished > 0) {
+      return {
+        ok: false,
+        error: `This doctor still has ${unfinished} unfinished queue ${unfinished === 1 ? "entry" : "entries"}. Complete or reassign them first.`,
+      }
+    }
+  }
+
+  // Promoting to DOCTOR needs a Doctor row. An account that was a doctor
+  // before still has one, so only a first-time promotion asks for details.
+  const needsNewDoctorRow = input.role === "DOCTOR" && !target.doctor
+  if (needsNewDoctorRow) {
+    if (!input.licenseNumber?.trim()) {
+      return { ok: false, error: "A licence number is required to make someone a doctor." }
+    }
+    const fee = Number(input.consultationFeePesos)
+    if (!input.consultationFeePesos || !Number.isFinite(fee) || fee <= 0) {
+      return { ok: false, error: "A consultation fee is required to make someone a doctor." }
+    }
+  }
+
+  const previousRole = target.role
+  await runWithRls(actor, async (tx) => {
+    await tx.user.update({
+      where: { id },
+      data: {
+        role: input.role,
+        branchId,
+        // Mirrors createUser: the company link is what makes a holding admin
+        // reachable at all, since they match no branch.
+        holdingCompanyId: toHolding ? actor.holdingCompanyId : null,
+      },
+    })
+
+    if (needsNewDoctorRow) {
+      await tx.doctor.create({
+        data: {
+          userId: id,
+          branchId: branchId!,
+          licenseNumber: input.licenseNumber!.trim(),
+          specialization: input.specialization?.trim() || "General Practitioner",
+          consultationFee: Math.round(Number(input.consultationFeePesos) * 100),
+        },
+      })
+    } else if (input.role === "DOCTOR" && target.doctor && branchId) {
+      // Re-promotion, or a promotion that also moved branch: the dormant row
+      // has to follow, or the doctor is pickable in the branch they left.
+      await tx.doctor.update({ where: { userId: id }, data: { branchId } })
+    }
+
+    await tx.auditLog.create({
+      data: {
+        branchId,
+        userId: actor.id,
+        action: "user.role_changed",
+        entityType: "User",
+        entityId: id,
+        changes: { fromRole: previousRole, toRole: input.role, branchId },
+      },
+    })
+  })
+
   return { ok: true }
 }
 

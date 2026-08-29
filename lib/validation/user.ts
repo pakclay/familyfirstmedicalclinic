@@ -61,3 +61,26 @@ export const editUserSchema = z.object({
 })
 
 export type EditUserInput = z.infer<typeof editUserSchema>
+
+/**
+ * Changing an existing account's role. Separate from editUserSchema because
+ * it is a different, far more dangerous operation than renaming someone,
+ * and it carries fields that only matter for one target role.
+ *
+ * `branchId` is required when moving *to* a branch-scoped role and ignored
+ * when moving to HOLDING_ADMIN, which has no branch. The doctor fields are
+ * required only when the target is DOCTOR and the account has no existing
+ * Doctor row to reuse — changeUserRole decides that, since it is the only
+ * side that can see whether one exists.
+ */
+export const changeRoleSchema = z.object({
+  role: z.enum(["FRONT_DESK", "DOCTOR", "CLINIC_ADMIN", "HOLDING_ADMIN"]),
+  branchId: z.string().optional(),
+  licenseNumber: z.string().trim().optional(),
+  specialization: z.string().trim().optional(),
+  consultationFeePesos: z.string().trim().optional(),
+  /** Typed confirmation, required by the UI for the two escalating changes. */
+  confirm: z.string().optional(),
+})
+
+export type ChangeRoleInput = z.infer<typeof changeRoleSchema>

@@ -4,12 +4,13 @@ import { revalidatePath } from "next/cache"
 import { auth } from "@/auth"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import type { AbilitySubject } from "@/lib/permissions/ability"
-import { createUserSchema, editUserSchema } from "@/lib/validation/user"
+import { createUserSchema, editUserSchema, changeRoleSchema } from "@/lib/validation/user"
 import {
   createUser,
   updateUser,
   setUserActive,
   forcePasswordReset,
+  changeUserRole,
   regenerateTempPassword,
   unlockAccount,
   type CreateUserResult,
@@ -70,6 +71,25 @@ export async function setUserActiveAction(id: string, isActive: boolean): Promis
   const user = await actingUser()
   const result = await setUserActive(user, id, isActive)
   if (result.ok) revalidateUserViews()
+  return result
+}
+
+export async function changeUserRoleAction(
+  id: string,
+  formData: Record<string, unknown>
+): Promise<ManageUserResult> {
+  const user = await actingUser()
+  const parsed = changeRoleSchema.safeParse(formData)
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Check the form for errors." }
+  }
+  const result = await changeUserRole(user, id, parsed.data)
+  if (result.ok) {
+    revalidateUserViews()
+    // A role change moves someone in or out of the doctor picker and the
+    // branch's staff list, neither of which lives under the paths above.
+    revalidatePath("/staff/queue", "layout")
+  }
   return result
 }
 

@@ -18,6 +18,7 @@ import {
   setUserActive,
   forcePasswordReset,
   regenerateTempPassword,
+  changeUserRole,
   unlockAccount,
   LOGIN_LOCKOUT_THRESHOLD,
   LOGIN_LOCKOUT_DURATION_MINUTES,
@@ -235,6 +236,10 @@ describe("user management", () => {
 
   afterAll(async () => {
     await superuserPrisma.auditLog.deleteMany({ where: { branchId: { in: [branchA.id, branchB.id] } } })
+    // Queue entries and patients come from the doctor-demotion test, and
+    // both reference the branch — deleted before the doctors they point at.
+    await superuserPrisma.queueEntry.deleteMany({ where: { branchId: { in: [branchA.id, branchB.id] } } })
+    await superuserPrisma.patient.deleteMany({ where: { branchId: { in: [branchA.id, branchB.id] } } })
     await superuserPrisma.doctor.deleteMany({ where: { branchId: { in: [branchA.id, branchB.id] } } })
     await superuserPrisma.user.deleteMany({ where: { branchId: { in: [branchA.id, branchB.id] } } })
     await superuserPrisma.user.delete({ where: { id: holdingAdmin.id } })
@@ -368,6 +373,222 @@ describe("user management", () => {
     expect((await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInA.id } })).mustChangePassword).toBe(
       true
     )
+  })
+
+  it("promotes a front desk account to clinic admin", async () => {
+    const u = await superuserPrisma.user.create({
+      data: {
+        branchId: branchA.id,
+        name: "Promote Me",
+        email: `promote-${Date.now()}@test.local`,
+        passwordHash: "x",
+        role: Role.FRONT_DESK,
+      },
+    })
+    expect(await changeUserRole(holdingAdmin, u.id, { role: "CLINIC_ADMIN" })).toEqual({ ok: true })
+    const row = await superuserPrisma.user.findUniqueOrThrow({ where: { id: u.id } })
+    expect(row.role).toBe(Role.CLINIC_ADMIN)
+    // Keeps the branch it already had — a straight role change should not
+    // require restating where someone works.
+    expect(row.branchId).toBe(branchA.id)
+
+    const log = await superuserPrisma.auditLog.findFirst({
+      where: { entityId: u.id, action: "user.role_changed" },
+    })
+    expect(log!.changes).toMatchObject({ fromRole: "FRONT_DESK", toRole: "CLINIC_ADMIN" })
+  })
+
+  it("creates a Doctor record when promoting to doctor, and reuses it on re-promotion", async () => {
+    const u = await superuserPrisma.user.create({
+      data: {
+        branchId: branchA.id,
+        name: "Future Doctor",
+        email: `futuredoc-${Date.now()}@test.local`,
+        passwordHash: "x",
+        role: Role.FRONT_DESK,
+      },
+    })
+    expect(
+      await changeUserRole(holdingAdmin, u.id, {
+        role: "DOCTOR",
+        licenseNumber: "LIC-ROLE-1",
+        consultationFeePesos: "750",
+      })
+    ).toEqual({ ok: true })
+    const doctor = await superuserPrisma.doctor.findUniqueOrThrow({ where: { userId: u.id } })
+    expect(doctor.consultationFee).toBe(75000)
+
+    // Demote, then promote again without supplying licence details.
+    expect(await changeUserRole(holdingAdmin, u.id, { role: "FRONT_DESK" })).toEqual({ ok: true })
+    // The record survives demotion — consultations.doctor_id is NOT NULL, so
+    // deleting it would be impossible for any doctor with history anyway.
+    expect(await superuserPrisma.doctor.findUnique({ where: { userId: u.id } })).not.toBeNull()
+
+    expect(await changeUserRole(holdingAdmin, u.id, { role: "DOCTOR" })).toEqual({ ok: true })
+    const again = await superuserPrisma.doctor.findUniqueOrThrow({ where: { userId: u.id } })
+    expect(again.id).toBe(doctor.id)
+    expect(again.licenseNumber).toBe("LIC-ROLE-1")
+  })
+
+  it("requires licence details only for a first-time doctor promotion", async () => {
+    const u = await superuserPrisma.user.create({
+      data: {
+        branchId: branchA.id,
+        name: "No Licence",
+        email: `nolicence-${Date.now()}@test.local`,
+        passwordHash: "x",
+        role: Role.FRONT_DESK,
+      },
+    })
+    expect(await changeUserRole(holdingAdmin, u.id, { role: "DOCTOR" })).toEqual({
+      ok: false,
+      error: "A licence number is required to make someone a doctor.",
+    })
+    expect(await changeUserRole(holdingAdmin, u.id, { role: "DOCTOR", licenseNumber: "L1" })).toEqual({
+      ok: false,
+      error: "A consultation fee is required to make someone a doctor.",
+    })
+    expect((await superuserPrisma.user.findUniqueOrThrow({ where: { id: u.id } })).role).toBe(Role.FRONT_DESK)
+  })
+
+  it("clears the branch when promoting to holding admin, and attaches the company", async () => {
+    const u = await superuserPrisma.user.create({
+      data: {
+        branchId: branchA.id,
+        name: "Future Owner",
+        email: `futureowner-${Date.now()}@test.local`,
+        passwordHash: "x",
+        role: Role.CLINIC_ADMIN,
+      },
+    })
+    expect(await changeUserRole(holdingAdmin, u.id, { role: "HOLDING_ADMIN" })).toEqual({ ok: true })
+    const row = await superuserPrisma.user.findUniqueOrThrow({ where: { id: u.id } })
+    // Carrying a branch would list them under it while their access ignores
+    // branches entirely.
+    expect(row.branchId).toBeNull()
+    expect(row.holdingCompanyId).toBe(holding.id)
+  })
+
+  it("cannot leave the company without a holding admin", async () => {
+    // There is no separate last-admin guard, because there is no way to
+    // reach the state it would defend against: a demotion needs an acting
+    // holding admin and a different target, so whoever performs it is still
+    // an admin when it commits. This test pins that reasoning rather than a
+    // check — if someone later adds a path that demotes an admin without
+    // another one acting, this is where it should start failing.
+    const other = await superuserPrisma.user.create({
+      data: {
+        holdingCompanyId: holding.id,
+        name: "Second Owner",
+        email: `secondowner-${Date.now()}@test.local`,
+        passwordHash: "x",
+        role: Role.HOLDING_ADMIN,
+      },
+    })
+    const otherSubject: AbilitySubject = {
+      id: other.id,
+      role: Role.HOLDING_ADMIN,
+      branchId: null,
+      holdingCompanyId: holding.id,
+    }
+
+    // The acting admin cannot demote themselves...
+    expect(await changeUserRole(otherSubject, other.id, { role: "CLINIC_ADMIN", branchId: branchA.id })).toEqual({
+      ok: false,
+      error: "You can't change your own role — ask another holding admin.",
+    })
+
+    // ...and demoting the *other* one leaves the actor in place, so an admin
+    // always remains.
+    expect(
+      await changeUserRole(otherSubject, holdingAdmin.id, { role: "CLINIC_ADMIN", branchId: branchA.id })
+    ).toEqual({ ok: true })
+    const stillAdmin = await superuserPrisma.user.count({
+      where: { role: Role.HOLDING_ADMIN, isActive: true, holdingCompanyId: holding.id },
+    })
+    expect(stillAdmin).toBeGreaterThanOrEqual(1)
+
+    // Restore the fixture for the tests that follow.
+    await superuserPrisma.user.update({
+      where: { id: holdingAdmin.id },
+      data: { role: Role.HOLDING_ADMIN, branchId: null, holdingCompanyId: holding.id },
+    })
+    await superuserPrisma.auditLog.deleteMany({ where: { userId: other.id } })
+    await superuserPrisma.user.delete({ where: { id: other.id } })
+  })
+
+  it("refuses to change your own role", async () => {
+    const result = await changeUserRole(holdingAdmin, holdingAdmin.id, { role: "FRONT_DESK", branchId: branchA.id })
+    expect(result).toEqual({
+      ok: false,
+      error: "You can't change your own role — ask another holding admin.",
+    })
+  })
+
+  it("refuses a role change from anyone who isn't a holding admin", async () => {
+    const before = await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInA.id } })
+    expect(await changeUserRole(clinicAdminA, frontDeskInA.id, { role: "CLINIC_ADMIN" })).toEqual({
+      ok: false,
+      error: "Only a holding admin can change a role.",
+    })
+    expect((await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInA.id } })).role).toBe(before.role)
+  })
+
+  it("refuses to demote a doctor who still has unfinished queue entries", async () => {
+    const u = await superuserPrisma.user.create({
+      data: {
+        branchId: branchA.id,
+        name: "Busy Doctor",
+        email: `busydoc-${Date.now()}@test.local`,
+        passwordHash: "x",
+        role: Role.DOCTOR,
+      },
+    })
+    const doc = await superuserPrisma.doctor.create({
+      data: { userId: u.id, branchId: branchA.id, licenseNumber: `BUSY-${Date.now()}`, consultationFee: 1000 },
+    })
+    const patient = await superuserPrisma.patient.create({
+      data: {
+        branchId: branchA.id,
+        firstName: "Role",
+        lastName: "Patient",
+        birthdate: new Date("1990-01-01"),
+        sex: Sex.FEMALE,
+        phone: "09170000000",
+        address: "1 Role St",
+        emergencyContactName: "Kin",
+        emergencyContactPhone: "09170000001",
+      },
+    })
+    const entry = await superuserPrisma.queueEntry.create({
+      data: {
+        branchId: branchA.id,
+        patientId: patient.id,
+        doctorId: doc.id,
+        queueNumber: 91001,
+        queueDate: new Date("2099-01-01T00:00:00Z"),
+        status: "WAITING",
+        source: "WALK_IN",
+        accessToken: `role-busy-${Date.now()}`,
+      },
+    })
+
+    const blocked = await changeUserRole(holdingAdmin, u.id, { role: "FRONT_DESK" })
+    expect(blocked.ok).toBe(false)
+    if (blocked.ok) return
+    expect(blocked.error).toContain("unfinished queue")
+    expect((await superuserPrisma.user.findUniqueOrThrow({ where: { id: u.id } })).role).toBe(Role.DOCTOR)
+
+    // Positive control: finishing the entry releases the demotion.
+    await superuserPrisma.queueEntry.update({ where: { id: entry.id }, data: { status: "COMPLETED" } })
+    expect(await changeUserRole(holdingAdmin, u.id, { role: "FRONT_DESK" })).toEqual({ ok: true })
+  })
+
+  it("refuses a no-op role change", async () => {
+    expect(await changeUserRole(holdingAdmin, frontDeskInA.id, { role: "FRONT_DESK" })).toEqual({
+      ok: false,
+      error: "That's already their role.",
+    })
   })
 
   it("issues a working temporary password, and invalidates the old one", async () => {

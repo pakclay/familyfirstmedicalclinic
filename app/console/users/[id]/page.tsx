@@ -1,4 +1,5 @@
 import { redirect, notFound } from "next/navigation"
+import Link from "next/link"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/db/prisma"
 import { getManagedUserById } from "@/lib/queries/users"
@@ -44,6 +45,17 @@ export default async function EditUserPage({ params }: { params: Promise<{ id: s
         {managedUser.email}
         {managedUser.branchName ? ` · ${managedUser.branchName}` : ""}
       </p>
+
+      {/* Role lives on its own page rather than in this form: it is the one
+          change that grants or removes access, and it needs its consequences
+          spelled out rather than sitting in a dropdown beside "Phone". */}
+      {session.user.role === "HOLDING_ADMIN" && (
+        <p className="mt-2 text-sm">
+          <Link href={`/console/users/${id}/role`} className="underline">
+            Change role or permissions
+          </Link>
+        </p>
+      )}
 
       <div className="mt-4">
         <EditUserForm user={managedUser} branches={branches} showBranchPicker={canMoveBranch} />

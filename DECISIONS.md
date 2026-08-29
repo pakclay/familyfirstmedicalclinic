@@ -9,6 +9,53 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-08-29 — Changing an existing account's role
+
+`updateUser` never touched `role` — only `createUser` set it — so an
+account's role was fixed for life and the remedy was deleting and
+recreating. Given its own page rather than a field on the edit form,
+because it is the one change that grants or removes access and it deserves
+its consequences spelled out rather than a dropdown beside "Phone".
+
+- **Kept out of `updateUser` deliberately.** Folding a privilege change
+  into the function used to fix a typo in someone's name would mean every
+  rename carried the machinery to grant company-wide access, and a caller
+  that forgot to omit `role` would escalate silently.
+- **A Doctor row is never deleted on demotion.** `consultations.doctor_id`
+  is NOT NULL with no ON DELETE, so a doctor who has ever recorded a
+  consultation has a row the database physically refuses to remove — and
+  should, since the clinical record points at it. Demotion leaves it
+  dormant; re-promotion reuses it, which also preserves the licence number
+  rather than asking for it again.
+- **That exposed a live bug, now fixed.** `listBranchDoctors` filtered only
+  on `branchId`, so any Doctor row stayed pickable in the "Assign doctor"
+  dropdown regardless of its user — a *deactivated* doctor was already
+  offered to the queue before this feature existed. Now filtered on
+  `user: { isActive: true, role: "DOCTOR" }`, which the demotion path
+  depends on to be correct at all.
+- **Self-change is refused, and that is also what protects the last
+  holding admin.** A demotion needs an acting holding admin and a different
+  target, so whoever performs it is still an admin when it commits.
+- **A "last holding admin" count was written and then deleted.** It could
+  never fire, for the reason directly above: the actor always counts as a
+  remaining admin. It was removed rather than kept as belt-and-braces,
+  because a guard that reads as load-bearing while being unreachable is
+  exactly the failure this file recorded that morning against the doctor
+  branch-move check. A test pins the reasoning instead, so a future path
+  that demotes an admin without another one acting fails there.
+- **Demoting a doctor mid-visit is refused**, on the same grounds as moving
+  one between branches: `assignDoctor` only ever attaches an in-branch
+  doctor, and a consultation in progress expects its doctor to still be
+  one.
+- **The capability matrix is data, not enforcement.** Each line names the
+  file that actually refuses, so it can be confirmed rather than trusted,
+  and if the two drift the query layer is right and the matrix is stale. It
+  exists because "CLINIC_ADMIN" on its own does not tell an admin that the
+  person will lose the consultation screen.
+- **Not verified in a browser.** The dev session had expired and signing in
+  means typing a password. The page compiles and the guards are covered at
+  the query layer, but the form is unexercised.
+
 ## 2026-08-29 — Triage vitals on the visit
 
 Vitals already existed, as `consultations.vitals`, but only a doctor could
