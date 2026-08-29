@@ -196,6 +196,7 @@ model User {
   expensesRecorded     Expense[]
   stockMovementsMade   StockMovement[]
   auditLogs            AuditLog[]
+  vitalsRecorded       QueueEntry[]    @relation("QueueEntryVitalsRecordedBy")
 
   @@map("users")
 }
@@ -284,6 +285,14 @@ model QueueEntry {
   completedAt    DateTime?     @map("completed_at")
   // cryptographically random, single-purpose; expires end of day (queueDate)
   accessToken    String        @unique @map("access_token")
+  // Triage vitals: { bp, temp, weight, height, pulse }. Recorded by front
+  // desk at check-in, before any consultation exists. Distinct from
+  // consultations.vitals, which is the doctor's own reading at the
+  // encounter — the two are allowed to differ.
+  vitals             Json?
+  vitalsRecordedAt   DateTime? @map("vitals_recorded_at")
+  vitalsRecordedById String?   @map("vitals_recorded_by")
+  vitalsRecordedBy   User?     @relation("QueueEntryVitalsRecordedBy", fields: [vitalsRecordedById], references: [id])
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
 

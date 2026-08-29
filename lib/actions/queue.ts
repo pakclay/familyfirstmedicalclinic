@@ -14,6 +14,7 @@ import {
   moveQueueEntryOrder,
   type StaffQueueEntryDTO,
 } from "@/lib/queries/queue"
+import { recordVitals, type RecordVitalsResult } from "@/lib/queries/vitals"
 
 async function actingUser(): Promise<AbilitySubject> {
   const session = await auth()
@@ -31,6 +32,23 @@ export async function callNextAction(): Promise<StaffQueueEntryDTO | null> {
   const result = await callNextEntry(user)
   revalidatePath("/staff/queue")
   revalidatePath("/doctor/queue")
+  return result
+}
+
+/**
+ * Returns a result object rather than throwing, unlike its neighbours here:
+ * a rejected vitals reading is a correctable typo the person needs to see
+ * next to the field, not a failed operation. Revalidates the doctor queue
+ * too, so a reading taken at the desk reaches a consultation screen already
+ * open on it.
+ */
+export async function recordVitalsAction(queueEntryId: string, input: unknown): Promise<RecordVitalsResult> {
+  const user = await actingUser()
+  const result = await recordVitals(user, queueEntryId, input)
+  if (result.ok) {
+    revalidatePath("/staff/queue")
+    revalidatePath("/doctor/queue")
+  }
   return result
 }
 

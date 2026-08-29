@@ -9,6 +9,63 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-08-29 — Triage vitals on the visit
+
+Vitals already existed, as `consultations.vitals`, but only a doctor could
+ever write them: a Consultation row requires a `doctor_id` and is created
+by `saveConsultation`, after the patient has been seen. Vitals are taken at
+triage, before any of that exists, so the people who actually measure them
+had no write path at all.
+
+- **Columns on `queue_entries`, not a `vitals` table.** queue_entries
+  already carries the branch RLS policies from the branch refactor, so
+  these ride along on the existing row and inherit that isolation exactly.
+  A separate table would need its own SELECT/INSERT/UPDATE policies, and
+  that is the part this codebase has already demonstrated is easiest to get
+  wrong. Cardinality agrees: one reading per visit, whereas consultations
+  carry revisions and would duplicate vitals across every revision of the
+  same encounter.
+- **`consultations.vitals` is kept, not moved.** It stays the doctor's own
+  reading at the encounter; the queue entry holds triage's. The two are
+  allowed to differ — a patient reweighed in the consultation room is not a
+  data conflict, and collapsing them would force one of the two readings to
+  be silently overwritten by the other. The consultation form prefills from
+  triage and says so, but editing there does not write back.
+- **Readings are validated now, and were not before.** The old schema
+  accepted any string, so a temperature of "999" or a typo'd weight of
+  "700" was stored verbatim and shown to a doctor as fact. Ranges bound what
+  a living patient can plausibly measure rather than what is healthy — a
+  reading can be alarming and still be real. Both forms import one schema,
+  so a reading cannot be accepted at triage and rejected in the consultation
+  room.
+- **Kept as strings rather than numbers.** The JSON column already held
+  strings, and changing the value types would silently invalidate every
+  reading recorded before today. Blood pressure has no numeric
+  representation anyway, so the column was never uniformly numeric.
+- **An empty save is refused rather than written as `{}`.** It would stamp
+  a recorder and a timestamp onto a reading that does not exist, which the
+  UI then presents as "vitals were taken" — worse than showing nothing.
+- **The audit row records which fields were taken, never the values.**
+  Measurements are clinical data belonging to the visit; `audit_logs` is
+  readable by every holding admin in the company and retained far longer
+  than the reading is clinically current. A test asserts the values do not
+  appear in the row.
+- **A correction overwrites rather than appends.** A stale pulse left
+  beside a corrected temperature reads as both having been measured. Visit-
+  level history is not kept here; the consultation snapshot is the durable
+  clinical record.
+- **The backfill was verified separately, because it had nothing to do.**
+  It copies the latest non-deleted consultation revision's vitals onto its
+  queue entry, but no seeded consultation carries vitals, so the migration
+  ran against zero rows. The UPDATE was replayed against purpose-built rows
+  to confirm it picks the highest revision and ignores a soft-deleted later
+  one — a backfill that silently picked the wrong revision would be
+  invisible until someone opened an old visit.
+- **Not verified in a browser.** The dev session had expired and signing in
+  means typing a password, which is not something to do on the owner's
+  behalf. The queue board's vitals form typechecks and the server compiles
+  clean, but nobody has clicked it.
+
 ## 2026-08-29 — Issuing a replacement temporary password
 
 An account created through the console gets a generated password shown

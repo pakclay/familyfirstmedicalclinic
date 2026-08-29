@@ -16,6 +16,8 @@ export type ConsultationScreenData = {
   history: ConsultationSummaryDTO[]
   medicines: MedicineOptionDTO[]
   consultationFee: number
+  /** Vitals triage already recorded on this visit, so the doctor sees them rather than re-taking them. */
+  triageVitals: { values: Record<string, string>; recordedAt: Date | null; recordedByName: string | null }
 }
 
 export async function getConsultationScreenData(
@@ -31,7 +33,7 @@ export async function getConsultationScreenData(
 
     const entry = await tx.queueEntry.findFirst({
       where: { id: queueEntryId, branchId },
-      include: { patient: true },
+      include: { patient: true, vitalsRecordedBy: { select: { name: true } } },
     })
     if (!entry) throw new ForbiddenError("Queue entry not found in your branch")
     if (entry.doctorId !== doctor.id) throw new ForbiddenError("This patient isn't assigned to you")
@@ -79,6 +81,21 @@ export async function getConsultationScreenData(
       })),
       medicines: medicines.map(toMedicineOptionDTO),
       consultationFee: doctor.consultationFee,
+      triageVitals: {
+        // Free-form JSON column — a row written before the vitals schema
+        // existed could be any shape, so anything that is not an object of
+        // strings is treated as absent rather than trusted onto the screen.
+        values:
+          entry.vitals && typeof entry.vitals === "object" && !Array.isArray(entry.vitals)
+            ? Object.fromEntries(
+                Object.entries(entry.vitals as Record<string, unknown>)
+                  .filter(([, v]) => typeof v === "string" && v !== "")
+                  .map(([k, v]) => [k, v as string])
+              )
+            : {},
+        recordedAt: entry.vitalsRecordedAt,
+        recordedByName: entry.vitalsRecordedBy?.name ?? null,
+      },
     }
   })
 }

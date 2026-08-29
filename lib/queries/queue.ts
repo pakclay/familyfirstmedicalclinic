@@ -109,6 +109,8 @@ export type StaffQueueEntryDTO = QueueEntryDTO & {
   patientName: string
   patientAge: number
   doctorName: string | null
+  /** Triage vitals already on the visit, so the board can show what still needs taking. */
+  vitals: Record<string, string>
 }
 
 function toStaffQueueEntryDTO(
@@ -124,6 +126,17 @@ function toStaffQueueEntryDTO(
     patientName: `${entry.patient.lastName}, ${entry.patient.firstName}`,
     patientAge,
     doctorName: entry.doctor?.user.name ?? null,
+    // Free-form JSON column, so a row written before the vitals schema
+    // existed could be any shape — anything that is not an object of
+    // strings is treated as absent rather than trusted into the UI.
+    vitals:
+      entry.vitals && typeof entry.vitals === "object" && !Array.isArray(entry.vitals)
+        ? Object.fromEntries(
+            Object.entries(entry.vitals as Record<string, unknown>)
+              .filter(([, v]) => typeof v === "string" && v !== "")
+              .map(([k, v]) => [k, v as string])
+          )
+        : {},
   }
 }
 
