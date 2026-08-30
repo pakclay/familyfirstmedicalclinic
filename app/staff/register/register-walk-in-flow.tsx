@@ -8,12 +8,15 @@ import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Card, CardContent } from "@/components/ui/card"
 import type { PatientDTO } from "@/lib/dto/patient"
-import { searchByPhoneAction, registerNewPatientAction, checkInExistingAction } from "./actions"
+import { searchPatientsAction, registerNewPatientAction, checkInExistingAction } from "./actions"
 
+// `term` is whatever the desk typed — a name or a number. It is carried
+// through the flow only to prefill and to label; nothing branches on which
+// kind it is except the phone prefill below.
 type Step =
   | { name: "start" }
-  | { name: "candidates"; phone: string; reasonForVisit: string; priority: boolean; candidates: PatientDTO[] }
-  | { name: "new-form"; phone: string; reasonForVisit: string; priority: boolean }
+  | { name: "candidates"; term: string; reasonForVisit: string; priority: boolean; candidates: PatientDTO[] }
+  | { name: "new-form"; term: string; reasonForVisit: string; priority: boolean }
   | { name: "done"; patientName: string; queueNumber: number }
 
 type NewPatientForm = {
@@ -22,6 +25,7 @@ type NewPatientForm = {
   middleName: string
   birthdate: string
   sex: string
+  phone: string
   email: string
   address: string
   emergencyContactName: string
@@ -37,6 +41,7 @@ const EMPTY_NEW_PATIENT_FORM: NewPatientForm = {
   middleName: "",
   birthdate: "",
   sex: "",
+  phone: "",
   email: "",
   address: "",
   emergencyContactName: "",
@@ -44,6 +49,14 @@ const EMPTY_NEW_PATIENT_FORM: NewPatientForm = {
   guardianName: "",
   guardianPhone: "",
   consent: false,
+}
+
+/**
+ * A search term is worth prefilling into the phone field only if it plausibly
+ * is one — otherwise the desk searched a name and would have to clear it out.
+ */
+function asPhoneOrEmpty(term: string): string {
+  return term.replace(/\D/g, "").length >= 7 ? term.trim() : ""
 }
 
 export function RegisterWalkInFlow() {
@@ -56,24 +69,26 @@ export function RegisterWalkInFlow() {
   async function handleStart(formData: FormData) {
     setPending(true)
     setError(null)
-    const phone = String(formData.get("phone") ?? "").trim()
+    const term = String(formData.get("term") ?? "").trim()
     const reasonForVisit = String(formData.get("reasonForVisit") ?? "").trim()
     const priority = formData.get("priority") === "on"
-    if (!phone || !reasonForVisit) {
-      setError("Phone number and reason for visit are both required.")
+    if (!term || !reasonForVisit) {
+      setError("A name or mobile number and a reason for visit are both required.")
       setPending(false)
       return
     }
     try {
-      const candidates = await searchByPhoneAction(phone)
-      if (candidates.length === 0) setNewPatientForm(EMPTY_NEW_PATIENT_FORM)
+      const candidates = await searchPatientsAction(term)
+      if (candidates.length === 0) {
+        setNewPatientForm({ ...EMPTY_NEW_PATIENT_FORM, phone: asPhoneOrEmpty(term) })
+      }
       setStep(
         candidates.length > 0
-          ? { name: "candidates", phone, reasonForVisit, priority, candidates }
-          : { name: "new-form", phone, reasonForVisit, priority }
+          ? { name: "candidates", term, reasonForVisit, priority, candidates }
+          : { name: "new-form", term, reasonForVisit, priority }
       )
     } catch {
-      setError("Something went wrong searching for this number. Try again.")
+      setError("Something went wrong searching. Try again.")
     } finally {
       setPending(false)
     }
@@ -104,7 +119,6 @@ export function RegisterWalkInFlow() {
     setError(null)
     const input = {
       ...newPatientForm,
-      phone: step.phone,
       reasonForVisit: step.reasonForVisit,
       priority: step.priority,
     }
@@ -152,13 +166,20 @@ export function RegisterWalkInFlow() {
       <Card>
         <CardContent className="flex flex-col gap-3 py-6">
           <p className="text-sm text-muted-foreground">
-            Found {step.candidates.length} existing patient{step.candidates.length > 1 ? "s" : ""} with this number:
+            Found {step.candidates.length} existing patient{step.candidates.length > 1 ? "s" : ""} matching &ldquo;
+            {step.term}&rdquo;:
           </p>
           <ul className="divide-y divide-border rounded-md border border-border">
             {step.candidates.map((p) => (
-              <li key={p.id} className="flex items-center justify-between px-4 py-3">
-                <span className="text-sm">
-                  {p.lastName}, {p.firstName} · {p.age}y
+              <li key={p.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                {/* Phone and age are both shown: with name search, two real
+                    people can share a name and the number is what tells them
+                    apart at the counter. */}
+                <span className="min-w-0 text-sm">
+                  {p.lastName}, {p.firstName}
+                  <span className="block text-xs text-muted-foreground">
+                    {p.age}y · {p.phone}
+                  </span>
                 </span>
                 <Button size="sm" disabled={pending} onClick={() => handleCheckInExisting(p.id)}>
                   This is the patient
@@ -172,8 +193,8 @@ export function RegisterWalkInFlow() {
             className="h-11"
             disabled={pending}
             onClick={() => {
-              setNewPatientForm(EMPTY_NEW_PATIENT_FORM)
-              setStep({ name: "new-form", phone: step.phone, reasonForVisit: step.reasonForVisit, priority: step.priority })
+              setNewPatientForm({ ...EMPTY_NEW_PATIENT_FORM, phone: asPhoneOrEmpty(step.term) })
+              setStep({ name: "new-form", term: step.term, reasonForVisit: step.reasonForVisit, priority: step.priority })
             }}
           >
             None of these — register a new patient
@@ -192,7 +213,7 @@ export function RegisterWalkInFlow() {
         <CardContent className="py-6">
           <form onSubmit={handleNewPatientSubmit} className="flex flex-col gap-4">
             <p className="text-sm text-muted-foreground">
-              New patient · {step.phone} · {step.reasonForVisit}
+              New patient · no match for &ldquo;{step.term}&rdquo; · {step.reasonForVisit}
             </p>
             <div className="grid grid-cols-2 gap-3">
               <Field label="First name" name="firstName" required autoFocus value={newPatientForm.firstName} onChange={(v) => set("firstName", v)} />
@@ -217,6 +238,10 @@ export function RegisterWalkInFlow() {
                 </select>
               </div>
             </div>
+            {/* Its own field now. The search term used to double as the phone
+                number, which only worked while the search was phone-only —
+                someone found by name would otherwise have no number recorded. */}
+            <Field label="Mobile number" name="phone" type="tel" required value={newPatientForm.phone} onChange={(v) => set("phone", v)} />
             <Field label="Address" name="address" required value={newPatientForm.address} onChange={(v) => set("address", v)} />
             <Field label="Email (optional)" name="email" type="email" value={newPatientForm.email} onChange={(v) => set("email", v)} />
             <div className="grid grid-cols-2 gap-3">
@@ -260,8 +285,19 @@ export function RegisterWalkInFlow() {
       <CardContent className="py-6">
         <form action={handleStart} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="phone">Mobile number</Label>
-            <Input id="phone" name="phone" type="tel" inputMode="tel" required autoFocus className="h-11" />
+            <Label htmlFor="term">Patient name or mobile number</Label>
+            <Input
+              id="term"
+              name="term"
+              required
+              autoFocus
+              autoComplete="off"
+              placeholder="e.g. Dela Cruz, or 0917…"
+              className="h-11"
+            />
+            <p className="text-xs text-muted-foreground">
+              Search before registering — a returning patient should keep the record they already have.
+            </p>
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="reasonForVisit">Reason for visit</Label>

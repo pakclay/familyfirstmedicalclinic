@@ -21,7 +21,7 @@ export default async function RegisterWalkInPage() {
     <div className="mx-auto max-w-md">
       <h1 className="text-2xl font-heading font-semibold">Register walk-in</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Search by mobile number first to avoid creating a duplicate record.
+        Search by name or mobile number first, so a returning patient keeps the record they already have.
       </p>
       <div className="mt-4">
         <RegisterWalkInFlow />

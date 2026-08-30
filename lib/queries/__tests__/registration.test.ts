@@ -6,6 +6,7 @@ import {
   registerWalkIn,
   checkInExistingPatient,
   searchPatientsByPhone,
+  searchPatientsForIntake,
 } from "@/lib/queries/patients"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import type { AbilitySubject } from "@/lib/permissions/ability"
@@ -178,5 +179,54 @@ describe("walk-in registration", () => {
     await expect(
       checkInExistingPatient(frontDeskB, patientInA.id, { reasonForVisit: "x", priority: false })
     ).rejects.toBeInstanceOf(ForbiddenError)
+  })
+
+  /**
+   * The intake search is what stands between the front desk and a duplicate
+   * record. searchPatientsByPhone above only ever matched an exact number, so
+   * a mistyped or changed one left re-encoding as the desk's only option —
+   * these cover the ways a returning patient is actually identified at a
+   * counter.
+   */
+  describe("searchPatientsForIntake", () => {
+    const names = async (subject: AbilitySubject, term: string) =>
+      (await searchPatientsForIntake(subject, term)).map((p) => p.firstName)
+
+    it("finds a patient by last name", async () => {
+      expect(await names(frontDeskA, "Dela Cruz")).toContain("Juan")
+    })
+
+    it("finds a patient by first name, case-insensitively", async () => {
+      expect(await names(frontDeskA, "juan")).toContain("Juan")
+    })
+
+    it("finds a patient by a partial name", async () => {
+      expect(await names(frontDeskA, "cruz")).toContain("Juan")
+    })
+
+    it("finds a patient by full name in either order", async () => {
+      expect(await names(frontDeskA, "Juan Dela Cruz")).toContain("Juan")
+      // The order the app itself displays names in, comma and all — a desk
+      // user reading it off another screen types exactly this.
+      expect(await names(frontDeskA, "Dela Cruz, Juan")).toContain("Juan")
+    })
+
+    it("still finds a patient by phone regardless of formatting", async () => {
+      expect(await names(frontDeskA, "09175550001")).toContain("Juan")
+      expect(await names(frontDeskA, "+63 917 555 0001")).toContain("Juan")
+    })
+
+    it("returns nothing for a term too short to narrow anything", async () => {
+      expect(await searchPatientsForIntake(frontDeskA, "j")).toEqual([])
+      expect(await searchPatientsForIntake(frontDeskA, "  ")).toEqual([])
+    })
+
+    it("is scoped to the searcher's own branch", async () => {
+      // Positive control first: the patient is findable, so the empty result
+      // below is a branch boundary rather than a search that finds nobody.
+      expect(await names(frontDeskA, "Dela Cruz")).toContain("Juan")
+      expect(await searchPatientsForIntake(frontDeskB, "Dela Cruz")).toEqual([])
+      expect(await searchPatientsForIntake(frontDeskB, "09175550001")).toEqual([])
+    })
   })
 })
