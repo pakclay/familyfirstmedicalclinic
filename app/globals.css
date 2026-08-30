@@ -183,6 +183,24 @@
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
   }
+
+  /* Fires once when a new number is called, to catch the eye of someone who
+     was not looking at the screen. Four pulses and it stops — a display that
+     blinks forever is one people stop seeing. The reduced-motion block below
+     already collapses the duration, so this is silent for anyone who asked
+     for that. */
+  @keyframes call-flash {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.2;
+    }
+  }
+  .animate-call-flash {
+    animation: call-flash 0.7s ease-in-out 4;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

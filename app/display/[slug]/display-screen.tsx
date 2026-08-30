@@ -25,9 +25,14 @@ export function DisplayScreen({ initialState }: { slug: string; initialState: Pu
 
       <div className="flex flex-col items-center gap-2">
         <p className="text-2xl text-sidebar-foreground/70">Now serving</p>
-        <p className="font-numeric text-[14rem] leading-none font-bold text-signal">
-          {state.nowServing ?? "—"}
-        </p>
+        {/* No placeholder glyph: an em-dash at 14rem sets as a solid bar the
+            width of the screen, which reads to a waiting room as a broken
+            display rather than as an idle one. */}
+        {state.nowServing !== null ? (
+          <p className="font-numeric text-[14rem] leading-none font-bold text-signal">{state.nowServing}</p>
+        ) : (
+          <p className="py-12 text-4xl text-sidebar-foreground/50">Nobody is being called right now</p>
+        )}
       </div>
 
       {state.next.length > 0 && (
