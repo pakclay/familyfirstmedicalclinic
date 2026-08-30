@@ -156,6 +156,48 @@ export async function searchPatientsByPhone(user: AbilitySubject, phone: string)
 }
 
 /**
+ * Levenshtein distance, but only asked whether it stays within `max`. Bails
+ * out the moment an entire row exceeds the budget, so comparisons that cannot
+ * possibly match cost a fraction of the full matrix — which matters when this
+ * runs against every name on a branch's roster for every keystroke's worth of
+ * search.
+ */
+function withinEditDistance(a: string, b: string, max: number): boolean {
+  if (a === b) return true
+  if (Math.abs(a.length - b.length) > max) return false
+
+  let previous = Array.from({ length: b.length + 1 }, (_, i) => i)
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i]
+    let best = i
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      const value = Math.min(previous[j] + 1, row[j - 1] + 1, previous[j - 1] + cost)
+      row.push(value)
+      if (value < best) best = value
+    }
+    if (best > max) return false
+    previous = row
+  }
+  return previous[b.length] <= max
+}
+
+/**
+ * How many single-character slips to forgive in a token of a given length.
+ * Nothing under four characters, where one edit turns half the roster into a
+ * match and the search stops meaning anything.
+ */
+function editBudget(token: string): number {
+  if (token.length < 4) return 0
+  return token.length >= 7 ? 2 : 1
+}
+
+/** Names split on whitespace so a compound surname like "Dela Cruz" compares token by token. */
+function nameTokens(firstName: string, lastName: string): string[] {
+  return `${firstName} ${lastName}`.toLowerCase().split(/\s+/).filter(Boolean)
+}
+
+/**
  * The duplicate check the front desk actually runs at intake: one box that
  * takes a name *or* a number.
  *
@@ -196,20 +238,44 @@ export async function searchPatientsForIntake(user: AbilitySubject, term: string
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
     })
 
-    return patients
-      .filter((p) => {
-        if (phoneKey && p.phone.replace(/\D/g, "").slice(-10) === phoneKey) return true
-        const first = p.firstName.toLowerCase()
-        const last = p.lastName.toLowerCase()
-        return (
-          first.includes(needle) ||
-          last.includes(needle) ||
-          `${first} ${last}`.includes(needle) ||
-          `${last} ${first}`.includes(needle)
-        )
-      })
-      .slice(0, 10)
-      .map(toPatientDTO)
+    const matchesPhone = (p: (typeof patients)[number]) =>
+      phoneKey !== null && p.phone.replace(/\D/g, "").slice(-10) === phoneKey
+
+    const matchesExactly = (p: (typeof patients)[number]) => {
+      const first = p.firstName.toLowerCase()
+      const last = p.lastName.toLowerCase()
+      return (
+        first.includes(needle) ||
+        last.includes(needle) ||
+        `${first} ${last}`.includes(needle) ||
+        `${last} ${first}`.includes(needle)
+      )
+    }
+
+    /**
+     * The tier that saves the desk from a duplicate. A record typed in wrong
+     * once — "Patriomonio" for "Patrimonio" — is invisible to substring
+     * matching forever after, and it is exactly the record most likely to be
+     * entered a second time. Every meaningful token of the search has to land
+     * on some token of the name, so forgiveness accumulates per word rather
+     * than letting one close word drag an unrelated person in.
+     */
+    const searchTokens = needle.split(" ").filter((t) => t.length >= 4)
+    const matchesApproximately = (p: (typeof patients)[number]) => {
+      if (searchTokens.length === 0) return false
+      const candidate = nameTokens(p.firstName, p.lastName)
+      return searchTokens.every((token) =>
+        candidate.some((against) => withinEditDistance(token, against, editBudget(token)))
+      )
+    }
+
+    // Exact first: when a real substring match exists, it is the answer, and
+    // burying it under near-misses would make the desk hunt for it.
+    const exact = patients.filter((p) => matchesPhone(p) || matchesExactly(p))
+    const exactIds = new Set(exact.map((p) => p.id))
+    const approximate = patients.filter((p) => !exactIds.has(p.id) && matchesApproximately(p))
+
+    return [...exact, ...approximate].slice(0, 10).map(toPatientDTO)
   })
 }
 
