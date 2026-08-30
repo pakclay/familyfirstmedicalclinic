@@ -221,6 +221,41 @@ describe("walk-in registration", () => {
       expect(await searchPatientsForIntake(frontDeskA, "  ")).toEqual([])
     })
 
+    /**
+     * The case this tier exists for, taken from a real record: a surname
+     * typed in wrong once — "Patriomonio" for "Patrimonio" — is invisible to
+     * substring matching forever after, and it is precisely the record most
+     * likely to get entered a second time.
+     */
+    it("finds a patient whose stored name was misspelled at intake", async () => {
+      await registerWalkIn(frontDeskA, {
+        ...basePatient,
+        firstName: "Alvin",
+        lastName: "Patriomonio", // deliberate typo, as stored
+        phone: "+63 917 555 0777",
+      })
+
+      expect(await names(frontDeskA, "patrimonio")).toContain("Alvin")
+      expect(await names(frontDeskA, "Patrimonio, Alvin")).toContain("Alvin")
+      expect(await names(frontDeskA, "alvin patrimonio")).toContain("Alvin")
+      // The spelling actually on the record still works too.
+      expect(await names(frontDeskA, "patriomonio")).toContain("Alvin")
+    })
+
+    it("does not match an unrelated name", async () => {
+      // The control for the tier above: forgiving two characters must not
+      // turn the search into something that matches anybody.
+      expect(await searchPatientsForIntake(frontDeskA, "zzzznotaname")).toEqual([])
+      expect(await names(frontDeskA, "Santos")).not.toContain("Juan")
+    })
+
+    it("ranks an exact match above a near one", async () => {
+      // "Juan" is exact for Juan; a fuzzy hit must never outrank it, or the
+      // desk hunts past near-misses for the person they actually typed.
+      const found = await searchPatientsForIntake(frontDeskA, "Juan")
+      expect(found[0].firstName).toBe("Juan")
+    })
+
     it("is scoped to the searcher's own branch", async () => {
       // Positive control first: the patient is findable, so the empty result
       // below is a branch boundary rather than a search that finds nobody.
