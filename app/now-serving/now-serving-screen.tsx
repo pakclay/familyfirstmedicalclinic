@@ -53,6 +53,57 @@ export function NowServingScreen({ nowServing, upNext }: { nowServing: NowServin
     return () => clearInterval(id)
   }, [router])
 
+  const audioRef = useRef<AudioContext | null>(null)
+  const speakTimer = useRef<number | null>(null)
+
+  /**
+   * The attention chime, synthesised rather than played from a file.
+   *
+   * A two-note fall is the sound a waiting room already understands, and
+   * generating it costs no asset to host, no network request on a screen that
+   * may be on flaky clinic wifi, and nothing to license. Two sine tones with a
+   * soft attack and an exponential tail — the ramps matter, because a gain
+   * that jumps straight to full volume clicks audibly on cheap TV speakers.
+   *
+   * Returns how long to wait before speaking, so the voice lands after the
+   * chime rather than under it.
+   */
+  const chime = useCallback((): number => {
+    const Ctor =
+      window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!Ctor) return 0
+
+    const ctx = audioRef.current ?? (audioRef.current = new Ctor())
+    // Created suspended until the page has had a gesture; the toggle is that
+    // gesture, so this resumes on the first announcement and is a no-op after.
+    if (ctx.state === "suspended") void ctx.resume()
+
+    const start = ctx.currentTime
+    // A5 then E5 — a falling fourth, which reads as "attention" rather than
+    // as an alarm. Deliberately not a rising pair, which sounds like a
+    // question.
+    for (const [frequency, offset] of [
+      [880, 0],
+      [659.25, 0.26],
+    ] as const) {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      const at = start + offset
+
+      osc.type = "sine"
+      osc.frequency.value = frequency
+      gain.gain.setValueAtTime(0.0001, at)
+      gain.gain.exponentialRampToValueAtTime(0.22, at + 0.02)
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.42)
+
+      osc.connect(gain).connect(ctx.destination)
+      osc.start(at)
+      osc.stop(at + 0.45)
+    }
+
+    return 620
+  }, [])
+
   const speak = useCallback((queueNumber: number, name: string) => {
     if (!("speechSynthesis" in window)) return
     // Cancel anything still queued: two calls in quick succession should
@@ -61,6 +112,26 @@ export function NowServingScreen({ nowServing, upNext }: { nowServing: NowServin
     const utterance = new SpeechSynthesisUtterance(`Number ${queueNumber}. ${spokenName(name)}.`)
     utterance.rate = 0.85
     window.speechSynthesis.speak(utterance)
+  }, [])
+
+  /** Chime, then the name — the sound is what makes people look up in time to hear it. */
+  const announceCall = useCallback(
+    (queueNumber: number, name: string) => {
+      if (speakTimer.current !== null) window.clearTimeout(speakTimer.current)
+      const delay = chime()
+      speakTimer.current = window.setTimeout(() => speak(queueNumber, name), delay)
+    },
+    [chime, speak]
+  )
+
+  // A board left running for a day should not leak an audio context or fire a
+  // pending announcement into a page that has gone.
+  useEffect(() => {
+    return () => {
+      if (speakTimer.current !== null) window.clearTimeout(speakTimer.current)
+      void audioRef.current?.close()
+      audioRef.current = null
+    }
   }, [])
 
   // Fires only on an actual change of number, not on every poll.
@@ -73,18 +144,19 @@ export function NowServingScreen({ nowServing, upNext }: { nowServing: NowServin
 
     setFlashing(true)
     const id = window.setTimeout(() => setFlashing(false), 3000)
-    if (announce && nowServing) speak(nowServing.queueNumber, nowServing.name)
+    if (announce && nowServing) announceCall(nowServing.queueNumber, nowServing.name)
     return () => window.clearTimeout(id)
-  }, [nowServing, announce, speak])
+  }, [nowServing, announce, announceCall])
 
   function toggleAnnounce() {
     const next = !announce
     setAnnounce(next)
-    // Speaking inside the click satisfies the browser's requirement that
-    // audio start from a gesture, and doubles as a check that whoever set the
-    // screen up can hear it — a silent display that believes it is announcing
-    // is the failure worth catching here, not later.
-    if (next && nowServing) speak(nowServing.queueNumber, nowServing.name)
+    // Sounding inside the click satisfies the browser's requirement that audio
+    // start from a gesture — for the AudioContext as much as for speech — and
+    // doubles as a check that whoever set the screen up can hear it. A silent
+    // display that believes it is announcing is the failure worth catching
+    // here, not later.
+    if (next && nowServing) announceCall(nowServing.queueNumber, nowServing.name)
   }
 
   return (
