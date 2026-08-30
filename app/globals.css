@@ -7,12 +7,13 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-inter);
-  --font-mono: var(--font-ibm-plex-mono);
-  --font-heading: var(--font-archivo);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-figures);
+  --font-heading: var(--font-display);
   --color-brand: var(--brand);
   --color-priority: var(--priority);
   --color-signal: var(--signal);
+  --color-marigold: var(--marigold);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -52,82 +53,111 @@
 }
 
 :root {
-  /* Family First Medical Clinic placeholder palette — swap for real brand
-     hex once the owner supplies logo assets; see SPEC.md §13.5. High
-     contrast, legible at arm's length on the waiting-room display. */
-  --ink: #14181b;
-  --paper: #f7f8f8;
-  --line: #dde2e1;
-  --brand: #0d6e6a;
-  --priority: #b3401f;
-  --signal: #e4b53f;
+  /* Family First Medical Clinic. Neutrals are green-biased rather than pure
+     grey, so the ground sits with the pine and marigold instead of under
+     them. Still high contrast — legible at arm's length on the waiting-room
+     display, which is the hardest surface this palette has to serve. */
+  --ink: #132a24; /* deep pine — body text, and the dark band ground */
+  --paper: #f4f6f4; /* pale green-grey, not warm cream and not pure white */
+  --chalk: #fbfcfb; /* cards, lifted a half-step off the ground */
+  --line: #d3dcd8;
+  --sage: #4a5f58; /* secondary text; the ink desaturated, not a grey */
+
+  /* Marigold is the accent: active nav, focus, anything asking to be noticed.
+     Kept as its own name because --signal reads correctly on an expiry badge
+     and wrongly on a nav underline, and they are the same hue. */
+  --marigold: #b8790f;
+
+  --brand: #14544a; /* primary actions — pine, calm enough to live under all day */
+  --priority: #a8341a; /* PRIORITY patients. Deliberately red, not orange —
+                          it must never be mistaken for the marigold accent. */
+  --signal: var(--marigold); /* expiring stock, attention-but-not-urgent */
 
   --background: var(--paper);
   --foreground: var(--ink);
-  --card: oklch(1 0 0);
+  --card: var(--chalk);
   --card-foreground: var(--ink);
-  --popover: oklch(1 0 0);
+  --popover: var(--chalk);
   --popover-foreground: var(--ink);
   --primary: var(--brand);
-  --primary-foreground: var(--paper);
-  --secondary: oklch(0.97 0 0);
+  --primary-foreground: #f2f7f5;
+  --secondary: #e8edea;
   --secondary-foreground: var(--ink);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.475 0 0);
-  --accent: oklch(0.97 0 0);
+  --muted: #e8edea;
+  --muted-foreground: var(--sage);
+  --accent: #e4ebe7; /* hover ground */
   --accent-foreground: var(--ink);
-  --destructive: oklch(0.577 0.245 27.325);
+  --destructive: #a8341a;
   --border: var(--line);
   --input: var(--line);
-  --ring: var(--brand);
+  /* Focus takes the marigold, not the brand: it has to be visible against a
+     brand-coloured button as well as against the page. */
+  --ring: var(--marigold);
   --chart-1: var(--brand);
-  --chart-2: var(--priority);
-  --chart-3: var(--signal);
-  --chart-4: oklch(0.556 0 0);
-  --chart-5: oklch(0.371 0 0);
-  --radius: 0.5rem;
+  --chart-2: var(--marigold);
+  --chart-3: var(--priority);
+  --chart-4: #7fa093;
+  --chart-5: #b9c7c1;
+  /* Tighter than the 8px default. The palette is precise rather than soft,
+     and a ledger of figures should not sit in a pill. */
+  --radius: 0.375rem;
   --sidebar: var(--ink);
   --sidebar-foreground: var(--paper);
-  --sidebar-primary: var(--brand);
-  --sidebar-primary-foreground: var(--paper);
-  --sidebar-accent: oklch(0.25 0 0);
+  --sidebar-primary: var(--marigold);
+  --sidebar-primary-foreground: #16110a;
+  --sidebar-accent: #23413a;
   --sidebar-accent-foreground: var(--paper);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: var(--brand);
+  --sidebar-border: #2b453d;
+  --sidebar-ring: var(--marigold);
 }
 
+/* Dark is the same palette re-grounded, not an inversion: the pine that was
+   the text becomes the ground, and every hue is lifted until it holds its
+   contrast there. Marigold and priority both brighten — at the light-mode
+   values they sink into a dark ground and stop reading as signals. */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --ink: #e9efec;
+  --paper: #0e1a16;
+  --chalk: #16241f;
+  --line: #26382f;
+  --sage: #a3b8af;
+
+  --marigold: #e8a430;
+  --brand: #4e9b89;
+  --priority: #e0714c;
+  --signal: var(--marigold);
+
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--chalk);
+  --card-foreground: var(--ink);
+  --popover: var(--chalk);
+  --popover-foreground: var(--ink);
+  --primary: var(--brand);
+  --primary-foreground: #06120e;
+  --secondary: #1d2f29;
+  --secondary-foreground: var(--ink);
+  --muted: #1d2f29;
+  --muted-foreground: var(--sage);
+  --accent: #22352e;
+  --accent-foreground: var(--ink);
+  --destructive: #e0714c;
+  --border: var(--line);
+  --input: #2d4039;
+  --ring: var(--marigold);
+  --chart-1: var(--brand);
+  --chart-2: var(--marigold);
+  --chart-3: var(--priority);
+  --chart-4: #8fa69c;
+  --chart-5: #5d7a6f;
+  --sidebar: #081310;
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--marigold);
+  --sidebar-primary-foreground: #16110a;
+  --sidebar-accent: #1d2f29;
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: #22352d;
+  --sidebar-ring: var(--marigold);
 }
 
 @layer base {
