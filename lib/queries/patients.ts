@@ -156,10 +156,68 @@ export async function searchPatientsByPhone(user: AbilitySubject, phone: string)
 }
 
 /**
+ * The duplicate check the front desk actually runs at intake: one box that
+ * takes a name *or* a number.
+ *
+ * searchPatientsByPhone above is exact-match on the last ten digits, which
+ * finds nobody when the number was mistyped, has since changed, or the
+ * patient cannot remember it — and the desk's only remaining option is to
+ * re-encode someone the clinic already has. Names are how a returning
+ * patient is actually identified at a counter, so the search has to accept
+ * them.
+ *
+ * Both halves run against the branch's roster in JS for the reason the
+ * phone search already documents: a DB `contains` built from normalized
+ * digits misses rows whose raw text has punctuation inside the window. The
+ * name half rides along on the same fetch rather than paying for a second
+ * query, and matches against the joined name in both orders so "Juan Dela"
+ * and "Dela Cruz, Juan" both land.
+ */
+export async function searchPatientsForIntake(user: AbilitySubject, term: string): Promise<PatientDTO[]> {
+  if (isHoldingAdmin(user)) {
+    throw new Error("searchPatientsForIntake requires a branch-scoped user")
+  }
+  // Commas and repeated spaces are dropped so the form the app itself shows
+  // everywhere — "Dela Cruz, Juan" — can be typed back in and still match.
+  const needle = term.trim().toLowerCase().replace(/,/g, " ").replace(/\s+/g, " ").trim()
+  // Two characters is the shortest search worth running — one letter matches
+  // most of the roster and tells the desk nothing.
+  if (needle.length < 2) return []
+
+  const digits = term.replace(/\D/g, "")
+  // Only treat the term as a phone number once there is enough of one to
+  // identify somebody; below that the digits are more likely part of a name
+  // or a typo than a number.
+  const phoneKey = digits.length >= 7 ? digits.slice(-10) : null
+
+  return runWithRls(user, async (tx) => {
+    const patients = await tx.patient.findMany({
+      where: { branchId: requireBranchId(user), deletedAt: null },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+    })
+
+    return patients
+      .filter((p) => {
+        if (phoneKey && p.phone.replace(/\D/g, "").slice(-10) === phoneKey) return true
+        const first = p.firstName.toLowerCase()
+        const last = p.lastName.toLowerCase()
+        return (
+          first.includes(needle) ||
+          last.includes(needle) ||
+          `${first} ${last}`.includes(needle) ||
+          `${last} ${first}`.includes(needle)
+        )
+      })
+      .slice(0, 10)
+      .map(toPatientDTO)
+  })
+}
+
+/**
  * §7.2 walk-in registration: creates the Patient and their same-day
  * QueueEntry (source WALK_IN, status CHECKED_IN) together. No silent
  * auto-match here — the staff-driven duplicate check
- * (`searchPatientsByPhone`) happens as its own UI step before this is ever
+ * (`searchPatientsForIntake`) happens as its own UI step before this is ever
  * called; a front desk user who's already searched and found no match is
  * deliberately creating a new record. §7.1's public-booking auto-match
  * logic is a separate flow, wired up in M3.

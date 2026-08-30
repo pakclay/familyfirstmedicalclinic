@@ -4,7 +4,7 @@ import { auth } from "@/auth"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import type { AbilitySubject } from "@/lib/permissions/ability"
 import {
-  searchPatientsByPhone,
+  searchPatientsForIntake,
   registerWalkIn,
   checkInExistingPatient,
   getPatientById,
@@ -24,9 +24,14 @@ async function actingUser(): Promise<AbilitySubject> {
   }
 }
 
-export async function searchByPhoneAction(phone: string): Promise<PatientDTO[]> {
+/**
+ * The desk's lookup: one term matched against names and phone numbers alike.
+ * Distinct from searchPatientsByPhone, which stays exact-match on the number
+ * because the booking auto-match needs certainty rather than candidates.
+ */
+export async function searchPatientsAction(term: string): Promise<PatientDTO[]> {
   const user = await actingUser()
-  return searchPatientsByPhone(user, phone)
+  return searchPatientsForIntake(user, term)
 }
 
 export type RegisterResult = { patient: PatientDTO; queueEntry: QueueEntryDTO }
