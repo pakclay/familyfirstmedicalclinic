@@ -54,7 +54,11 @@ if (!appUrl) {
 }
 
 const parsed = new URL(appUrl)
-const role = decodeURIComponent(parsed.username)
+// Poolers that front more than one database (e.g. Supabase's Supavisor)
+// route by username, encoding it as "<role>.<project-ref>" — the role
+// itself is still just "<role>". A bare role name (Neon, plain Postgres)
+// has no "." and passes through unchanged.
+const role = decodeURIComponent(parsed.username).split(".")[0]
 const password = decodeURIComponent(parsed.password)
 
 if (!role) fail("APP_DATABASE_URL has no username, so there is no role to create.")
