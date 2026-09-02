@@ -1,4 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { getAppName } from "@/lib/branding"
 import { LoginForm } from "./login-form"
 
 export default async function LoginPage({
@@ -7,12 +8,13 @@ export default async function LoginPage({
   searchParams: Promise<{ next?: string; passwordChanged?: string }>
 }) {
   const { next, passwordChanged } = await searchParams
+  const appName = await getAppName()
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-muted p-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-xl">Family First Medical Clinic</CardTitle>
+          <CardTitle className="text-xl">{appName}</CardTitle>
           <CardDescription>Staff and doctor sign-in.</CardDescription>
         </CardHeader>
         <CardContent>

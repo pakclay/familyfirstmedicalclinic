@@ -27,11 +27,16 @@ export type HeaderNavItem = { label: string; href: string }
 export function AppHeader({
   navItems,
   userLabel,
-  brand = "Family First",
+  brand,
 }: {
   navItems: HeaderNavItem[]
   userLabel: string
-  brand?: string
+  /**
+   * Required rather than defaulted: the name is a holding-admin setting now
+   * (lib/branding.ts), and a default here would be a second copy of it that
+   * silently wins whenever a caller forgets to pass one.
+   */
+  brand: string
 }) {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
@@ -91,7 +96,11 @@ export function AppHeader({
               <Menu className="size-5" />
             </Button>
 
-            <span className="hidden shrink-0 items-center gap-2 font-heading text-base font-semibold tracking-tight sm:inline-flex">
+            {/* The name is admin-settable and can be much longer than the
+                one this shipped with, so the brand yields space to the nav
+                and ellipsises rather than pushing links off the row: the
+                mark stays fixed, only the text gives. */}
+            <span className="hidden min-w-0 max-w-[16rem] items-center gap-2 font-heading text-base font-semibold tracking-tight sm:inline-flex">
               <svg width="18" height="18" viewBox="0 0 22 22" aria-hidden="true" className="shrink-0">
                 <circle cx="11" cy="11" r="10" fill="none" stroke="currentColor" strokeWidth="1.5" />
                 <path
@@ -99,7 +108,9 @@ export function AppHeader({
                   fill="var(--marigold)"
                 />
               </svg>
-              {brand}
+              <span className="truncate" title={brand}>
+                {brand}
+              </span>
             </span>
 
             <nav className="hidden items-center gap-1 sm:flex" aria-label="Sections">

@@ -9,6 +9,53 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-09-03 — App name as a holding-admin setting
+
+"Family First Medical Clinic" was hardcoded in four places — the root
+layout's `<title>`, the login card, the header on all three authenticated
+shells, and the kicker above the clinic name on the public booking page —
+with no constant tying them together, and two variants ("Family First" in
+the header) that could drift apart. It is now `holding_companies.brand_name`,
+editable by a holding admin from /console/admin.
+
+- **A new column, not a reuse of `holding_companies.name`.** That one is the
+  legal entity ("Family First Holdings") and is displayed as such on the
+  administration page. The brand is what patients and staff read. They are
+  not the same string and overloading one field would rename both at once.
+- **Nullable, meaning "not set", falling back to `DEFAULT_APP_NAME`**
+  (`lib/branding.ts`). Backfilling the current name into every row would
+  make a deployment's built-in default unreachable once an admin changed it;
+  as it stands, clearing the field restores it. `editBrandingSchema` is the
+  piece that turns a blank input into `null` — the only place in this app
+  where blank is meaningful rather than invalid.
+- **One field, not a long/short pair.** The header used the shorter "Family
+  First" because the long form overflows a 7-item staff nav. Asking an admin
+  to maintain two names to solve a layout problem is the wrong trade: the
+  brand in the header now truncates with the mark held fixed, so any length
+  degrades gracefully instead of pushing nav links off the row.
+- **The root layout became `generateMetadata`.** A title that is a database
+  value cannot be a static `metadata` object. This costs one indexed row
+  read per document request; `getAppName` is wrapped in React `cache` so the
+  several callers in one render share a query. Nothing lost static rendering
+  — every route in this app was already server-rendered on demand.
+- **`getAppName` swallows query failures and returns the default.** The
+  login page previously rendered with no database access at all. Letting a
+  cosmetic string hard-depend on a query would turn a database blip into
+  "nobody can reach the sign-in form" — the wrong failure for a page title.
+- **`AppHeader`'s `brand` prop is required rather than defaulted.** A default
+  would be a second copy of the name that silently wins wherever a caller
+  forgot to pass one, which is the bug this change exists to remove.
+- **Holding-admin only, checked in the query layer.** `holding_companies` has
+  no RLS policy (absent from `enable_rls_backstop`, same as `clinics`), so
+  the role check in `lib/queries/branding.ts` *is* the enforcement with no
+  database backstop underneath — hence its own test rather than trusting the
+  action-layer gate. Renaming the product for every branch at once is a
+  company-level decision, not one branch admin's to make for the others.
+- **Revalidates `("/", "layout")`, not the settings page.** The name is read
+  by the root layout and by every shell's header, so a narrower revalidation
+  would leave the old name in the tab and header until something else
+  happened to invalidate them.
+
 ## 2026-08-29 — Changing an existing account's role
 
 `updateUser` never touched `role` — only `createUser` set it — so an
