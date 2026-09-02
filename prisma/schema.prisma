@@ -105,8 +105,16 @@ enum NotificationStatus {
 // ─────────────────────────────────────────────────────────────────────────
 
 model HoldingCompany {
-  id           String   @id @default(uuid())
-  name         String
+  id   String @id @default(uuid())
+  name String
+  // The product name shown to everyone — browser tab, login card, header,
+  // public booking page. Deliberately separate from `name`: that one is the
+  // legal entity ("Family First Holdings") and shows on the admin overview,
+  // while this is the brand patients and staff read ("Family First Medical
+  // Clinic"). Null means "not set" and falls back to DEFAULT_APP_NAME
+  // (lib/branding.ts), so an admin can clear the field to get the built-in
+  // name back rather than having to remember what it was.
+  brandName    String?  @map("brand_name")
   contactName  String?  @map("contact_name")
   contactEmail String?  @map("contact_email")
   contactPhone String?  @map("contact_phone")

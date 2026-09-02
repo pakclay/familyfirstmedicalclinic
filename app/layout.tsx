@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Fraunces, Public_Sans, JetBrains_Mono } from "next/font/google";
+import { getAppName } from "@/lib/branding";
 import "./globals.css";
 
 /**
@@ -30,10 +31,19 @@ const mono = JetBrains_Mono({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-  title: "Family First Medical Clinic",
-  description: "General checkups, walk-ins, and follow-ups — book, queue, and consult, paperless.",
-};
+// The title is a holding-admin setting rather than a constant, so this has
+// to be generateMetadata rather than a static `metadata` object. It costs
+// one indexed row read per document request — `getAppName` is request-cached
+// and falls back to the built-in name if the query fails, so a database
+// blip degrades the tab title rather than the page. Every route in this app
+// is already server-rendered on demand, so nothing loses static rendering
+// by depending on it.
+export async function generateMetadata(): Promise<Metadata> {
+  return {
+    title: await getAppName(),
+    description: "General checkups, walk-ins, and follow-ups — book, queue, and consult, paperless.",
+  };
+}
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (

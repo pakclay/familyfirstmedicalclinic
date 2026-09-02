@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation"
 import { auth } from "@/auth"
+import { getAppName } from "@/lib/branding"
 import { AppHeader } from "@/components/nav/app-header"
 
 const DOCTOR_NAV = [
@@ -14,7 +15,7 @@ export default async function DoctorLayout({ children }: { children: React.React
 
   return (
     <div className="flex min-h-full flex-col">
-      <AppHeader navItems={DOCTOR_NAV} userLabel={session.user.name ?? ""} />
+      <AppHeader navItems={DOCTOR_NAV} userLabel={session.user.name ?? ""} brand={await getAppName()} />
       <main className="flex-1 p-4 sm:p-6">{children}</main>
     </div>
   )

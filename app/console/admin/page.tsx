@@ -2,10 +2,13 @@ import { redirect } from "next/navigation"
 import Link from "next/link"
 import { auth } from "@/auth"
 import { getAdminOverview, type OverviewAccount } from "@/lib/queries/admin-overview"
+import { getBrandName } from "@/lib/queries/branding"
+import { DEFAULT_APP_NAME } from "@/lib/branding"
 import { ROLE_LABEL } from "@/lib/dto/user"
 import type { AbilitySubject } from "@/lib/permissions/ability"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { BrandingForm } from "./branding-form"
 
 export default async function AdminPage() {
   const session = await auth()
@@ -31,7 +34,7 @@ export default async function AdminPage() {
     branchId: session.user.branchId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
-  const overview = await getAdminOverview(user)
+  const [overview, brandName] = await Promise.all([getAdminOverview(user), getBrandName(user)])
   const { totals, attention } = overview
   const nothingNeedsAttention =
     attention.lockedOut.length === 0 &&
@@ -244,6 +247,17 @@ export default async function AdminPage() {
           {overview.holdingAccounts.length === 0 && (
             <p className="px-4 py-4 text-center text-sm text-muted-foreground">No company-level accounts.</p>
           )}
+        </div>
+      </section>
+
+      {/* Last, on purpose. The page leads with what needs attention today
+          (see the comment above the attention section); a setting that gets
+          changed once and then never again would push that further down the
+          page every time someone opens it to check on the company. */}
+      <section className="mt-6">
+        <p className="text-xs font-medium uppercase text-muted-foreground">Branding</p>
+        <div className="mt-2 rounded-md border border-border">
+          <BrandingForm brandName={brandName} defaultAppName={DEFAULT_APP_NAME} />
         </div>
       </section>
     </div>

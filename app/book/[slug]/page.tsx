@@ -1,15 +1,19 @@
 import { notFound } from "next/navigation"
 import { CalendarCheck } from "lucide-react"
 import { prisma } from "@/lib/db/prisma"
+import { getAppName } from "@/lib/branding"
 import { publicBranchName } from "@/lib/queries/public-branch-name"
 import { BookingForm } from "./booking-form"
 
 export default async function BookPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params
-  const branch = await prisma.branch.findUnique({
-    where: { slug, isActive: true },
-    select: { name: true, address: true, clinic: { select: { name: true } } },
-  })
+  const [branch, appName] = await Promise.all([
+    prisma.branch.findUnique({
+      where: { slug, isActive: true },
+      select: { name: true, address: true, clinic: { select: { name: true } } },
+    }),
+    getAppName(),
+  ])
   if (!branch) notFound()
 
   return (
@@ -20,7 +24,7 @@ export default async function BookPage({ params }: { params: Promise<{ slug: str
             <CalendarCheck className="size-5" aria-hidden />
           </span>
           <div>
-            <p className="text-xs font-medium tracking-wide text-sidebar-foreground/60 uppercase">Family First</p>
+            <p className="text-xs font-medium tracking-wide text-sidebar-foreground/60 uppercase">{appName}</p>
             <h1 className="mt-1 font-heading text-xl font-semibold">{publicBranchName(branch)}</h1>
             <p className="mt-1 text-sm text-sidebar-foreground/70">{branch.address}</p>
           </div>
