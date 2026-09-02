@@ -45,17 +45,25 @@ const MEDICINE_SEEDS = [
 // which every other seeded pair already covers. Going from 3 locations to 4
 // keeps this from tripling the seed volume the way giving every clinic 2
 // branches would.
+//
+// Clinic names carry no location, because the branch under them already
+// does. Every public surface composes "{clinic} – {branch}"
+// (lib/queries/public-branch-name.ts), so a clinic seeded as "Family First
+// Medical Clinic – Quezon City" above a branch named "Quezon City" renders
+// to patients as "… – Quezon City – Quezon City" on the booking page, the
+// display screen, the status page and in SMS. Region names keep the three
+// clinics tellable apart in admin UI without repeating the city.
 const CLINIC_SEEDS = [
   {
-    name: "Family First Medical Clinic – Quezon City",
+    name: "Family First North",
     branches: [{ slug: "quezon-city", city: "Quezon City" }],
   },
   {
-    name: "Family First Medical Clinic – Makati",
+    name: "Family First South",
     branches: [{ slug: "makati", city: "Makati" }],
   },
   {
-    name: "Family First Medical Clinic – Cebu",
+    name: "Family First Visayas",
     branches: [
       { slug: "cebu-city", city: "Cebu City" },
       { slug: "cebu-mandaue", city: "Mandaue City" },

@@ -9,6 +9,31 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-09-03 — Clinic names must not repeat their branch's location
+
+Every public surface composes `{clinic} – {branch}`
+(`lib/queries/public-branch-name.ts`), and the seed named clinics
+"Family First Medical Clinic – Quezon City" above branches named
+"Quezon City". Patients saw "… – Quezon City – Quezon City" on the booking
+page, the display screen, the status page and in SMS.
+
+- **Fixed as data, not as code.** The tempting fix is to have
+  `publicBranchName` drop a clinic prefix that looks redundant, but the
+  check can only be a string heuristic, and it would also swallow a
+  legitimate "Cebu Family Clinic" with a "Cebu City" branch. A public name
+  composer that silently discards part of the name an admin typed is worse
+  than one that repeats it. The constraint is now written down at the
+  function that depends on it.
+- **Region names, not one clinic per city.** Collapsing to a single clinic
+  with four branches reads best publicly, but in an existing database it
+  moves branches between clinics and deletes rows; renaming does neither.
+  "Family First North / South / Visayas" keeps three clinics tellable apart
+  in admin UI without naming a city a branch already names.
+- **The existing rows were renamed through `updateClinic`**, not a raw
+  UPDATE, so the correction is in `audit_logs` like any other holding-admin
+  rename. Applied to production and preview; the local dev database had two
+  of the three already renamed by hand and those were left alone.
+
 ## 2026-09-03 — App name as a holding-admin setting
 
 "Family First Medical Clinic" was hardcoded in four places — the root
