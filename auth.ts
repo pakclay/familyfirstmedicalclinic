@@ -75,15 +75,40 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       // an already-open tab. Only reachable from auth.ts's Node.js-runtime
       // callers (route handlers, server components) — proxy.ts uses
       // auth.config.ts's Prisma-free callbacks instead. See auth.config.ts.
-      const current = await prisma.user.findUnique({ where: { id: token.id } })
-      if (!current || !current.isActive) {
-        return null
+      //
+      // The whole re-check is wrapped so a *failed* query can't be mistaken
+      // for a deactivated account. Auth.js turns any throw in this callback
+      // into a null session — i.e. a silent sign-out — so without this catch
+      // a transient database error (a connection-pool timeout, a pooler
+      // dropping the connection after the preceding interactive transaction,
+      // a cold database branch) logs the user out mid-session with nothing
+      // in the logs to say why. On a query failure we keep the existing
+      // token: it fails open for a single request, the re-check runs again
+      // on the next navigation, and a genuinely deactivated user is still
+      // caught then. Only a query that *succeeds* and comes back
+      // missing/inactive signs the user out.
+      try {
+        const current = await prisma.user.findUnique({ where: { id: token.id } })
+        if (!current) {
+          console.error("[auth] signing out: no user row for token id", { userId: token.id })
+          return null
+        }
+        if (!current.isActive) {
+          console.error("[auth] signing out: user is deactivated", { userId: token.id })
+          return null
+        }
+        token.role = current.role
+        token.branchId = current.branchId
+        token.holdingCompanyId = current.holdingCompanyId
+        token.mustChangePassword = current.mustChangePassword
+        return token
+      } catch (error) {
+        console.error("[auth] isActive re-check failed — keeping session for this request", {
+          userId: token.id,
+          error: error instanceof Error ? error.message : String(error),
+        })
+        return token
       }
-      token.role = current.role
-      token.branchId = current.branchId
-      token.holdingCompanyId = current.holdingCompanyId
-      token.mustChangePassword = current.mustChangePassword
-      return token
     },
   },
 })
