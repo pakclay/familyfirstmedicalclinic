@@ -28,8 +28,19 @@ export type RoleProfile = {
   cannot: RoleCapability[]
 }
 
-export const ROLE_PROFILES: RoleProfile[] = [
-  {
+/**
+ * Keyed by `Role` so the compiler demands a profile for every member of the
+ * enum. Previously this was a plain array and `roleProfile` threw at runtime
+ * for anything missing — which meant adding a role compiled cleanly and then
+ * crashed /console/users/[id]/role, the one screen whose entire job is
+ * explaining what a role means.
+ *
+ * Declaration order is the display order: `ROLE_PROFILES` below is derived
+ * from this object's values, and JavaScript preserves insertion order for
+ * non-numeric string keys. Ordered least to most privileged.
+ */
+const PROFILE_BY_ROLE: Record<Role, RoleProfile> = {
+  FRONT_DESK: {
     role: "FRONT_DESK",
     label: "Front desk",
     summary: "Runs the queue at one branch — check-in, vitals, payments, remittance.",
@@ -48,7 +59,7 @@ export const ROLE_PROFILES: RoleProfile[] = [
       { label: "Manage accounts", enforcedIn: "lib/permissions/ability.ts" },
     ],
   },
-  {
+  DOCTOR: {
     role: "DOCTOR",
     label: "Doctor",
     summary: "Sees patients at one branch. The only role that can record a consultation.",
@@ -65,7 +76,7 @@ export const ROLE_PROFILES: RoleProfile[] = [
       { label: "Manage accounts", enforcedIn: "lib/permissions/ability.ts" },
     ],
   },
-  {
+  CLINIC_ADMIN: {
     role: "CLINIC_ADMIN",
     label: "Clinic admin",
     summary: "Runs one branch: its staff, stock, expenses and reports. Not the whole clinic.",
@@ -85,7 +96,7 @@ export const ROLE_PROFILES: RoleProfile[] = [
       { label: "Open a consultation", enforcedIn: "lib/queries/consultations.ts" },
     ],
   },
-  {
+  HOLDING_ADMIN: {
     role: "HOLDING_ADMIN",
     label: "Holding admin",
     summary: "The whole company. Not attached to any branch, and the only role that spans them.",
@@ -104,10 +115,20 @@ export const ROLE_PROFILES: RoleProfile[] = [
       { label: "Reach another holding company's data", enforcedIn: "lib/permissions/ability.ts" },
     ],
   },
-]
+}
 
+/** The profiles in display order — least to most privileged. */
+export const ROLE_PROFILES: RoleProfile[] = Object.values(PROFILE_BY_ROLE)
+
+/**
+ * The compiler guarantees a profile for every `Role`, so this can only fail
+ * for a value that reached us as a role without being one — a stale row read
+ * from the database after an enum member is removed, say. Kept as a throw
+ * rather than a fallback: rendering "unknown role" on the screen that
+ * explains permissions would be worse than failing.
+ */
 export function roleProfile(role: Role): RoleProfile {
-  const found = ROLE_PROFILES.find((p) => p.role === role)
+  const found = PROFILE_BY_ROLE[role]
   if (!found) throw new Error(`No capability profile for role ${role}`)
   return found
 }
