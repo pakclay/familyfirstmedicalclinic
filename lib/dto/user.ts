@@ -1,7 +1,14 @@
-import type { User, Doctor } from "@prisma/client"
+import type { User, Doctor, Role } from "@prisma/client"
 
-/** Display names for the Role enum, shared by every UI that renders a role. */
-export const ROLE_LABEL: Record<string, string> = {
+/**
+ * Display names for the Role enum, shared by every UI that renders a role.
+ *
+ * Keyed by `Role` rather than `string` so adding a member to the enum is a
+ * build error here instead of `undefined` appearing in the eight screens
+ * that render a role name. A role registry that silently tolerates a
+ * missing entry is the kind of thing you only notice in production.
+ */
+export const ROLE_LABEL: Record<Role, string> = {
   FRONT_DESK: "Front desk",
   DOCTOR: "Doctor",
   CLINIC_ADMIN: "Clinic admin",

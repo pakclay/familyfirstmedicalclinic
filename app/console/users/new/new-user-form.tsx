@@ -1,5 +1,6 @@
 "use client"
 
+import type { Role } from "@prisma/client"
 import { useState } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -37,7 +38,8 @@ export function NewUserForm({
   showBranchPicker,
   defaultBranchId,
 }: {
-  roles: string[]
+  /** Straight from `assignableRoles`, so it is already narrowed to Role. */
+  roles: Role[]
   branches: { id: string; name: string; clinic: { name: string } }[]
   showBranchPicker: boolean
   /** Preselected when arriving from a branch's staff section. */
