@@ -76,7 +76,7 @@ describe("notifications", () => {
     const fdUser = await superuserPrisma.user.create({
       data: { branchId: branch.id, name: "Front Desk", email: `fd-notif-${Date.now()}@test.local`, passwordHash: "x", role: Role.FRONT_DESK },
     })
-    frontDesk = { id: fdUser.id, role: Role.FRONT_DESK, branchId: branch.id, holdingCompanyId: null }
+    frontDesk = { id: fdUser.id, role: Role.FRONT_DESK, branchId: branch.id, clinicId: null, holdingCompanyId: null }
 
     const docUser = await superuserPrisma.user.create({
       data: { branchId: branch.id, name: "Dr. Notify", email: `dr-notif-${Date.now()}@test.local`, passwordHash: "x", role: Role.DOCTOR },
@@ -85,7 +85,7 @@ describe("notifications", () => {
       data: { userId: docUser.id, branchId: branch.id, licenseNumber: "N1", consultationFee: 50000 },
     })
     doctorId = doctor.id
-    doctorUser = { id: docUser.id, role: Role.DOCTOR, branchId: branch.id, holdingCompanyId: null }
+    doctorUser = { id: docUser.id, role: Role.DOCTOR, branchId: branch.id, clinicId: null, holdingCompanyId: null }
   })
 
   afterEach(async () => {
@@ -392,7 +392,7 @@ describe("branch scoping — notifications", () => {
         role: Role.FRONT_DESK,
       },
     })
-    frontDeskA = { id: fdUser.id, role: Role.FRONT_DESK, branchId: branchA.id, holdingCompanyId: null }
+    frontDeskA = { id: fdUser.id, role: Role.FRONT_DESK, branchId: branchA.id, clinicId: null, holdingCompanyId: null }
 
     const doctorA = await createDoctor(branchA.id, "IsoA")
     const doctorSibling = await createDoctor(siblingOfA.id, "IsoSib")

@@ -13,6 +13,14 @@ const BRANCH_ADMIN_NAV: NavItem[] = [
   { label: "Settings", href: "/console/settings" },
 ]
 
+// Two verbs, two entries. No Dashboard: the dashboard's non-branch-admin arm
+// renders the holding-admin fallback, whose two links both refuse this role.
+// Its home (proxy.ts / app/page.tsx ROLE_HOME) is /console/users instead.
+const CLINIC_ADMIN_NAV: NavItem[] = [
+  { label: "Users", href: "/console/users" },
+  { label: "Branches", href: "/console/clinic" },
+]
+
 const HOLDING_ADMIN_NAV: NavItem[] = [
   { label: "Dashboard", href: "/console/dashboard" },
   // Sits above Clinics/Users because it is the way into both: the org tree
@@ -27,6 +35,7 @@ const HOLDING_ADMIN_NAV: NavItem[] = [
 
 export function navForRole(role: Role): NavItem[] {
   if (role === "HOLDING_ADMIN") return HOLDING_ADMIN_NAV
+  if (role === "CLINIC_ADMIN") return CLINIC_ADMIN_NAV
   if (role === "BRANCH_ADMIN") return BRANCH_ADMIN_NAV
   return []
 }

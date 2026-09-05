@@ -9,6 +9,118 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-09-06 — A clinic-level administrator (the new CLINIC_ADMIN)
+
+The owner asked for "a clinic admin role, or a user of the mother clinic",
+able to create and deactivate users and branches. The 2026-08-24 branch
+hierarchy entry recorded, as an explicit non-goal, that no clinic-wide role
+would be built and the holding admin would remain the only cross-branch
+role. This reverses that. Decisions made with the owner before any code:
+
+- **Full role, not a redefinition.** The branch-scoped role was renamed to
+  BRANCH_ADMIN first (previous entry) so the name CLINIC_ADMIN could mean a
+  clinic. Redefining it in place would have escalated every existing branch
+  admin to its sibling branches — live production accounts — silently.
+- **Administration only.** It creates and deactivates accounts and branches
+  under its own clinic. It has no branch and sees no patient, queue,
+  payment, consultation or stock row — not at any branch, including its own
+  clinic's. It is not a "clinic-wide branch admin".
+- **It may create BRANCH_ADMINs, not another CLINIC_ADMIN or a
+  HOLDING_ADMIN.** The owner chose this knowing the trade below.
+
+What "administration only" actually is, stated so nobody mistakes it later:
+
+- **A convenience boundary, not an enforced one.** `createUser` hands the
+  creator the new account's temporary password (users.ts,
+  new-user-form.tsx). A clinic admin can therefore create a front desk
+  account at any branch in its clinic, read the password off its own
+  screen, sign in as that account, and reach every patient at that branch.
+  No route or role gate closes this; only out-of-band password delivery
+  would, and that is a separate change the owner declined for now.
+  role-capabilities.ts says this in the role's own `cannot` list.
+- **The one path that IS closed is taking over an existing account.**
+  `regenerateTempPassword` refuses this role outright: rotating a front desk
+  password yields a working credential with no new row for anyone to
+  notice. `forcePasswordReset` and `unlockAccount` yield no credential and
+  stay open to it.
+
+How it is scoped, and the two places the "no RLS change" assumption failed:
+
+- **`User.clinicId`, nullable, with a CHECK constraint.** Each role carries
+  exactly one scope link: HOLDING_ADMIN a company, CLINIC_ADMIN a clinic,
+  everyone else a branch (`users_role_scope_check`). The load-bearing arm
+  is the default: `canManageTarget` compared `target.branchId ===
+  actor.branchId`, and for a branchless actor that is `null === null` — any
+  branchless FRONT_DESK row in ANY tenant would have been manageable. Zero
+  such rows existed; the constraint keeps it that way at the database, not
+  by convention. A clinic admin carries no `holdingCompanyId` on purpose:
+  its company is reached through its clinic, so a future read that checks
+  only for a company id fails closed for this role rather than open.
+- **`audit_logs` needed its INSERT policy widened.** The brief assumed an
+  administration-only role would touch no policied table. It touches one:
+  every administrative action writes an audit row, that row carries the
+  branch it acted ON, and a branchless actor runs with `app.branch_id = ''`
+  — the row matched no arm and the whole create rolled back. A fourth GUC,
+  `app.clinic_id` (lib/db/rls.ts), and one INSERT arm on `audit_logs` fix
+  that. SELECT is deliberately not widened: audit rows carry `patient.read`
+  entityIds. The tenant-isolation suite pins that the clinic GUC opens
+  INSERT and nothing else, on every policied table.
+- **Then the widened INSERT still failed, for a reason worth writing down.**
+  Postgres checks a row returned by `INSERT ... RETURNING` against the
+  table's SELECT policy as well, and Prisma's `create` always emits
+  RETURNING. So a clinic admin's audit write was *admitted* by the INSERT
+  policy and then *refused* on the read-back by the SELECT policy that
+  deliberately has no clinic arm — 42501 either way, indistinguishable from
+  the INSERT being blocked. Reproduced with two raw statements against a
+  live database: identical INSERT, OK without RETURNING, 42501 with it. The
+  fix is not to widen SELECT but to stop asking for the row: nothing in the
+  codebase reads an audit row back from its own write, so
+  `appendAuditLog` (lib/db/rls.ts) wraps `createMany`, which emits a bare
+  INSERT, and takes the same `{ data }` shape as `create` so a call site
+  changes one token. Every audit write a clinic admin can reach — twelve
+  sites in users.ts and branches.ts — uses it. The tenant-isolation suite
+  pins both halves: the helper's write succeeds, and the same write via
+  `create` is refused, so a future SELECT widening announces itself.
+- **Rejected: a `runWithRlsForBranch` that pins `app.branch_id` to the
+  branch being acted on.** Cheaper, no migration — and it grants that
+  transaction full SELECT/INSERT/UPDATE on all eleven operational tables
+  for that branch. Branchlessness IS this role's guarantee.
+
+Sites the compiler could not find, closed explicitly rather than left to
+fail by accident:
+
+- **Implicit branchless gates in patients.ts and consultations.ts.** Five
+  functions used `isHoldingAdmin` as a stand-in for "is branchless" and
+  then reached for `user.branchId!`. They failed closed only because Prisma
+  rejects a null there — a 500 from a `!`, not an authorization check.
+  Each now refuses this role as a ForbiddenError, and tests pin it.
+- **Pre-existing unbounded lookups, fixed while widening the gate.**
+  `updateBranch` and `setBranchActive` did `findUnique({ where: { id } })`
+  with no tenant bound — a latent cross-tenant write for holding admins,
+  and a cross-clinic kill switch the moment a second tier could reach it.
+  `createUser`'s holding-admin arm trusted `input.branchId` with no company
+  bound. `createClinic` wrote `actor.holdingCompanyId` unchecked. All
+  bounded now.
+- **The enum is ordered on purpose.** Three user lists `orderBy: { role }`,
+  and Postgres sorts an enum by `enumsortorder`, not declaration order. A
+  bare `ADD VALUE` would have listed clinic admins after holding admins
+  everywhere; `BEFORE 'HOLDING_ADMIN'` and a test pin the order.
+
+Surface:
+
+- **`/console/clinic`** (singular, session-derived, no id in the URL), not a
+  relaxed `/console/clinics/[id]`. That route's single action guard also
+  protects clinic *creation*, which this role must never reach, and §5's
+  rule is that scoping comes from the session, never a parameter. The
+  branch form is duplicated rather than shared: a server component cannot
+  pass a function to a client component, so each form imports its own
+  action. Nav is two entries — Users and Branches — and home is
+  `/console/users`; the dashboard's fallback offers two links this role
+  cannot open, so it gets none.
+- **Seed:** one clinic admin per clinic (`clinic-admin.<clinic-slug>@…`).
+  Visayas is the only clinic with two branches, so it is the only place
+  "manages both, sees neither's patients" is observable.
+
 ## 2026-09-06 — CLINIC_ADMIN renamed to BRANCH_ADMIN
 
 The role called CLINIC_ADMIN has been branch-scoped since the branch

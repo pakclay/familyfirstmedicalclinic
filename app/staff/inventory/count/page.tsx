@@ -13,6 +13,7 @@ export default async function PhysicalCountPage() {
     id: session.user.id,
     role: session.user.role,
     branchId: session.user.branchId,
+    clinicId: session.user.clinicId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const medicines = await listMedicines(user)

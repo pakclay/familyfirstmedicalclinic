@@ -87,7 +87,7 @@ describe("vitals", () => {
         role: Role.FRONT_DESK,
       },
     })
-    frontDeskA = { id: fdA.id, role: Role.FRONT_DESK, branchId: branchA.id, holdingCompanyId: null }
+    frontDeskA = { id: fdA.id, role: Role.FRONT_DESK, branchId: branchA.id, clinicId: null, holdingCompanyId: null }
 
     const fdSib = await superuserPrisma.user.create({
       data: {
@@ -98,7 +98,7 @@ describe("vitals", () => {
         role: Role.FRONT_DESK,
       },
     })
-    frontDeskSibling = { id: fdSib.id, role: Role.FRONT_DESK, branchId: siblingOfA.id, holdingCompanyId: null }
+    frontDeskSibling = { id: fdSib.id, role: Role.FRONT_DESK, branchId: siblingOfA.id, clinicId: null, holdingCompanyId: null }
 
     const docUser = await superuserPrisma.user.create({
       data: {
@@ -109,7 +109,7 @@ describe("vitals", () => {
         role: Role.DOCTOR,
       },
     })
-    doctorA = { id: docUser.id, role: Role.DOCTOR, branchId: branchA.id, holdingCompanyId: null }
+    doctorA = { id: docUser.id, role: Role.DOCTOR, branchId: branchA.id, clinicId: null, holdingCompanyId: null }
 
     const patientA = await makePatient(branchA.id, "PatientA")
     const patientSib = await makePatient(siblingOfA.id, "PatientSib")
@@ -224,6 +224,7 @@ describe("vitals", () => {
       id: "someone",
       role: Role.HOLDING_ADMIN,
       branchId: null,
+      clinicId: null,
       holdingCompanyId: holdingId,
     }
     expect(await recordVitals(holdingAdmin, entryA.id, { temp: "37" })).toEqual({

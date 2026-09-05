@@ -56,14 +56,17 @@ const MEDICINE_SEEDS = [
 const CLINIC_SEEDS = [
   {
     name: "Family First North",
+    slug: "north",
     branches: [{ slug: "quezon-city", city: "Quezon City" }],
   },
   {
     name: "Family First South",
+    slug: "south",
     branches: [{ slug: "makati", city: "Makati" }],
   },
   {
     name: "Family First Visayas",
+    slug: "visayas",
     branches: [
       { slug: "cebu-city", city: "Cebu City" },
       { slug: "cebu-mandaue", city: "Mandaue City" },
@@ -118,6 +121,24 @@ async function main() {
     const clinic = await prisma.clinic.create({
       data: { holdingCompanyId: holding.id, name: clinicSeed.name },
     })
+
+    // One clinic-level admin per clinic: branchless, attached to the clinic
+    // directly, and deliberately given no holdingCompanyId (its company is
+    // reached through its clinic — see lib/permissions/ability.ts). Visayas
+    // is the one that matters for demos: with two branches it is the only
+    // clinic where "manages both branches, sees neither's patients" is
+    // observable at all.
+    const clinicAdminEmail = `clinic-admin.${clinicSeed.slug}@familyfirst.example`
+    await prisma.user.create({
+      data: {
+        clinicId: clinic.id,
+        name: `${clinicSeed.name} Clinic Admin`,
+        email: clinicAdminEmail,
+        passwordHash,
+        role: Role.CLINIC_ADMIN,
+      },
+    })
+    createdUsers.push({ role: "CLINIC_ADMIN", email: clinicAdminEmail, branch: `(all of ${clinicSeed.name})` })
 
     for (const b of clinicSeed.branches) {
       // Branch names carry only the location — every admin-facing label

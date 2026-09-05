@@ -73,7 +73,7 @@ export async function createClinic(actor: AbilitySubject, input: CreateClinicInp
   const created = await runWithRls(actor, async (tx) => {
     const clinic = await tx.clinic.create({
       data: {
-        holdingCompanyId: actor.holdingCompanyId,
+        holdingCompanyId: requireHoldingCompanyId(actor),
         name: input.name.trim(),
       },
     })

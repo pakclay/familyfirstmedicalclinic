@@ -9,6 +9,7 @@ import {
   updateBranch,
   setBranchActive,
   getOwnBranch,
+  getOwnClinic,
   updateOwnBranchSettings,
 } from "@/lib/queries/branches"
 import type { AbilitySubject } from "@/lib/permissions/ability"
@@ -51,6 +52,8 @@ describe("branch management", () => {
   let existingBranch: { id: string }
   let holdingAdmin: AbilitySubject
   let branchAdmin: AbilitySubject
+  let clinicAdmin: AbilitySubject
+  let otherBranch: { id: string }
 
   beforeAll(async () => {
     holding = await superuserPrisma.holdingCompany.create({ data: { name: "Test Holding — branch mgmt" } })
@@ -77,7 +80,7 @@ describe("branch management", () => {
         role: Role.HOLDING_ADMIN,
       },
     })
-    holdingAdmin = { id: holdingUser.id, role: Role.HOLDING_ADMIN, branchId: null, holdingCompanyId: holding.id }
+    holdingAdmin = { id: holdingUser.id, role: Role.HOLDING_ADMIN, branchId: null, clinicId: null, holdingCompanyId: holding.id }
 
     const adminUser = await superuserPrisma.user.create({
       data: {
@@ -88,7 +91,32 @@ describe("branch management", () => {
         role: Role.BRANCH_ADMIN,
       },
     })
-    branchAdmin = { id: adminUser.id, role: Role.BRANCH_ADMIN, branchId: existingBranch.id, holdingCompanyId: null }
+    branchAdmin = { id: adminUser.id, role: Role.BRANCH_ADMIN, branchId: existingBranch.id, clinicId: null, holdingCompanyId: null }
+
+    // A branch under the *other* clinic, so the clinic admin's bound has
+    // something to be tested against — everything else in this suite lives
+    // under `clinic`, where "in scope" and "everything" are the same set.
+    otherBranch = await superuserPrisma.branch.create({
+      data: {
+        clinicId: otherClinic.id,
+        name: "Other Clinic Branch",
+        slug: `other-clinic-branch-${Date.now()}`,
+        address: "9 Test St",
+        city: "Test City",
+        phone: "0000",
+        operatingHours: STANDARD_HOURS,
+      },
+    })
+    const clinicAdminUser = await superuserPrisma.user.create({
+      data: {
+        clinicId: clinic.id,
+        name: "Clinic Admin",
+        email: `clinic-admin-branches-${Date.now()}@test.local`,
+        passwordHash: "x",
+        role: Role.CLINIC_ADMIN,
+      },
+    })
+    clinicAdmin = { id: clinicAdminUser.id, role: Role.CLINIC_ADMIN, branchId: null, clinicId: clinic.id, holdingCompanyId: null }
   })
 
   afterAll(async () => {
@@ -98,11 +126,55 @@ describe("branch management", () => {
     await superuserPrisma.auditLog.deleteMany({ where: { branchId: { in: branchIds } } })
     await superuserPrisma.user.deleteMany({ where: { branchId: { in: branchIds } } })
     await superuserPrisma.user.deleteMany({ where: { holdingCompanyId: holding.id } })
+    // The clinic admin hangs off the clinic, not a branch — neither sweep
+    // above reaches it, and the clinic delete below would trip its FK.
+    await superuserPrisma.user.deleteMany({ where: { clinicId: { in: clinicIds } } })
     await superuserPrisma.branch.deleteMany({ where: { id: { in: branchIds } } })
     await superuserPrisma.clinic.deleteMany({ where: { id: { in: clinicIds } } })
     await superuserPrisma.holdingCompany.deleteMany({ where: { id: holding.id } })
     await superuserPrisma.$disconnect()
     await prisma.$disconnect()
+  })
+
+  it("lets a clinic admin create and deactivate only within its own clinic", async () => {
+    const created = await createBranch(clinicAdmin, clinic.id, branchInput({ name: "Clinic Admin Branch", slug: `clinic-admin-made-${Date.now()}` }))
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    // The audit row for a branchless actor is what the audit_logs INSERT
+    // policy's clinic arm exists for — this test runs as the RLS-bound app
+    // role, so the whole create would have rolled back without it.
+    const log = await superuserPrisma.auditLog.findFirst({ where: { action: "branch.created", entityId: created.branch.id } })
+    expect(log?.userId).toBe(clinicAdmin.id)
+
+    // Another clinic's id is a role error, not a lookup miss, so a probe
+    // cannot tell whether that clinic exists.
+    expect(await createBranch(clinicAdmin, otherClinic.id, branchInput({ name: "Sneaky" }))).toEqual({
+      ok: false,
+      error: "Only a holding admin manages branches.",
+    })
+    // ...and another clinic's branch reads as absent.
+    expect(await setBranchActive(clinicAdmin, otherBranch.id, false)).toEqual({ ok: false, error: "Branch not found." })
+    expect(await setBranchActive(clinicAdmin, existingBranch.id, false)).toEqual({ ok: true })
+    expect(await setBranchActive(clinicAdmin, existingBranch.id, true)).toEqual({ ok: true })
+
+    // Reconfiguring an existing branch stays holding-admin only: the role is
+    // create + deactivate, not address and hours.
+    const edit = { ...branchInput() } as Record<string, unknown>
+    delete edit.slug
+    expect(await updateBranch(clinicAdmin, existingBranch.id, edit as EditBranchInput)).toEqual({
+      ok: false,
+      error: "Only a holding admin manages branches.",
+    })
+
+    // Reads are bounded the same way as writes.
+    const listed = (await listBranches(clinicAdmin)).map((b) => b.id)
+    expect(listed).toContain(existingBranch.id)
+    expect(listed).not.toContain(otherBranch.id)
+    expect(await listBranches(clinicAdmin, { clinicId: otherClinic.id })).toEqual([])
+    expect(await getBranchById(clinicAdmin, otherBranch.id)).toBeNull()
+
+    expect((await getOwnClinic(clinicAdmin)).id).toBe(clinic.id)
+    await expect(getOwnBranch(clinicAdmin)).rejects.toBeInstanceOf(ForbiddenError)
   })
 
   it("lets a holding admin create a branch under a clinic, and audit-logs it in the same transaction", async () => {

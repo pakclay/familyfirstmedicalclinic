@@ -200,10 +200,10 @@ describe("listAuditLog", () => {
       },
     })
 
-    holdingAdmin = { id: holdingUser.id, role: Role.HOLDING_ADMIN, branchId: null, holdingCompanyId: holding.id }
-    branchAdmin = { id: adminUser.id, role: Role.BRANCH_ADMIN, branchId: branchA.id, holdingCompanyId: null }
-    frontDesk = { id: frontDeskUser.id, role: Role.FRONT_DESK, branchId: branchA.id, holdingCompanyId: null }
-    doctor = { id: doctorUser.id, role: Role.DOCTOR, branchId: branchA.id, holdingCompanyId: null }
+    holdingAdmin = { id: holdingUser.id, role: Role.HOLDING_ADMIN, branchId: null, clinicId: null, holdingCompanyId: holding.id }
+    branchAdmin = { id: adminUser.id, role: Role.BRANCH_ADMIN, branchId: branchA.id, clinicId: null, holdingCompanyId: null }
+    frontDesk = { id: frontDeskUser.id, role: Role.FRONT_DESK, branchId: branchA.id, clinicId: null, holdingCompanyId: null }
+    doctor = { id: doctorUser.id, role: Role.DOCTOR, branchId: branchA.id, clinicId: null, holdingCompanyId: null }
 
     // Timestamps sit at midday Manila so the range assertions don't hinge on
     // a few hours of timezone slop either way.
@@ -305,6 +305,7 @@ describe("listAuditLog", () => {
       id: siblingAdminUser.id,
       role: Role.BRANCH_ADMIN,
       branchId: siblingOfA.id,
+      clinicId: null,
       holdingCompanyId: null,
     }
 

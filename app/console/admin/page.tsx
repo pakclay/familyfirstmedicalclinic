@@ -32,6 +32,7 @@ export default async function AdminPage() {
     id: session.user.id,
     role: session.user.role,
     branchId: session.user.branchId,
+    clinicId: session.user.clinicId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const [overview, brandName] = await Promise.all([getAdminOverview(user), getBrandName(user)])

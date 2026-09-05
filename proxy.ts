@@ -22,6 +22,7 @@ const ROLE_HOME: Record<Role, string> = {
   FRONT_DESK: "/staff/queue",
   DOCTOR: "/doctor/queue",
   BRANCH_ADMIN: "/console/dashboard",
+  CLINIC_ADMIN: "/console/users",
   HOLDING_ADMIN: "/console/dashboard",
 }
 
@@ -35,7 +36,7 @@ const PUBLIC_PREFIXES = ["/book/", "/q/", "/display/", "/login", "/api/auth"]
 const SECTION_ACCESS: { prefix: string; roles: Role[] }[] = [
   { prefix: "/staff", roles: ["FRONT_DESK", "BRANCH_ADMIN", "HOLDING_ADMIN"] },
   { prefix: "/doctor", roles: ["DOCTOR"] },
-  { prefix: "/console", roles: ["BRANCH_ADMIN", "HOLDING_ADMIN"] },
+  { prefix: "/console", roles: ["BRANCH_ADMIN", "CLINIC_ADMIN", "HOLDING_ADMIN"] },
 ]
 
 export default auth((req) => {

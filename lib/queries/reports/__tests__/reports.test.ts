@@ -120,7 +120,7 @@ describe("reports and reconciliation", () => {
     const holdingAdminUser = await superuserPrisma.user.create({
       data: { name: "Owner", email: `owner-report-${Date.now()}@test.local`, passwordHash: "x", role: Role.HOLDING_ADMIN, holdingCompanyId: holding.id },
     })
-    holdingAdmin = { id: holdingAdminUser.id, role: Role.HOLDING_ADMIN, branchId: null, holdingCompanyId: holding.id }
+    holdingAdmin = { id: holdingAdminUser.id, role: Role.HOLDING_ADMIN, branchId: null, clinicId: null, holdingCompanyId: holding.id }
 
     branches = []
     branchAdmins = []
@@ -154,12 +154,12 @@ describe("reports and reconciliation", () => {
       const adminUser = await superuserPrisma.user.create({
         data: { branchId: branch.id, name: `Admin ${i}`, email: `admin-report-${i}-${Date.now()}@test.local`, passwordHash: "x", role: Role.BRANCH_ADMIN },
       })
-      branchAdmins.push({ id: adminUser.id, role: Role.BRANCH_ADMIN, branchId: branch.id, holdingCompanyId: null })
+      branchAdmins.push({ id: adminUser.id, role: Role.BRANCH_ADMIN, branchId: branch.id, clinicId: null, holdingCompanyId: null })
 
       const fdUser = await superuserPrisma.user.create({
         data: { branchId: branch.id, name: `FrontDesk ${i}`, email: `fd-report-${i}-${Date.now()}@test.local`, passwordHash: "x", role: Role.FRONT_DESK },
       })
-      frontDeskUsers.push({ id: fdUser.id, role: Role.FRONT_DESK, branchId: branch.id, holdingCompanyId: null })
+      frontDeskUsers.push({ id: fdUser.id, role: Role.FRONT_DESK, branchId: branch.id, clinicId: null, holdingCompanyId: null })
 
       const docUser = await superuserPrisma.user.create({
         data: { branchId: branch.id, name: `Doc ${i}`, email: `doc-report-${i}-${Date.now()}@test.local`, passwordHash: "x", role: Role.DOCTOR },
@@ -167,7 +167,7 @@ describe("reports and reconciliation", () => {
       const doctor = await superuserPrisma.doctor.create({
         data: { userId: docUser.id, branchId: branch.id, licenseNumber: `R${i}`, consultationFee: 50000 },
       })
-      doctors.push({ id: doctor.id, user: { id: docUser.id, role: Role.DOCTOR, branchId: branch.id, holdingCompanyId: null } })
+      doctors.push({ id: doctor.id, user: { id: docUser.id, role: Role.DOCTOR, branchId: branch.id, clinicId: null, holdingCompanyId: null } })
 
       const branchPatients: string[] = []
       for (let j = 0; j < 2; j++) {

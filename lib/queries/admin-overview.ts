@@ -95,7 +95,7 @@ export async function getAdminOverview(actor: AbilitySubject): Promise<AdminOver
   // Every account in the company, by either attachment route: through a
   // branch's clinic, or directly for the branchless holding admins.
   const companyUsers = {
-    OR: [{ holdingCompanyId }, { branch: { clinic: { holdingCompanyId } } }],
+    OR: [{ holdingCompanyId }, { branch: { clinic: { holdingCompanyId } } }, { clinic: { holdingCompanyId } }],
   }
   const now = new Date()
 
@@ -166,7 +166,7 @@ export async function getAdminOverview(actor: AbilitySubject): Promise<AdminOver
       take: ATTENTION_LIST_LIMIT,
     }),
     prisma.user.findMany({
-      where: { holdingCompanyId, branchId: null },
+      where: { branchId: null, OR: [{ holdingCompanyId }, { clinic: { holdingCompanyId } }] },
       select: { id: true, name: true, email: true, role: true, branch: { select: { name: true } } },
       orderBy: { name: "asc" },
     }),

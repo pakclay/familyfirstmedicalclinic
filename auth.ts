@@ -52,6 +52,7 @@ const {
           email: user.email,
           role: user.role,
           branchId: user.branchId,
+          clinicId: user.clinicId,
           holdingCompanyId: user.holdingCompanyId,
           mustChangePassword: user.mustChangePassword,
         }
@@ -67,6 +68,7 @@ const {
         token.id = user.id!
         token.role = user.role
         token.branchId = user.branchId
+        token.clinicId = user.clinicId
         token.holdingCompanyId = user.holdingCompanyId
         token.mustChangePassword = user.mustChangePassword
         return token
@@ -105,6 +107,7 @@ const {
         }
         token.role = current.role
         token.branchId = current.branchId
+        token.clinicId = current.clinicId
         token.holdingCompanyId = current.holdingCompanyId
         token.mustChangePassword = current.mustChangePassword
         return token

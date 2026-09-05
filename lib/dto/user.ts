@@ -12,6 +12,7 @@ export const ROLE_LABEL: Record<Role, string> = {
   FRONT_DESK: "Front desk",
   DOCTOR: "Doctor",
   BRANCH_ADMIN: "Branch admin",
+  CLINIC_ADMIN: "Clinic admin",
   HOLDING_ADMIN: "Holding admin",
 }
 

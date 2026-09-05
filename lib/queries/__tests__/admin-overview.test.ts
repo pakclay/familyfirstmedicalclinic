@@ -91,7 +91,7 @@ describe("getAdminOverview", () => {
       email: "ov-owner",
       role: Role.HOLDING_ADMIN,
     })
-    admin = { id: owner.id, role: Role.HOLDING_ADMIN, branchId: null, holdingCompanyId: companyId }
+    admin = { id: owner.id, role: Role.HOLDING_ADMIN, branchId: null, clinicId: null, holdingCompanyId: companyId }
 
     await makeUser({ branchId: staffedBranch.id, name: "Overview Staff One", email: "ov-s1", role: Role.FRONT_DESK })
     await makeUser({
@@ -151,6 +151,7 @@ describe("getAdminOverview", () => {
       id: "someone",
       role: Role.BRANCH_ADMIN,
       branchId: staffedBranch.id,
+      clinicId: null,
       holdingCompanyId: null,
     }
     await expect(getAdminOverview(branchAdmin)).rejects.toBeInstanceOf(ForbiddenError)

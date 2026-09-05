@@ -66,10 +66,11 @@ Do not build these. Mention them in the README as future work only.
 | Role | Scope | Can do |
 |---|---|---|
 | **Patient** | Self | Book a slot, view own queue position, view own visit summary via a tokenized link. No login/password. |
-| **Front Desk / Staff** | One clinic | Register walk-ins, search patients, manage queue order, call next, record payment, send follow-up messages |
-| **Doctor** | One clinic (may be assigned to several) | See own queue, open patient record, write consultation notes, record medicine given, record payment received |
-| **Clinic Admin** | One clinic | Everything staff can do, plus manage doctors/staff accounts, clinic hours, services and prices, view full clinic reports |
-| **Holding Admin (Owner)** | All clinics under the holding company | Create clinics, view consolidated and per-clinic reports, manage all users, view audit log |
+| **Front Desk / Staff** | One branch | Register walk-ins, search patients, manage queue order, call next, record payment, send follow-up messages |
+| **Doctor** | One branch (may be assigned to several) | See own queue, open patient record, write consultation notes, record medicine given, record payment received |
+| **Branch Admin** | One branch | Everything staff can do, plus manage doctors/staff accounts, branch hours, services and prices, view the branch's reports |
+| **Clinic Admin** | One clinic (the "mother clinic"), administration only | Create and deactivate front desk, doctor and branch admin accounts across the clinic's branches; create and deactivate branches. No patient, queue, payment or stock access — not at any branch. |
+| **Holding Admin (Owner)** | All clinics under the holding company | Create clinics, view consolidated and per-branch reports, manage all users, view audit log |
 
 `DECISION:` Default to role-based permissions checked on the server for every request, not just hidden in the UI. Patients never authenticate — they access their own status through an unguessable token in the URL.
 
@@ -238,7 +239,9 @@ Every report has a date range filter and CSV export. Show a simple bar or line c
 
 **Doctor:** login · my queue · consultation screen · my patients today · my collections today
 
-**Clinic Admin:** dashboard (including low-stock and expiring panels) · manage doctors and staff · manage medicine catalog (add, edit, set reorder level and prices, deactivate) · clinic settings (hours, services, prices) · reports · expenses
+**Branch Admin:** dashboard (including low-stock and expiring panels) · manage doctors and staff · manage medicine catalog (add, edit, set reorder level and prices, deactivate) · branch settings (hours, services, prices) · reports · expenses
+
+**Clinic Admin:** manage the clinic's accounts (front desk, doctors, branch admins) · manage the clinic's branches (create, deactivate) — nothing operational
 
 **Holding Admin:** consolidated dashboard · manage clinics · manage all users · consolidated reports · audit log viewer
 

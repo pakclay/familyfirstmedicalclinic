@@ -93,8 +93,8 @@ describe("walk-in registration", () => {
         role: Role.FRONT_DESK,
       },
     })
-    frontDeskA = { id: userA.id, role: Role.FRONT_DESK, branchId: branchA.id, holdingCompanyId: null }
-    frontDeskB = { id: userB.id, role: Role.FRONT_DESK, branchId: branchB.id, holdingCompanyId: null }
+    frontDeskA = { id: userA.id, role: Role.FRONT_DESK, branchId: branchA.id, clinicId: null, holdingCompanyId: null }
+    frontDeskB = { id: userB.id, role: Role.FRONT_DESK, branchId: branchB.id, clinicId: null, holdingCompanyId: null }
   })
 
   afterAll(async () => {

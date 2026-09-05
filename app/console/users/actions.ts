@@ -21,13 +21,14 @@ import {
 async function actingUser(): Promise<AbilitySubject> {
   const session = await auth()
   if (!session?.user) throw new ForbiddenError("Not signed in")
-  if (session.user.role !== "HOLDING_ADMIN" && session.user.role !== "BRANCH_ADMIN") {
+  if (session.user.role !== "HOLDING_ADMIN" && session.user.role !== "BRANCH_ADMIN" && session.user.role !== "CLINIC_ADMIN") {
     throw new ForbiddenError("Only an admin manages users")
   }
   return {
     id: session.user.id,
     role: session.user.role,
     branchId: session.user.branchId,
+    clinicId: session.user.clinicId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
 }

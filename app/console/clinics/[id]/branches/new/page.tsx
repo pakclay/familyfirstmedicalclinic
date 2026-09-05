@@ -16,6 +16,7 @@ export default async function NewBranchPage({ params }: { params: Promise<{ id: 
     id: session.user.id,
     role: session.user.role,
     branchId: session.user.branchId,
+    clinicId: session.user.clinicId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const clinic = await getClinicById(actor, clinicId)

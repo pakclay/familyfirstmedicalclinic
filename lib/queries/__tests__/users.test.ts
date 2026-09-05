@@ -23,7 +23,7 @@ import {
   LOGIN_LOCKOUT_THRESHOLD,
   LOGIN_LOCKOUT_DURATION_MINUTES,
 } from "@/lib/queries/users"
-import type { AbilitySubject } from "@/lib/permissions/ability"
+import { assignableRoles, type AbilitySubject } from "@/lib/permissions/ability"
 
 describe("isLockedOut", () => {
   it("is false with no lockedUntil", () => {
@@ -74,7 +74,7 @@ describe("login lockout and password change", () => {
         mustChangePassword: true,
       },
     })
-    subject = { id: user.id, role: Role.FRONT_DESK, branchId: branch.id, holdingCompanyId: null }
+    subject = { id: user.id, role: Role.FRONT_DESK, branchId: branch.id, clinicId: null, holdingCompanyId: null }
   })
 
   afterAll(async () => {
@@ -157,15 +157,19 @@ describe("user management", () => {
   let holding: { id: string }
   let branchA: { id: string }
   let branchB: { id: string }
+  let clinicA: { id: string }
+  let clinicB: { id: string }
   let branchAdminA: AbilitySubject
+  let clinicAdmin: AbilitySubject
+  let otherClinicAdmin: AbilitySubject
   let holdingAdmin: AbilitySubject
   let frontDeskInA: { id: string }
   let frontDeskInB: { id: string }
 
   beforeAll(async () => {
     holding = await superuserPrisma.holdingCompany.create({ data: { name: "Test Holding — user mgmt" } })
-    const clinicA = await superuserPrisma.clinic.create({ data: { holdingCompanyId: holding.id, name: "Clinic A" } })
-    const clinicB = await superuserPrisma.clinic.create({ data: { holdingCompanyId: holding.id, name: "Clinic B" } })
+    clinicA = await superuserPrisma.clinic.create({ data: { holdingCompanyId: holding.id, name: "Clinic A" } })
+    clinicB = await superuserPrisma.clinic.create({ data: { holdingCompanyId: holding.id, name: "Clinic B" } })
     branchA = await superuserPrisma.branch.create({
       data: {
         clinicId: clinicA.id,
@@ -198,7 +202,7 @@ describe("user management", () => {
         role: Role.BRANCH_ADMIN,
       },
     })
-    branchAdminA = { id: adminUser.id, role: Role.BRANCH_ADMIN, branchId: branchA.id, holdingCompanyId: null }
+    branchAdminA = { id: adminUser.id, role: Role.BRANCH_ADMIN, branchId: branchA.id, clinicId: null, holdingCompanyId: null }
 
     const holdingUser = await superuserPrisma.user.create({
       data: {
@@ -209,7 +213,7 @@ describe("user management", () => {
         role: Role.HOLDING_ADMIN,
       },
     })
-    holdingAdmin = { id: holdingUser.id, role: Role.HOLDING_ADMIN, branchId: null, holdingCompanyId: holding.id }
+    holdingAdmin = { id: holdingUser.id, role: Role.HOLDING_ADMIN, branchId: null, clinicId: null, holdingCompanyId: holding.id }
 
     const fdA = await superuserPrisma.user.create({
       data: {
@@ -232,6 +236,31 @@ describe("user management", () => {
       },
     })
     frontDeskInB = { id: fdB.id }
+
+    // One clinic-level admin per clinic. Branchless and deliberately given no
+    // holdingCompanyId — its company is reached through its clinic, which is
+    // what makes the "visible to its holding admin" test below load-bearing.
+    const clinicAdminUser = await superuserPrisma.user.create({
+      data: {
+        clinicId: clinicA.id,
+        name: "Clinic A Admin",
+        email: `clinic-admin-a-${Date.now()}@test.local`,
+        passwordHash: "x",
+        role: Role.CLINIC_ADMIN,
+      },
+    })
+    clinicAdmin = { id: clinicAdminUser.id, role: Role.CLINIC_ADMIN, branchId: null, clinicId: clinicA.id, holdingCompanyId: null }
+
+    const otherClinicAdminUser = await superuserPrisma.user.create({
+      data: {
+        clinicId: clinicB.id,
+        name: "Clinic B Admin",
+        email: `clinic-admin-b-${Date.now()}@test.local`,
+        passwordHash: "x",
+        role: Role.CLINIC_ADMIN,
+      },
+    })
+    otherClinicAdmin = { id: otherClinicAdminUser.id, role: Role.CLINIC_ADMIN, branchId: null, clinicId: clinicB.id, holdingCompanyId: null }
   })
 
   afterAll(async () => {
@@ -243,11 +272,115 @@ describe("user management", () => {
     await superuserPrisma.doctor.deleteMany({ where: { branchId: { in: [branchA.id, branchB.id] } } })
     await superuserPrisma.user.deleteMany({ where: { branchId: { in: [branchA.id, branchB.id] } } })
     await superuserPrisma.user.delete({ where: { id: holdingAdmin.id } })
+    // Clinic admins hang off the clinic, not a branch — the branchId sweep
+    // above misses them, and the clinic delete below would trip their FK.
+    await superuserPrisma.user.deleteMany({ where: { clinicId: { in: [clinicA.id, clinicB.id] } } })
     await superuserPrisma.branch.deleteMany({ where: { id: { in: [branchA.id, branchB.id] } } })
     await superuserPrisma.clinic.deleteMany({ where: { holdingCompanyId: holding.id } })
     await superuserPrisma.holdingCompany.deleteMany({ where: { id: holding.id } })
     await superuserPrisma.$disconnect()
     await prisma.$disconnect()
+  })
+
+  describe("clinic admin", () => {
+    it("creates a front desk account in its own clinic's branch, audit row and all", async () => {
+      // Runs as webinar_app (APP_DATABASE_URL, non-superuser) so audit_logs'
+      // INSERT policy actually bites: without the clinic arm added in the
+      // audit_logs_clinic_admin_insert migration, the audit write for a
+      // branchless actor is refused and this whole transaction rolls back.
+      const result = await createUser(clinicAdmin, {
+        name: "Clinic-Made Front Desk",
+        email: `clinic-made-fd-${Date.now()}@test.local`,
+        role: "FRONT_DESK",
+        branchId: branchA.id,
+      })
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      const log = await superuserPrisma.auditLog.findFirst({
+        where: { action: "user.created", entityId: result.user.id },
+      })
+      expect(log?.userId).toBe(clinicAdmin.id)
+      expect(log?.branchId).toBe(branchA.id)
+    })
+
+    it("refuses a branch in a sibling clinic — a forged id reads as 'not found', never as a choice", async () => {
+      // `branches` has no RLS: the where-clause in createUser is the whole
+      // boundary. An account minted there would have full RLS-blessed access
+      // to that branch's patients, queue and payments.
+      const result = await createUser(clinicAdmin, {
+        name: "Sneaky",
+        email: `sneaky-${Date.now()}@test.local`,
+        role: "FRONT_DESK",
+        branchId: branchB.id,
+      })
+      expect(result).toEqual({ ok: false, error: "Select a branch." })
+      expect(await superuserPrisma.user.count({ where: { branchId: branchB.id, name: "Sneaky" } })).toBe(0)
+    })
+
+    it("may create a branch admin in its clinic, but never a peer or a holding admin", async () => {
+      const branchAdminMade = await createUser(clinicAdmin, {
+        name: "Clinic-Made Branch Admin",
+        email: `clinic-made-ba-${Date.now()}@test.local`,
+        role: "BRANCH_ADMIN",
+        branchId: branchA.id,
+      })
+      expect(branchAdminMade.ok).toBe(true)
+
+      const denied = { ok: false, error: "You can't create an account with that role." }
+      expect(
+        await createUser(clinicAdmin, { name: "Peer", email: `peer-${Date.now()}@test.local`, role: "CLINIC_ADMIN", clinicId: clinicA.id })
+      ).toEqual(denied)
+      expect(
+        await createUser(clinicAdmin, { name: "Boss", email: `boss-${Date.now()}@test.local`, role: "HOLDING_ADMIN" })
+      ).toEqual(denied)
+    })
+
+    it("cannot manage an account outside its clinic, a peer, or a holding admin", async () => {
+      // All three read as "not found" — the same non-enumeration answer the
+      // branch admin gets for a sibling branch.
+      for (const targetId of [frontDeskInB.id, otherClinicAdmin.id, holdingAdmin.id]) {
+        expect(await setUserActive(clinicAdmin, targetId, false)).toEqual({ ok: false, error: "User not found." })
+        expect(await getManagedUserById(clinicAdmin, targetId)).toBeNull()
+      }
+      // ...while its own clinic's staff are reachable.
+      expect(await getManagedUserById(clinicAdmin, frontDeskInA.id)).not.toBeNull()
+    })
+
+    it("cannot issue a password for an existing account", async () => {
+      // The one-step impersonation path: rotate a front desk password, sign
+      // in, inherit that branch's patients, queue and payments — with no new
+      // row for anyone to notice. Refused even inside its own clinic.
+      expect(await regenerateTempPassword(clinicAdmin, frontDeskInA.id)).toEqual({
+        ok: false,
+        error: "Ask a holding admin to issue a password.",
+      })
+    })
+
+    it("assignableRoles: front desk, doctor and branch admin — never a peer or a superior", () => {
+      expect(assignableRoles(clinicAdmin)).toEqual(["FRONT_DESK", "DOCTOR", "BRANCH_ADMIN"])
+      expect(assignableRoles(holdingAdmin)).toEqual(["FRONT_DESK", "DOCTOR", "BRANCH_ADMIN", "CLINIC_ADMIN", "HOLDING_ADMIN"])
+    })
+
+    it("is visible to its holding admin", async () => {
+      // branchId null AND holdingCompanyId null: matches neither of the
+      // original two holdingCompanyScope arms. Regression guard for the third.
+      const ids = (await listUsers(holdingAdmin)).map((u) => u.id)
+      expect(ids).toContain(clinicAdmin.id)
+    })
+
+    it("the CHECK constraint refuses a clinic admin that carries a branch", async () => {
+      await expect(
+        superuserPrisma.user.create({
+          data: {
+            name: "Malformed",
+            email: `malformed-${Date.now()}@test.local`,
+            passwordHash: "x",
+            role: Role.CLINIC_ADMIN,
+            branchId: branchA.id, // a branch AND no clinic — exactly the null===null state
+          },
+        })
+      ).rejects.toThrow(/users_role_scope_check|23514/)
+    })
   })
 
   it("lets a branch admin create a front desk account in their own branch", async () => {
@@ -489,6 +622,7 @@ describe("user management", () => {
       id: other.id,
       role: Role.HOLDING_ADMIN,
       branchId: null,
+      clinicId: null,
       holdingCompanyId: holding.id,
     }
 
@@ -511,7 +645,7 @@ describe("user management", () => {
     // Restore the fixture for the tests that follow.
     await superuserPrisma.user.update({
       where: { id: holdingAdmin.id },
-      data: { role: Role.HOLDING_ADMIN, branchId: null, holdingCompanyId: holding.id },
+      data: { role: Role.HOLDING_ADMIN, branchId: null, clinicId: null, holdingCompanyId: holding.id },
     })
     await superuserPrisma.auditLog.deleteMany({ where: { userId: other.id } })
     await superuserPrisma.user.delete({ where: { id: other.id } })
@@ -753,7 +887,7 @@ describe("updateUser — branch reassignment", () => {
         role: Role.HOLDING_ADMIN,
       },
     })
-    holdingAdmin = { id: owner.id, role: Role.HOLDING_ADMIN, branchId: null, holdingCompanyId: holding.id }
+    holdingAdmin = { id: owner.id, role: Role.HOLDING_ADMIN, branchId: null, clinicId: null, holdingCompanyId: holding.id }
 
     const admin = await superuserPrisma.user.create({
       data: {
@@ -764,7 +898,7 @@ describe("updateUser — branch reassignment", () => {
         role: Role.BRANCH_ADMIN,
       },
     })
-    branchAdminA = { id: admin.id, role: Role.BRANCH_ADMIN, branchId: branchA.id, holdingCompanyId: null }
+    branchAdminA = { id: admin.id, role: Role.BRANCH_ADMIN, branchId: branchA.id, clinicId: null, holdingCompanyId: null }
 
     frontDeskInA = await superuserPrisma.user.create({
       data: {

@@ -23,6 +23,7 @@ export default async function StaffQueuePage() {
     id: session.user.id,
     role: session.user.role,
     branchId: session.user.branchId,
+    clinicId: session.user.clinicId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const [entries, doctors] = await Promise.all([listTodayQueue(user), listBranchDoctors(user)])
