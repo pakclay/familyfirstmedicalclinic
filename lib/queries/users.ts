@@ -2,12 +2,15 @@ import bcrypt from "bcryptjs"
 import { randomBytes } from "crypto"
 import type { Role, Prisma } from "@prisma/client"
 import { prisma } from "@/lib/db/prisma"
-import { runWithRls } from "@/lib/db/rls"
+import { runWithRls, appendAuditLog } from "@/lib/db/rls"
 import {
   isHoldingAdmin,
   requireBranchId,
   requireHoldingCompanyId,
   canManageRole,
+  assignableRoles,
+  isClinicAdmin,
+  requireClinicId,
   type AbilitySubject,
 } from "@/lib/permissions/ability"
 import { toUserDTO, type UserDTO } from "@/lib/dto/user"
@@ -100,7 +103,7 @@ export async function changeOwnPassword(
       where: { id: user.id },
       data: { passwordHash, mustChangePassword: false },
     })
-    await tx.auditLog.create({
+    await appendAuditLog(tx, {
       data: {
         branchId: user.branchId,
         userId: user.id,
@@ -140,44 +143,89 @@ export function generateTempPassword(): string {
   return chars.join("")
 }
 
-function canManageTarget(actor: AbilitySubject, target: { role: Role; branchId: string | null }): boolean {
+/**
+ * The shape every managed-user lookup must `include`, because canManageTarget
+ * needs the target's clinic and a user reaches its clinic through its branch.
+ */
+const managedTargetInclude = { branch: { select: { clinicId: true } } } as const
+
+type ManagedTarget = { role: Role; branchId: string | null; branch: { clinicId: string } | null }
+
+function canManageTarget(actor: AbilitySubject, target: ManagedTarget): boolean {
   if (isHoldingAdmin(actor)) return true
-  return target.branchId === actor.branchId && (target.role === "FRONT_DESK" || target.role === "DOCTOR")
+  // Both admin tiers manage staff roles only — never another admin. Checked
+  // first so the scope arms below never have to reason about it.
+  if (!assignableRoles(actor).includes(target.role)) return false
+  if (isClinicAdmin(actor)) {
+    // Both sides required-present on purpose. Comparing two nullables is how
+    // a branchless actor would match every other branchless row
+    // (`null === null`); a clinic-less row must not reproduce that one tier
+    // up. The users_role_scope_check constraint makes such rows
+    // unrepresentable; this keeps the code honest even if it were dropped.
+    return Boolean(actor.clinicId) && target.branch?.clinicId === actor.clinicId
+  }
+  return Boolean(actor.branchId) && target.branchId === actor.branchId
 }
 
 /**
  * Bounds a single-user lookup to accounts `actor` could manage at all.
  *
- * canManageTarget answers "is this the right *role* and branch", but for a
+ * canManageTarget answers "is this the right *role* and scope", but for a
  * holding admin it answers plain `true` — it has no notion of tenancy. The
- * company bound therefore has to be part of the query, not a check after
- * it: `users` has no RLS, so a bare findUnique by id reaches every account
- * in the database. Expressed as a where-clause rather than a post-filter so
+ * tenant bound therefore has to be part of the query, not a check after it:
+ * `users` has no RLS, so a bare findUnique by id reaches every account in
+ * the database. Expressed as a where-clause rather than a post-filter so
  * another tenant's account is simply "not found", which is the same answer
  * getManagedUserById already gives for "exists but not yours".
+ *
+ * The branch-admin arm carries its own bound too. It used to be a bare
+ * `{ id }`, which was safe only because canManageTarget ran afterwards; with
+ * two admin tiers that is one forgotten call away from a cross-branch read.
  */
 function managedUserWhere(actor: AbilitySubject, id: string): Prisma.UserWhereInput {
-  return isHoldingAdmin(actor) ? { id, ...holdingCompanyScope(requireHoldingCompanyId(actor)) } : { id }
+  if (isHoldingAdmin(actor)) return { id, ...holdingCompanyScope(requireHoldingCompanyId(actor)) }
+  if (isClinicAdmin(actor)) return { id, branch: { clinicId: requireClinicId(actor) } }
+  return { id, branchId: requireBranchId(actor) }
 }
 
-const userInclude = { branch: { select: { name: true } }, doctor: true } as const
+const userInclude = { branch: { select: { name: true, clinicId: true } }, doctor: true } as const
 
 /**
- * A holding admin's list is bounded to their own company — matching by the
- * user's own holdingCompanyId (how holding admins are attached) OR through
- * their branch's clinic (how everyone else is). `users` has no RLS, so
- * dropping this predicate lists every account in the database.
+ * A holding admin's list is bounded to their own company. Three attachment
+ * routes: the user's own holdingCompanyId (holding admins), through their
+ * branch's clinic (everyone with a branch), or through their clinic directly
+ * (clinic admins, who are branchless and carry no company id of their own —
+ * see requireClinicId for why). Drop the third arm and every clinic admin
+ * becomes invisible to the people who manage it. `users` has no RLS, so
+ * dropping the whole predicate lists every account in the database.
  */
 function holdingCompanyScope(holdingCompanyId: string): Prisma.UserWhereInput {
   return {
-    OR: [{ holdingCompanyId }, { branch: { clinic: { holdingCompanyId } } }],
+    OR: [{ holdingCompanyId }, { branch: { clinic: { holdingCompanyId } } }, { clinic: { holdingCompanyId } }],
   }
 }
 
+/**
+ * Every account in one clinic: through the user's branch (front desk,
+ * doctors, branch admins) or, for the branchless clinic admin itself, by
+ * direct attachment. The second arm is pinned to `branchId: null` on
+ * purpose — the branch relation is authoritative whenever one exists, so a
+ * stale clinicId on a branch-having row can never widen this past what
+ * canManageTarget allows.
+ */
+function clinicScope(clinicId: string): Prisma.UserWhereInput {
+  return { OR: [{ branch: { clinicId } }, { branchId: null, clinicId }] }
+}
+
 export async function listUsers(actor: AbilitySubject): Promise<UserDTO[]> {
+  // Each non-holding arm filters by the roles that actor may manage —
+  // byte-identical to assignableRoles(actor), so the list never shows a
+  // row the row actions would then refuse.
   const where: Prisma.UserWhereInput = isHoldingAdmin(actor)
     ? holdingCompanyScope(requireHoldingCompanyId(actor))
-    : { branchId: requireBranchId(actor), role: { in: ["FRONT_DESK", "DOCTOR"] } }
+    : isClinicAdmin(actor)
+      ? { ...clinicScope(requireClinicId(actor)), role: { in: assignableRoles(actor) } }
+      : { branchId: requireBranchId(actor), role: { in: assignableRoles(actor) } }
   const rows = await prisma.user.findMany({ where, include: userInclude, orderBy: [{ role: "asc" }, { name: "asc" }] })
   return rows.map(toUserDTO)
 }
@@ -200,9 +248,16 @@ export async function listUsers(actor: AbilitySubject): Promise<UserDTO[]> {
  * that isn't there.
  */
 export async function listUsersForClinic(actor: AbilitySubject, clinicId: string): Promise<UserDTO[]> {
+  // A clinic admin asking about a clinic other than its own matches nothing
+  // — the same "not yours reads as empty" shape the branch-admin arm has
+  // always had, one tier up.
+  if (isClinicAdmin(actor) && clinicId !== requireClinicId(actor)) return []
+
   const where: Prisma.UserWhereInput = isHoldingAdmin(actor)
     ? { branch: { clinicId, clinic: { holdingCompanyId: requireHoldingCompanyId(actor) } } }
-    : { branchId: requireBranchId(actor), branch: { clinicId }, role: { in: ["FRONT_DESK", "DOCTOR"] } }
+    : isClinicAdmin(actor)
+      ? { branch: { clinicId }, role: { in: assignableRoles(actor) } }
+      : { branchId: requireBranchId(actor), branch: { clinicId }, role: { in: assignableRoles(actor) } }
   const rows = await prisma.user.findMany({
     where,
     include: userInclude,
@@ -222,11 +277,16 @@ export async function listUsersForClinic(actor: AbilitySubject, clinicId: string
  * getManagedUserById returning null for both causes.
  */
 export async function listUsersForBranch(actor: AbilitySubject, branchId: string): Promise<UserDTO[]> {
-  if (!isHoldingAdmin(actor) && requireBranchId(actor) !== branchId) return []
+  // The clinic-admin guard must run before requireBranchId is ever
+  // evaluated — a branchless actor reaching that call is a 500, not a
+  // refusal. Its own bound is the branch's clinic, checked in the where.
+  if (!isHoldingAdmin(actor) && !isClinicAdmin(actor) && requireBranchId(actor) !== branchId) return []
 
   const where: Prisma.UserWhereInput = isHoldingAdmin(actor)
     ? { branchId, branch: { clinic: { holdingCompanyId: requireHoldingCompanyId(actor) } } }
-    : { branchId, role: { in: ["FRONT_DESK", "DOCTOR"] } }
+    : isClinicAdmin(actor)
+      ? { branchId, branch: { clinicId: requireClinicId(actor) }, role: { in: assignableRoles(actor) } }
+      : { branchId, role: { in: assignableRoles(actor) } }
   const rows = await prisma.user.findMany({
     where,
     include: userInclude,
@@ -249,12 +309,44 @@ export async function createUser(actor: AbilitySubject, input: CreateUserInput):
     return { ok: false, error: "You can't create an account with that role." }
   }
 
-  let branchId: string | null
+  // Each role carries exactly one scope link (users_role_scope_check pins
+  // this at the database): holding admins a company, clinic admins a clinic,
+  // everyone else a branch.
+  let branchId: string | null = null
+  let clinicId: string | null = null
   if (input.role === "HOLDING_ADMIN") {
     branchId = null
+  } else if (input.role === "CLINIC_ADMIN") {
+    // Only a holding admin reaches here (assignableRoles). The clinic must be
+    // one of theirs: `clinics` has no RLS, so this where-clause is the bound.
+    if (!input.clinicId) return { ok: false, error: "Select a clinic." }
+    const clinic = await prisma.clinic.findFirst({
+      where: { id: input.clinicId, holdingCompanyId: requireHoldingCompanyId(actor) },
+    })
+    if (!clinic) return { ok: false, error: "Select a clinic." }
+    clinicId = clinic.id
   } else if (isHoldingAdmin(actor)) {
     if (!input.branchId) return { ok: false, error: "Select a branch." }
-    branchId = input.branchId
+    // Pre-existing gap closed at the same time: `branches` has no RLS, so
+    // without the company bound a holding admin could name any tenant's
+    // branch id and mint an account there.
+    const branch = await prisma.branch.findFirst({
+      where: { id: input.branchId, clinic: { holdingCompanyId: requireHoldingCompanyId(actor) } },
+    })
+    if (!branch) return { ok: false, error: "Select a branch." }
+    branchId = branch.id
+  } else if (isClinicAdmin(actor)) {
+    // Never trust input.branchId on its own: a sibling clinic's branch id
+    // would mint a FRONT_DESK there, and that account HAS full RLS-blessed
+    // access to that branch's patients, queue and payments. Re-fetch under
+    // the actor's clinic so an out-of-clinic branch reads as "not found",
+    // never as a valid choice.
+    if (!input.branchId) return { ok: false, error: "Select a branch." }
+    const branch = await prisma.branch.findFirst({
+      where: { id: input.branchId, clinicId: requireClinicId(actor) },
+    })
+    if (!branch) return { ok: false, error: "Select a branch." }
+    branchId = branch.id
   } else {
     // Branch admin: ignore any branchId the form sent — they can only ever
     // create within their own branch, and trusting a client-supplied value
@@ -276,6 +368,10 @@ export async function createUser(actor: AbilitySubject, input: CreateUserInput):
     const user = await tx.user.create({
       data: {
         branchId,
+        clinicId,
+        // Deliberately null for a CLINIC_ADMIN: its company is reached
+        // through its clinic, so a future read that checks only for the
+        // presence of a company id fails closed for this role, not open.
         holdingCompanyId: input.role === "HOLDING_ADMIN" ? actor.holdingCompanyId : null,
         name: input.name.trim(),
         email,
@@ -296,7 +392,7 @@ export async function createUser(actor: AbilitySubject, input: CreateUserInput):
         },
       })
     }
-    await tx.auditLog.create({
+    await appendAuditLog(tx, {
       data: {
         branchId,
         userId: actor.id,
@@ -326,7 +422,7 @@ export type ManageUserResult = { ok: true } | { ok: false; error: string }
 const UNFINISHED_QUEUE_STATUSES = ["BOOKED", "CHECKED_IN", "WAITING", "CALLED", "IN_CONSULTATION"] as const
 
 export async function updateUser(actor: AbilitySubject, id: string, input: EditUserInput): Promise<ManageUserResult> {
-  const target = await prisma.user.findFirst({ where: managedUserWhere(actor, id), include: { doctor: true } })
+  const target = await prisma.user.findFirst({ where: managedUserWhere(actor, id), include: { doctor: true, ...managedTargetInclude } })
   if (!target || !canManageTarget(actor, target)) return { ok: false, error: "User not found." }
 
   // An absent branchId means "leave it alone" — only an explicit, different
@@ -402,7 +498,7 @@ export async function updateUser(actor: AbilitySubject, id: string, input: EditU
     // admins are the ones who need to see a new person appear in their
     // scope. The `from` id is in `changes` so the move stays traceable from
     // either end.
-    await tx.auditLog.create({
+    await appendAuditLog(tx, {
       data: {
         branchId: movingBranch ? requestedBranchId : target.branchId,
         userId: actor.id,
@@ -424,12 +520,12 @@ export async function setUserActive(actor: AbilitySubject, id: string, isActive:
   // instead of the real reason.
   if (id === actor.id) return { ok: false, error: "You can't deactivate your own account." }
 
-  const target = await prisma.user.findFirst({ where: managedUserWhere(actor, id) })
+  const target = await prisma.user.findFirst({ where: managedUserWhere(actor, id), include: managedTargetInclude })
   if (!target || !canManageTarget(actor, target)) return { ok: false, error: "User not found." }
 
   await runWithRls(actor, async (tx) => {
     await tx.user.update({ where: { id }, data: { isActive } })
-    await tx.auditLog.create({
+    await appendAuditLog(tx, {
       data: {
         branchId: target.branchId,
         userId: actor.id,
@@ -481,7 +577,7 @@ export async function changeUserRole(
 
   const target = await prisma.user.findFirst({
     where: managedUserWhere(actor, id),
-    include: { doctor: true },
+    include: { doctor: true, ...managedTargetInclude },
   })
   if (!target) return { ok: false, error: "User not found." }
   if (target.role === input.role) return { ok: false, error: "That's already their role." }
@@ -490,10 +586,23 @@ export async function changeUserRole(
   const requestedBranchId = input.branchId?.trim() || null
 
   let branchId: string | null
+  let clinicId: string | null = null
   if (toHolding) {
     // A holding admin has no branch; carrying one would make them appear in
     // a branch's staff list while their access ignores branches entirely.
     branchId = null
+  } else if (input.role === "CLINIC_ADMIN") {
+    // Clinic admins hold no branch (lib/db/rls.ts scopes them by clinic, not
+    // branch). Without this arm a promotion would produce a clinic admin
+    // WITH a branchId and no clinicId — rejected by users_role_scope_check,
+    // and the exact state that would dissolve the fail-closed RLS story.
+    branchId = null
+    if (!input.clinicId) return { ok: false, error: "Select a clinic for this role." }
+    const clinic = await prisma.clinic.findFirst({
+      where: { id: input.clinicId, holdingCompanyId: requireHoldingCompanyId(actor) },
+    })
+    if (!clinic) return { ok: false, error: "Select a clinic." }
+    clinicId = clinic.id
   } else {
     // Moving to a branch-scoped role needs a branch. Reuse their current one
     // when the caller did not name one, so a straight FRONT_DESK -> DOCTOR
@@ -544,6 +653,10 @@ export async function changeUserRole(
       data: {
         role: input.role,
         branchId,
+        // Written on every role change, not just when set: a demotion away
+        // from CLINIC_ADMIN must clear the stale clinic link or the row fails
+        // users_role_scope_check. Mirrors createUser's scope-link rule.
+        clinicId,
         // Mirrors createUser: the company link is what makes a holding admin
         // reachable at all, since they match no branch.
         holdingCompanyId: toHolding ? actor.holdingCompanyId : null,
@@ -566,7 +679,7 @@ export async function changeUserRole(
       await tx.doctor.update({ where: { userId: id }, data: { branchId } })
     }
 
-    await tx.auditLog.create({
+    await appendAuditLog(tx, {
       data: {
         branchId,
         userId: actor.id,
@@ -613,7 +726,18 @@ export async function regenerateTempPassword(
     return { ok: false, error: "You can't issue yourself a new password — ask another admin." }
   }
 
-  const target = await prisma.user.findFirst({ where: managedUserWhere(actor, id) })
+  // A clinic admin administers accounts; it must not be able to *become*
+  // one. Rotating a front desk password yields a working credential for an
+  // existing account — sign in with it and inherit that branch's patients,
+  // queue and payments, with no new row for anyone to notice. createUser
+  // has the same shape (see assignableRoles' comment) and is allowed as a
+  // product decision; this path takes over an account that already exists,
+  // which is a different thing, and is refused.
+  if (isClinicAdmin(actor)) {
+    return { ok: false, error: "Ask a holding admin to issue a password." }
+  }
+
+  const target = await prisma.user.findFirst({ where: managedUserWhere(actor, id), include: managedTargetInclude })
   if (!target || !canManageTarget(actor, target)) return { ok: false, error: "User not found." }
 
   const tempPassword = generateTempPassword()
@@ -633,7 +757,7 @@ export async function regenerateTempPassword(
         lockedUntil: null,
       },
     })
-    await tx.auditLog.create({
+    await appendAuditLog(tx, {
       data: {
         branchId: target.branchId,
         userId: actor.id,
@@ -648,12 +772,12 @@ export async function regenerateTempPassword(
 }
 
 export async function forcePasswordReset(actor: AbilitySubject, id: string): Promise<ManageUserResult> {
-  const target = await prisma.user.findFirst({ where: managedUserWhere(actor, id) })
+  const target = await prisma.user.findFirst({ where: managedUserWhere(actor, id), include: managedTargetInclude })
   if (!target || !canManageTarget(actor, target)) return { ok: false, error: "User not found." }
 
   await runWithRls(actor, async (tx) => {
     await tx.user.update({ where: { id }, data: { mustChangePassword: true } })
-    await tx.auditLog.create({
+    await appendAuditLog(tx, {
       data: {
         branchId: target.branchId,
         userId: actor.id,
@@ -667,12 +791,12 @@ export async function forcePasswordReset(actor: AbilitySubject, id: string): Pro
 }
 
 export async function unlockAccount(actor: AbilitySubject, id: string): Promise<ManageUserResult> {
-  const target = await prisma.user.findFirst({ where: managedUserWhere(actor, id) })
+  const target = await prisma.user.findFirst({ where: managedUserWhere(actor, id), include: managedTargetInclude })
   if (!target || !canManageTarget(actor, target)) return { ok: false, error: "User not found." }
 
   await runWithRls(actor, async (tx) => {
     await tx.user.update({ where: { id }, data: { failedLoginAttempts: 0, lockedUntil: null } })
-    await tx.auditLog.create({
+    await appendAuditLog(tx, {
       data: { branchId: target.branchId, userId: actor.id, action: "user.unlocked", entityType: "User", entityId: id },
     })
   })

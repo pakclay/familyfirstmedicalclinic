@@ -1,0 +1,15 @@
+-- The clinic-level administrator: scoped to one Clinic (the "mother
+-- clinic"), branchless, and limited to administration — it creates and
+-- deactivates accounts and branches under its clinic, and nothing else.
+-- See DECISIONS.md, 2026-09-06.
+--
+-- Its own migration because Postgres forbids using a newly added enum value
+-- in the transaction that adds it (55P04), and Prisma runs each migration
+-- file as one transaction. The CHECK constraint that references this value
+-- therefore lives two files later.
+--
+-- BEFORE 'HOLDING_ADMIN' is not cosmetic. Three list queries order by role
+-- (lib/queries/users.ts), and Postgres sorts an enum by pg_enum's
+-- enumsortorder, not by the schema's declaration order — a bare ADD VALUE
+-- appends, which would list clinic admins after holding admins everywhere.
+ALTER TYPE "Role" ADD VALUE 'CLINIC_ADMIN' BEFORE 'HOLDING_ADMIN';

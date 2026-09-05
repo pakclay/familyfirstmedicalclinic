@@ -23,6 +23,7 @@ export default async function ClinicDetailPage({ params }: { params: Promise<{ i
     id: session.user.id,
     role: session.user.role,
     branchId: session.user.branchId,
+    clinicId: session.user.clinicId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const clinic = await getClinicById(actor, id)

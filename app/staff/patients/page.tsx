@@ -30,6 +30,7 @@ export default async function StaffPatientsPage({
     id: session.user.id,
     role: session.user.role,
     branchId: session.user.branchId,
+    clinicId: session.user.clinicId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const patients = await listPatients(user, { search: q })

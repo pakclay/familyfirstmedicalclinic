@@ -15,6 +15,7 @@ enum Role {
   FRONT_DESK
   DOCTOR
   BRANCH_ADMIN
+  CLINIC_ADMIN
   HOLDING_ADMIN
 }
 
@@ -136,6 +137,7 @@ model Clinic {
   updatedAt        DateTime        @updatedAt @map("updated_at")
 
   branches Branch[]
+  users    User[]
 
   @@map("clinics")
 }
@@ -183,6 +185,8 @@ model User {
   id                  String          @id @default(uuid())
   branchId            String?         @map("branch_id")
   branch              Branch?         @relation(fields: [branchId], references: [id])
+  clinicId            String?         @map("clinic_id")
+  clinic              Clinic?         @relation(fields: [clinicId], references: [id])
   holdingCompanyId    String?         @map("holding_company_id")
   holdingCompany      HoldingCompany? @relation(fields: [holdingCompanyId], references: [id])
   name                String

@@ -28,6 +28,7 @@ export default async function ExpensesPage({
     id: session.user.id,
     role: session.user.role,
     branchId: session.user.branchId,
+    clinicId: session.user.clinicId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const { expenses, startLabel, endLabel } = await listExpenses(user, { start, end })

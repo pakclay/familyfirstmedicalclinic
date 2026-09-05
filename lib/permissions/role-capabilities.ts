@@ -21,7 +21,7 @@ export type RoleProfile = {
   label: string
   /** One line an admin can act on, not a definition. */
   summary: string
-  scope: "branch" | "company"
+  scope: "branch" | "clinic" | "company"
   /** Which top-level sections the route gate lets them reach (proxy.ts). */
   sections: string[]
   can: RoleCapability[]
@@ -94,6 +94,32 @@ const PROFILE_BY_ROLE: Record<Role, RoleProfile> = {
       { label: "Create or edit clinics and branches", enforcedIn: "lib/queries/clinics.ts" },
       { label: "See the audit log or the consolidated report", enforcedIn: "lib/queries/audit-log.ts" },
       { label: "Open a consultation", enforcedIn: "lib/queries/consultations.ts" },
+    ],
+  },
+  CLINIC_ADMIN: {
+    role: "CLINIC_ADMIN",
+    label: "Clinic admin",
+    summary: "Administers one clinic: its accounts and its branches. No patient, queue, money or stock access anywhere.",
+    scope: "clinic",
+    // Deliberately not "/staff": every screen there is a branch's queue,
+    // patients or stock, and this role has no branch to work in.
+    sections: ["/console"],
+    can: [
+      { label: "Create and deactivate front desk, doctor and branch admin accounts across its clinic's branches", enforcedIn: "lib/permissions/ability.ts" },
+      { label: "Create and deactivate branches under its clinic", enforcedIn: "lib/queries/branches.ts" },
+    ],
+    cannot: [
+      { label: "Open any patient, queue, payment or consultation record", enforcedIn: "prisma/migrations/…branch_rewrite_rls_policies" },
+      { label: "Edit stock, expenses or remittances", enforcedIn: "lib/queries/inventory.ts" },
+      { label: "Create another clinic admin or a holding admin, or issue a password to an existing account", enforcedIn: "lib/permissions/ability.ts" },
+      { label: "Reconfigure a branch's address or hours, or reach another clinic", enforcedIn: "lib/queries/branches.ts" },
+      // Stated so nobody later mistakes the line above for a guarantee:
+      // creating an account hands the creator its temporary password, so a
+      // clinic admin CAN reach a branch's data by making an account there
+      // and signing in as it. The data boundary is a convenience for this
+      // role, not an enforced one — a product decision (DECISIONS.md,
+      // 2026-09-06), made knowing the trade.
+      { label: "Be prevented from reaching branch data via an account it creates — this is by convention, not enforcement", enforcedIn: "lib/queries/users.ts (createUser returns the temp password)" },
     ],
   },
   HOLDING_ADMIN: {

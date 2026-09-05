@@ -27,6 +27,7 @@ export default async function ChangeRolePage({ params }: { params: Promise<{ id:
     id: session.user.id,
     role: session.user.role,
     branchId: session.user.branchId,
+    clinicId: session.user.clinicId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const managedUser = await getManagedUserById(actor, id)
@@ -91,7 +92,7 @@ export default async function ChangeRolePage({ params }: { params: Promise<{ id:
                   {p.role === managedUser.role && <span className="ml-2 text-xs text-brand">current</span>}
                 </h2>
                 <span className="text-xs text-muted-foreground">
-                  {p.scope === "company" ? "whole company" : "one branch"} · {p.sections.join(" ")}
+                  {p.scope === "company" ? "whole company" : p.scope === "clinic" ? "one clinic" : "one branch"} · {p.sections.join(" ")}
                 </span>
               </div>
               <p className="mt-1 text-xs text-muted-foreground">{p.summary}</p>

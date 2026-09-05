@@ -12,7 +12,7 @@ export default async function NewUserPage({
   const { clinicId, branchId } = await searchParams
   const session = await auth()
   if (!session?.user) redirect("/login")
-  if (session.user.role !== "HOLDING_ADMIN" && session.user.role !== "BRANCH_ADMIN") {
+  if (session.user.role !== "HOLDING_ADMIN" && session.user.role !== "BRANCH_ADMIN" && session.user.role !== "CLINIC_ADMIN") {
     redirect("/console/users")
   }
 
@@ -20,6 +20,7 @@ export default async function NewUserPage({
     id: session.user.id,
     role: session.user.role,
     branchId: session.user.branchId,
+    clinicId: session.user.clinicId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const roles = assignableRoles(user)
@@ -37,14 +38,32 @@ export default async function NewUserPage({
   // — createUser still decides the branch server-side, so a forged value can
   // only shrink or preselect what this dropdown offers, never widen who can
   // be created or where.
+  //
+  // Both branchless admin tiers see the picker; each list is bounded to what
+  // that tier may create into. `branches` has no RLS, so the holding arm's
+  // company bound is what stops this listing every tenant's branches (it
+  // had none before), and the clinic arm lists only the actor's own clinic.
+  // createUser re-validates the chosen id against the same bound.
+  const branchSelect = { id: true, name: true, clinic: { select: { name: true } } } as const
+  const branchOrder = [{ clinic: { name: "asc" } }, { name: "asc" }] as const
   const branches =
     session.user.role === "HOLDING_ADMIN"
       ? await prisma.branch.findMany({
-          where: { isActive: true, ...(clinicId ? { clinicId } : {}) },
-          select: { id: true, name: true, clinic: { select: { name: true } } },
-          orderBy: [{ clinic: { name: "asc" } }, { name: "asc" }],
+          where: {
+            isActive: true,
+            clinic: { holdingCompanyId: session.user.holdingCompanyId ?? "" },
+            ...(clinicId ? { clinicId } : {}),
+          },
+          select: branchSelect,
+          orderBy: [...branchOrder],
         })
-      : []
+      : session.user.role === "CLINIC_ADMIN"
+        ? await prisma.branch.findMany({
+            where: { isActive: true, clinicId: session.user.clinicId ?? "" },
+            select: branchSelect,
+            orderBy: [...branchOrder],
+          })
+        : []
 
   return (
     <div className="mx-auto max-w-md">
@@ -53,7 +72,7 @@ export default async function NewUserPage({
         <NewUserForm
           roles={roles}
           branches={branches}
-          showBranchPicker={session.user.role === "HOLDING_ADMIN"}
+          showBranchPicker={session.user.role !== "BRANCH_ADMIN"}
           defaultBranchId={branchId && branches.some((b) => b.id === branchId) ? branchId : undefined}
         />
       </div>

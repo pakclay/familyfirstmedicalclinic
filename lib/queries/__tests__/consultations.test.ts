@@ -71,7 +71,7 @@ describe("consultations", () => {
       data: { userId: docUser.id, branchId: branch.id, licenseNumber: "C1", consultationFee: 50000 },
     })
     doctorId = doctor.id
-    doctorUser = { id: docUser.id, role: Role.DOCTOR, branchId: branch.id, holdingCompanyId: null }
+    doctorUser = { id: docUser.id, role: Role.DOCTOR, branchId: branch.id, clinicId: null, holdingCompanyId: null }
 
     patient = await superuserPrisma.patient.create({
       data: {
@@ -242,7 +242,7 @@ describe("consultations", () => {
     const otherDoctor = await superuserPrisma.doctor.create({
       data: { userId: otherDocUser.id, branchId: branch.id, licenseNumber: "C2", consultationFee: 50000 },
     })
-    const otherDoctorSubject: AbilitySubject = { id: otherDocUser.id, role: Role.DOCTOR, branchId: branch.id, holdingCompanyId: null }
+    const otherDoctorSubject: AbilitySubject = { id: otherDocUser.id, role: Role.DOCTOR, branchId: branch.id, clinicId: null, holdingCompanyId: null }
 
     const entry = await createQueueEntry() // assigned to `doctorId`, not otherDoctor
 
@@ -404,7 +404,7 @@ describe("branch scoping — consultations", () => {
       data: { userId: docUserA.id, branchId: branchA.id, licenseNumber: `${PREFIX}-L1`, consultationFee: 50000 },
     })
     doctorAId = doctorRowA.id
-    doctorA = { id: docUserA.id, role: Role.DOCTOR, branchId: branchA.id, holdingCompanyId: null }
+    doctorA = { id: docUserA.id, role: Role.DOCTOR, branchId: branchA.id, clinicId: null, holdingCompanyId: null }
 
     const holdingUser = await superuserPrisma.user.create({
       data: {
@@ -415,7 +415,7 @@ describe("branch scoping — consultations", () => {
         role: Role.HOLDING_ADMIN,
       },
     })
-    holdingAdmin = { id: holdingUser.id, role: Role.HOLDING_ADMIN, branchId: null, holdingCompanyId: holding.id }
+    holdingAdmin = { id: holdingUser.id, role: Role.HOLDING_ADMIN, branchId: null, clinicId: null, holdingCompanyId: holding.id }
 
     const mkPatient = async (branchId: string, firstName: string, lastName: string) =>
       superuserPrisma.patient.create({

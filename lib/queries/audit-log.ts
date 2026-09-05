@@ -178,6 +178,11 @@ export async function listAuditLog(user: AbilitySubject, params: AuditLogFilters
     OR: [
       { branch: { clinic: { holdingCompanyId } } },
       { branchId: null, user: { holdingCompanyId } },
+      // A clinic admin carries no holdingCompanyId of its own — its company
+      // is reached through its clinic — so the arm above never matches its
+      // rows. Without this one, every action that role takes is auditable by
+      // nobody at all.
+      { branchId: null, user: { clinic: { holdingCompanyId } } },
       { branchId: null, userId: null },
     ],
   }
@@ -245,7 +250,7 @@ export async function listAuditLog(user: AbilitySubject, params: AuditLogFilters
       tx.auditLog.groupBy({ by: ["action"], where: holdingScope, orderBy: { action: "asc" } }),
       tx.auditLog.groupBy({ by: ["entityType"], where: holdingScope, orderBy: { entityType: "asc" } }),
       tx.user.findMany({
-        where: { OR: [{ branch: { clinic: { holdingCompanyId } } }, { holdingCompanyId }] },
+        where: { OR: [{ branch: { clinic: { holdingCompanyId } } }, { holdingCompanyId }, { clinic: { holdingCompanyId } }] },
         select: { id: true, name: true },
         orderBy: { name: "asc" },
       }),

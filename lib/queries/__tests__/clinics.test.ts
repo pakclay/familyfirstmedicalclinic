@@ -49,7 +49,7 @@ describe("clinic management", () => {
         role: Role.HOLDING_ADMIN,
       },
     })
-    holdingAdmin = { id: holdingUser.id, role: Role.HOLDING_ADMIN, branchId: null, holdingCompanyId: holding.id }
+    holdingAdmin = { id: holdingUser.id, role: Role.HOLDING_ADMIN, branchId: null, clinicId: null, holdingCompanyId: holding.id }
 
     const adminUser = await superuserPrisma.user.create({
       data: {
@@ -60,7 +60,7 @@ describe("clinic management", () => {
         role: Role.BRANCH_ADMIN,
       },
     })
-    branchAdmin = { id: adminUser.id, role: Role.BRANCH_ADMIN, branchId: existingBranch.id, holdingCompanyId: null }
+    branchAdmin = { id: adminUser.id, role: Role.BRANCH_ADMIN, branchId: existingBranch.id, clinicId: null, holdingCompanyId: null }
   })
 
   afterAll(async () => {

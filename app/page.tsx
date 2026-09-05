@@ -6,6 +6,7 @@ const ROLE_HOME: Record<Role, string> = {
   FRONT_DESK: "/staff/queue",
   DOCTOR: "/doctor/queue",
   BRANCH_ADMIN: "/console/dashboard",
+  CLINIC_ADMIN: "/console/users",
   HOLDING_ADMIN: "/console/dashboard",
 }
 

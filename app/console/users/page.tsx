@@ -10,7 +10,7 @@ import { ROLE_LABEL } from "@/lib/dto/user"
 export default async function UsersPage() {
   const session = await auth()
   if (!session?.user) redirect("/login")
-  if (session.user.role !== "HOLDING_ADMIN" && session.user.role !== "BRANCH_ADMIN") {
+  if (session.user.role !== "HOLDING_ADMIN" && session.user.role !== "BRANCH_ADMIN" && session.user.role !== "CLINIC_ADMIN") {
     return (
       <div>
         <h1 className="text-2xl font-heading font-semibold">Users</h1>
@@ -23,6 +23,7 @@ export default async function UsersPage() {
     id: session.user.id,
     role: session.user.role,
     branchId: session.user.branchId,
+    clinicId: session.user.clinicId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const users = await listUsers(user)
