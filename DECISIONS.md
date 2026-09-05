@@ -9,6 +9,77 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-09-05 — Console navigation latency
+
+Clicking a console nav item took ~3s in production while the same click took
+~50ms locally. Measured before changing anything, with the tab foregrounded
+(a backgrounded tab throttles `requestAnimationFrame` to 1Hz and fabricates a
+phantom ~1000ms in any click-to-paint harness — the first measurement taken
+here was wrong for exactly that reason).
+
+Single uncontended RSC requests against production, warm:
+`/console/dashboard` ~560-780ms, `/console/clinics` ~750-985ms,
+`/console/reports` ~6000ms. Dashboard is the tell: for a holding admin it
+returns early and runs *no* page queries at all, so ~600ms was fixed
+per-request overhead before any data.
+
+- **It is not the prefetch storm.** Opening a console page fires 25-40
+  `?_rsc=` prefetches, one per row link, which looks like the culprit and was
+  initially diagnosed as one. It isn't: with no `loading.tsx` anywhere,
+  Next bails a prefetch at the first segment that has one, and having none in
+  the tree means bailing immediately —
+  `next/dist/server/app-render/create-component-tree.js`, "prefetch
+  everything up to the first route segment that defines a loading.tsx
+  boundary … (We do the same if there's no loading boundary in the entire
+  tree)". Those requests never rendered a layout or page. Recorded because
+  the wrong version of this is very plausible and would send the next person
+  down the same path.
+- **The cost was sequential round trips, multiplied by distance.**
+  `x-vercel-id: sin1::iad1` — requests entered Vercel's edge in Singapore and
+  executed in US East, while the database is in Singapore. Every Postgres
+  round trip crossed the Pacific at ~100-200ms instead of ~10ms, so each of
+  the following was ~15x its real cost. `vercel.json` now pins functions to
+  `sin1`. It holds no comment because the format allows none; this is it.
+- **`auth()` is request-memoised** (`auth.ts`). The `jwt` callback re-reads
+  the user row on every call to enforce isActive revocation, and `auth()` is
+  called independently by the shell header and by each page — query logging
+  showed three identical `SELECT ... FROM users WHERE id = $1` per render.
+  React's `cache` collapses them to one *per request*, which is not a TTL and
+  does not weaken the guarantee: the check still runs on every navigation.
+- **The three RLS GUCs are set in one statement** (`lib/db/rls.ts`), not
+  three sequential `$executeRaw` calls. `set_config(..., true)` keeps its
+  transaction-local semantics when several are projected by one SELECT
+  (verified: the setting reads back empty after commit). Two round trips
+  saved inside each of ~96 scoped queries.
+- **Shell layouts no longer block on data.** All three top-level-awaited
+  `auth()`, and per `next/dist/docs/.../file-conventions/layout.md` that
+  means "the navigation will block until the layout finishes rendering, and
+  the `loading.js` fallback will not be shown". The header's reads moved into
+  `components/nav/shell-header.tsx` behind `<Suspense>`, so the layouts are
+  no longer `async` at all and `loading.tsx` works. The signed-out redirect
+  moved with it, which is safe because it was never the gate — `proxy.ts`
+  refuses the request first and every page re-checks.
+- **The holding report groups instead of looping**
+  (`lib/queries/reports/holding.ts`). It ran three aggregates per branch in a
+  serial `for`, and because an interactive transaction runs on one
+  connection the inner `Promise.all` did not overlap them either: 1 + 3N
+  sequential round trips, 25 for eight branches. Now 1 + 3×(distinct
+  timezones), batching branches that share a calendar range. Verified
+  byte-identical to the old algorithm against real data.
+- **Per-row links opt out of prefetching**, nav links don't. Prefetch is a
+  bet: one speculative render for a chance to save a click. Worth it for six
+  nav items the user bounces between; not for fifteen staff rows where the
+  hit rate is 1/N. The CSV links under `/console/reports` opt out too — those
+  are route handlers that would have generated a report on scroll.
+- **Adding `loading.tsx` does make the remaining prefetches render the shell**
+  (that is the same bail rule, now bailing lower). Accepted deliberately: the
+  cost is bounded by the nav's fixed six, and it buys the skeleton appearing
+  instantly on click rather than after a round trip.
+- **`staleTimes.dynamic` was left alone.** It would make back-navigation
+  instant by reusing the client cache (default 0, i.e. never), but it is
+  global, and a queue screen showing 30s-stale state is a worse bug than a
+  slow one in a clinic.
+
 ## 2026-09-03 — Clinic names must not repeat their branch's location
 
 Every public surface composes `{clinic} – {branch}`

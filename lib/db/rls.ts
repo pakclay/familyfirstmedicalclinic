@@ -3,6 +3,30 @@ import { prisma } from "./prisma"
 import type { AbilitySubject } from "@/lib/permissions/ability"
 
 /**
+ * Sets all three GUCs in a single statement — one database round trip
+ * rather than three. These used to be three separate `$executeRaw` calls,
+ * which read more clearly but cost two extra sequential round trips inside
+ * every one of the ~96 scoped queries in the app. That is invisible against
+ * a local Postgres and expensive against a managed database in another
+ * region, where it was measurably a large share of each console render.
+ *
+ * `set_config(..., true)` keeps its `is_local` semantics when several are
+ * projected by one SELECT: all three are still scoped to the surrounding
+ * transaction and are gone once it commits.
+ */
+function setScope(
+  tx: Prisma.TransactionClient,
+  role: string,
+  userId: string,
+  branchId: string
+): Promise<number> {
+  return tx.$executeRaw`SELECT
+    set_config('app.role', ${role}, true),
+    set_config('app.user_id', ${userId}, true),
+    set_config('app.branch_id', ${branchId}, true)`
+}
+
+/**
  * Runs `fn` inside a Postgres transaction with the RLS session GUCs
  * (app.role / app.user_id / app.branch_id) set via SET LOCAL, so the
  * policies in the enable_rls_backstop/branch_rewrite_rls_policies
@@ -19,9 +43,7 @@ export async function runWithRls<T>(
   fn: (tx: Prisma.TransactionClient) => Promise<T>
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT set_config('app.role', ${user.role}, true)`
-    await tx.$executeRaw`SELECT set_config('app.user_id', ${user.id}, true)`
-    await tx.$executeRaw`SELECT set_config('app.branch_id', ${user.branchId ?? ""}, true)`
+    await setScope(tx, user.role, user.id, user.branchId ?? "")
     return fn(tx)
   })
 }
@@ -41,9 +63,7 @@ export async function runWithBranchScope<T>(
   fn: (tx: Prisma.TransactionClient) => Promise<T>
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT set_config('app.role', 'PUBLIC', true)`
-    await tx.$executeRaw`SELECT set_config('app.user_id', '', true)`
-    await tx.$executeRaw`SELECT set_config('app.branch_id', ${branchId}, true)`
+    await setScope(tx, "PUBLIC", "", branchId)
     return fn(tx)
   })
 }
@@ -60,9 +80,7 @@ export async function runWithBranchScope<T>(
  */
 export async function runWithFullVisibility<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
   return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT set_config('app.role', 'HOLDING_ADMIN', true)`
-    await tx.$executeRaw`SELECT set_config('app.user_id', '', true)`
-    await tx.$executeRaw`SELECT set_config('app.branch_id', '', true)`
+    await setScope(tx, "HOLDING_ADMIN", "", "")
     return fn(tx)
   })
 }

@@ -49,7 +49,7 @@ export default async function DashboardPage() {
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
         <Panel title="Low stock" count={panels.lowStock.length} accent="priority">
           {panels.lowStock.map((m) => (
-            <Link key={m.id} href={`/staff/inventory/${m.id}`} className="flex justify-between px-4 py-2 text-sm hover:bg-accent">
+            <Link prefetch={false} key={m.id} href={`/staff/inventory/${m.id}`} className="flex justify-between px-4 py-2 text-sm hover:bg-accent">
               <span>{m.name}</span>
               <span className="font-numeric text-muted-foreground">
                 {m.currentStock} / {m.reorderLevel}
@@ -60,7 +60,7 @@ export default async function DashboardPage() {
 
         <Panel title="Expiring soon (60 days)" count={panels.expiringSoon.length} accent="signal">
           {panels.expiringSoon.map((m) => (
-            <Link key={m.id} href={`/staff/inventory/${m.id}`} className="flex justify-between px-4 py-2 text-sm hover:bg-accent">
+            <Link prefetch={false} key={m.id} href={`/staff/inventory/${m.id}`} className="flex justify-between px-4 py-2 text-sm hover:bg-accent">
               <span>{m.name}</span>
               <span className="text-muted-foreground">
                 {m.expiryDate?.toLocaleDateString("en-PH", { month: "short", day: "numeric" })}
@@ -72,7 +72,7 @@ export default async function DashboardPage() {
         {panels.expired.length > 0 && (
           <Panel title="Already expired" count={panels.expired.length} accent="destructive">
             {panels.expired.map((m) => (
-              <Link key={m.id} href={`/staff/inventory/${m.id}`} className="flex justify-between px-4 py-2 text-sm hover:bg-accent">
+              <Link prefetch={false} key={m.id} href={`/staff/inventory/${m.id}`} className="flex justify-between px-4 py-2 text-sm hover:bg-accent">
                 <span>{m.name}</span>
                 <span className="text-muted-foreground">
                   {m.expiryDate?.toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })}

@@ -135,7 +135,7 @@ export default async function AdminPage() {
                 accent="signal"
               >
                 {attention.clinicsWithoutBranches.map((c) => (
-                  <Link
+                  <Link prefetch={false}
                     key={c.id}
                     href={`/console/clinics/${c.id}/branches/new`}
                     className="flex items-center justify-between px-4 py-2 text-sm hover:bg-accent"
@@ -155,7 +155,7 @@ export default async function AdminPage() {
                 accent="signal"
               >
                 {attention.branchesWithoutStaff.map((b) => (
-                  <Link
+                  <Link prefetch={false}
                     key={b.id}
                     href={`/console/users/new?branchId=${b.id}`}
                     className="flex items-center justify-between gap-2 px-4 py-2 text-sm hover:bg-accent"
@@ -178,7 +178,7 @@ export default async function AdminPage() {
           {overview.clinics.map((clinic) => (
             <div key={clinic.id} className="rounded-md border border-border">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5">
-                <Link href={`/console/clinics/${clinic.id}`} className="font-medium hover:underline">
+                <Link prefetch={false} href={`/console/clinics/${clinic.id}`} className="font-medium hover:underline">
                   {clinic.name}
                 </Link>
                 <span className="text-xs text-muted-foreground">
@@ -191,7 +191,7 @@ export default async function AdminPage() {
                 {clinic.branches.map((branch) => (
                   <li key={branch.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2">
                     <div className="min-w-0">
-                      <Link
+                      <Link prefetch={false}
                         href={`/console/clinics/${clinic.id}/branches/${branch.id}`}
                         className="text-sm hover:underline"
                       >
@@ -331,7 +331,7 @@ function AttentionCard({
 function AccountRow({ account }: { account: OverviewAccount }) {
   return (
     <div className="px-4 py-2">
-      <Link href={`/console/users/${account.id}`} className="text-sm font-medium hover:underline">
+      <Link prefetch={false} href={`/console/users/${account.id}`} className="text-sm font-medium hover:underline">
         {account.name}
       </Link>
       <p className="truncate text-xs text-muted-foreground">

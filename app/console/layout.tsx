@@ -1,22 +1,18 @@
-import { redirect } from "next/navigation"
-import { auth } from "@/auth"
-import { navForRole } from "@/lib/nav"
-import { getAppName } from "@/lib/branding"
-import { AppHeader } from "@/components/nav/app-header"
+import { Suspense } from "react"
+import { ShellHeader, ShellHeaderSkeleton } from "@/components/nav/shell-header"
 
-export default async function ConsoleLayout({ children }: { children: React.ReactNode }) {
-  const session = await auth()
-  if (!session?.user) redirect("/login")
-
-  const nav = navForRole(session.user.role)
-
+/**
+ * Deliberately not `async` and deliberately awaiting nothing: a top-level
+ * await here (this used to call `auth()` and `getAppName()`) blocks every
+ * navigation on the layout and suppresses `loading.tsx` for every page
+ * below it. See components/nav/shell-header.tsx.
+ */
+export default function ConsoleLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-full flex-col">
-      <AppHeader
-        navItems={nav}
-        userLabel={`${session.user.name} · ${session.user.role.replace("_", " ")}`}
-        brand={await getAppName()}
-      />
+      <Suspense fallback={<ShellHeaderSkeleton />}>
+        <ShellHeader showRole />
+      </Suspense>
       <main className="flex-1 p-4 sm:p-6">{children}</main>
     </div>
   )
