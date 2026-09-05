@@ -1,7 +1,5 @@
-import { redirect } from "next/navigation"
-import { auth } from "@/auth"
-import { getAppName } from "@/lib/branding"
-import { AppHeader } from "@/components/nav/app-header"
+import { Suspense } from "react"
+import { ShellHeader, ShellHeaderSkeleton } from "@/components/nav/shell-header"
 
 const STAFF_NAV = [
   { label: "Queue", href: "/staff/queue" },
@@ -13,13 +11,13 @@ const STAFF_NAV = [
   { label: "Remittance", href: "/staff/remittance" },
 ]
 
-export default async function StaffLayout({ children }: { children: React.ReactNode }) {
-  const session = await auth()
-  if (!session?.user) redirect("/login")
-
+/** Not async on purpose — see components/nav/shell-header.tsx. */
+export default function StaffLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-full flex-col">
-      <AppHeader navItems={STAFF_NAV} userLabel={session.user.name ?? ""} brand={await getAppName()} />
+      <Suspense fallback={<ShellHeaderSkeleton />}>
+        <ShellHeader navItems={STAFF_NAV} />
+      </Suspense>
       <main className="flex-1 p-4 sm:p-6">{children}</main>
     </div>
   )

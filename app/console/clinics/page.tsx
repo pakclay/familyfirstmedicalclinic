@@ -44,7 +44,7 @@ export default async function ClinicsPage() {
       <ul className="mt-4 divide-y divide-border rounded-md border border-border">
         {clinics.map((c) => (
           <li key={c.id} className="flex items-center justify-between px-4 py-3">
-            <Link href={`/console/clinics/${c.id}`} className="font-medium hover:underline">
+            <Link prefetch={false} href={`/console/clinics/${c.id}`} className="font-medium hover:underline">
               {c.name}
             </Link>
           </li>

@@ -38,7 +38,7 @@ export default async function ReportsPage({
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-heading font-semibold">Consolidated reports</h1>
           <Button asChild variant="outline" size="sm">
-            <Link href={`/api/reports/holding?start=${report.startLabel}&end=${report.endLabel}`}>Download CSV</Link>
+            <Link prefetch={false} href={`/api/reports/holding?start=${report.startLabel}&end=${report.endLabel}`}>Download CSV</Link>
           </Button>
         </div>
         <div className="mt-3">
@@ -119,10 +119,10 @@ export default async function ReportsPage({
         <h1 className="text-2xl font-heading font-semibold">Reports</h1>
         <div className="flex gap-2">
           <Button asChild variant="outline" size="sm">
-            <Link href={`/api/reports/clinic?start=${branchReport.startLabel}&end=${branchReport.endLabel}`}>Clinic CSV</Link>
+            <Link prefetch={false} href={`/api/reports/clinic?start=${branchReport.startLabel}&end=${branchReport.endLabel}`}>Clinic CSV</Link>
           </Button>
           <Button asChild variant="outline" size="sm">
-            <Link href={`/api/reports/inventory?start=${inventoryReport.startLabel}&end=${inventoryReport.endLabel}`}>Inventory CSV</Link>
+            <Link prefetch={false} href={`/api/reports/inventory?start=${inventoryReport.startLabel}&end=${inventoryReport.endLabel}`}>Inventory CSV</Link>
           </Button>
         </div>
       </div>
@@ -180,7 +180,7 @@ export default async function ReportsPage({
             {inventoryReport.rows.map((r) => (
               <tr key={r.medicineId} className="border-b border-border">
                 <td className="py-2">
-                  <Link href={`/staff/inventory/${r.medicineId}`} className="hover:underline">
+                  <Link prefetch={false} href={`/staff/inventory/${r.medicineId}`} className="hover:underline">
                     {r.medicineName}
                   </Link>
                 </td>

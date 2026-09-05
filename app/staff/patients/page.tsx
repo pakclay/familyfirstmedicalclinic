@@ -47,7 +47,7 @@ export default async function StaffPatientsPage({
       <ul className="mt-4 divide-y divide-border rounded-md border border-border">
         {patients.map((p) => (
           <li key={p.id}>
-            <Link
+            <Link prefetch={false}
               href={`/staff/patients/${p.id}`}
               className="flex items-center justify-between px-4 py-3 text-sm hover:bg-accent"
             >

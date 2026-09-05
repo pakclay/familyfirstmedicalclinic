@@ -40,7 +40,7 @@ export default async function UsersPage() {
         {users.map((u) => (
           <li key={u.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
-              <Link href={`/console/users/${u.id}`} className="font-medium hover:underline">
+              <Link prefetch={false} href={`/console/users/${u.id}`} className="font-medium hover:underline">
                 {u.name}
               </Link>
               {!u.isActive && <span className="ml-2 text-xs text-destructive">Inactive</span>}

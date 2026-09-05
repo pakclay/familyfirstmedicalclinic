@@ -96,7 +96,7 @@ export default async function InventoryListPage({
       <ul className="mt-4 divide-y divide-border rounded-md border border-border">
         {medicines.map((m) => (
           <li key={m.id}>
-            <Link href={`/staff/inventory/${m.id}`} className="flex items-center justify-between px-4 py-3 text-sm hover:bg-accent">
+            <Link prefetch={false} href={`/staff/inventory/${m.id}`} className="flex items-center justify-between px-4 py-3 text-sm hover:bg-accent">
               <div>
                 <p>
                   {m.name} {m.strength}

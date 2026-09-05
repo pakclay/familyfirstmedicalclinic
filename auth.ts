@@ -1,3 +1,4 @@
+import { cache } from "react"
 import NextAuth from "next-auth"
 import Credentials from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
@@ -5,7 +6,12 @@ import { prisma } from "@/lib/db/prisma"
 import { authConfig } from "@/auth.config"
 import { isLockedOut, recordFailedLogin, recordSuccessfulLogin } from "@/lib/queries/users"
 
-export const { handlers, signIn, signOut, auth } = NextAuth({
+const {
+  handlers,
+  signIn,
+  signOut,
+  auth: uncachedAuth,
+} = NextAuth({
   ...authConfig,
   providers: [
     Credentials({
@@ -112,3 +118,34 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     },
   },
 })
+
+export { handlers, signIn, signOut }
+
+/**
+ * Request-memoised `auth()`.
+ *
+ * The `jwt` callback above re-reads the user row on every invocation, and
+ * `auth()` is called several times while rendering one page — the shell
+ * header needs the session, and so does each page, independently. Measured
+ * on `/console/users`, that was three identical
+ * `SELECT ... FROM users WHERE id = $1` round trips for a single
+ * navigation. Against a database in another region that is most of the
+ * page's latency, and it is pure duplication: all three run within one
+ * request and cannot disagree.
+ *
+ * React's `cache` collapses them to one *per request*, which leaves the
+ * isActive re-check exactly as strong as it was — the guarantee is that a
+ * deactivation takes effect on the user's next navigation, and the lookup
+ * still happens once on every navigation. It is not a TTL and nothing is
+ * shared between requests or between users.
+ *
+ * It also makes the fail-open path above resolve once rather than three
+ * times: a transient query failure now yields one outcome for the whole
+ * request, instead of the header and the page each rolling the dice
+ * separately and potentially disagreeing.
+ *
+ * Every caller uses the no-argument form, so the wrapper only needs that
+ * one; proxy.ts builds its own Prisma-free instance from auth.config.ts
+ * and is unaffected.
+ */
+export const auth = cache(() => uncachedAuth())
