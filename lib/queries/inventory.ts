@@ -4,9 +4,9 @@ import { ForbiddenError } from "@/lib/permissions/errors"
 import { toMedicineDetailDTO, type MedicineDetailDTO, type StockMovementDTO } from "@/lib/dto/medicine"
 import { medicineCatalogSchema, receiveStockSchema, physicalCountSchema } from "@/lib/validation/medicine"
 
-function requireClinicAdmin(user: AbilitySubject) {
-  if (user.role !== "CLINIC_ADMIN") {
-    throw new ForbiddenError("Only a clinic admin can manage the medicine catalog")
+function requireBranchAdmin(user: AbilitySubject) {
+  if (user.role !== "BRANCH_ADMIN") {
+    throw new ForbiddenError("Only a branch admin can manage the medicine catalog")
   }
 }
 
@@ -73,9 +73,9 @@ export async function getMedicineWithLedger(user: AbilitySubject, medicineId: st
   })
 }
 
-/** §9 Clinic Admin: "manage medicine catalog (add, edit, set reorder level and prices, deactivate)." */
+/** §9 Branch Admin: "manage medicine catalog (add, edit, set reorder level and prices, deactivate)." */
 export async function createMedicine(user: AbilitySubject, input: unknown): Promise<MedicineDetailDTO> {
-  requireClinicAdmin(user)
+  requireBranchAdmin(user)
   const branchId = requireBranchId(user)
   const parsed = medicineCatalogSchema.parse(input)
 
@@ -104,7 +104,7 @@ export async function createMedicine(user: AbilitySubject, input: unknown): Prom
 
 /** Catalog fields only — never `currentStock`, which changes exclusively through a StockMovement (§6). */
 export async function updateMedicine(user: AbilitySubject, medicineId: string, input: unknown): Promise<MedicineDetailDTO> {
-  requireClinicAdmin(user)
+  requireBranchAdmin(user)
   const branchId = requireBranchId(user)
   const parsed = medicineCatalogSchema.parse(input)
 
@@ -135,7 +135,7 @@ export async function updateMedicine(user: AbilitySubject, medicineId: string, i
 
 /** §7.5 "Stock in": writes a receipt movement and raises current_stock. */
 export async function receiveStock(user: AbilitySubject, input: unknown): Promise<MedicineDetailDTO> {
-  if (user.role !== "CLINIC_ADMIN" && user.role !== "FRONT_DESK") {
+  if (user.role !== "BRANCH_ADMIN" && user.role !== "FRONT_DESK") {
     throw new ForbiddenError("Only clinic staff can receive stock")
   }
   const branchId = requireBranchId(user)
@@ -189,7 +189,7 @@ export type PhysicalCountResult = { totalVarianceCentavos: number; discrepancies
 
 /** §7.5 "Physical count": one adjustment movement per discrepancy, with a required reason, and the total variance in pesos. */
 export async function submitPhysicalCount(user: AbilitySubject, input: unknown): Promise<PhysicalCountResult> {
-  if (user.role !== "CLINIC_ADMIN" && user.role !== "FRONT_DESK") {
+  if (user.role !== "BRANCH_ADMIN" && user.role !== "FRONT_DESK") {
     throw new ForbiddenError("Only clinic staff can submit a physical count")
   }
   const branchId = requireBranchId(user)
@@ -244,7 +244,7 @@ export async function submitPhysicalCount(user: AbilitySubject, input: unknown):
 /**
  * §7.5 "Corrections": editing or deleting a dispensed row after saving
  * writes a compensating `return` movement rather than editing the
- * original — stock history is append-only. Scoped to clinic admins: a
+ * original — stock history is append-only. Scoped to branch admins: a
  * correction is an oversight action on an already-saved clinical/
  * financial record, not something the original doctor should be able to
  * quietly undo unilaterally after the fact.
@@ -254,7 +254,7 @@ export async function deleteDispensedMedicine(
   medicineDispensedId: string,
   reason: string
 ): Promise<void> {
-  requireClinicAdmin(user)
+  requireBranchAdmin(user)
   const branchId = requireBranchId(user)
   if (!reason.trim()) throw new Error("A reason is required to delete a dispensed medicine")
 
@@ -301,7 +301,7 @@ export type InventoryDashboardPanels = {
   expired: MedicineDetailDTO[]
 }
 
-/** §7.5 / §9 Clinic Admin dashboard panels. */
+/** §7.5 / §9 Branch Admin dashboard panels. */
 export async function getInventoryDashboardPanels(user: AbilitySubject): Promise<InventoryDashboardPanels> {
   const all = await listMedicines(user)
   return {

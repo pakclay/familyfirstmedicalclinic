@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import NextAuth from "next-auth"
 import { authConfig } from "@/auth.config"
+import type { Role } from "@prisma/client"
 
 // Uses the edge-safe config directly (not auth.ts's full config), even
 // though proxy.ts runs on the Node.js runtime (unlike the old middleware.ts
@@ -17,10 +18,10 @@ import { authConfig } from "@/auth.config"
 // auth.config.ts.
 const { auth } = NextAuth(authConfig)
 
-const ROLE_HOME: Record<string, string> = {
+const ROLE_HOME: Record<Role, string> = {
   FRONT_DESK: "/staff/queue",
   DOCTOR: "/doctor/queue",
-  CLINIC_ADMIN: "/console/dashboard",
+  BRANCH_ADMIN: "/console/dashboard",
   HOLDING_ADMIN: "/console/dashboard",
 }
 
@@ -31,10 +32,10 @@ const PUBLIC_PREFIXES = ["/book/", "/q/", "/display/", "/login", "/api/auth"]
 
 // Which roles may enter each authenticated shell. Checked in order — the
 // first matching prefix wins, so a more specific prefix must come first.
-const SECTION_ACCESS: { prefix: string; roles: string[] }[] = [
-  { prefix: "/staff", roles: ["FRONT_DESK", "CLINIC_ADMIN", "HOLDING_ADMIN"] },
+const SECTION_ACCESS: { prefix: string; roles: Role[] }[] = [
+  { prefix: "/staff", roles: ["FRONT_DESK", "BRANCH_ADMIN", "HOLDING_ADMIN"] },
   { prefix: "/doctor", roles: ["DOCTOR"] },
-  { prefix: "/console", roles: ["CLINIC_ADMIN", "HOLDING_ADMIN"] },
+  { prefix: "/console", roles: ["BRANCH_ADMIN", "HOLDING_ADMIN"] },
 ]
 
 export default auth((req) => {
@@ -59,7 +60,7 @@ export default auth((req) => {
   }
 
   const role = session.user.role
-  const section = SECTION_ACCESS.find((s) => pathname.startsWith(s.prefix))
+  const section = SECTION_ACCESS.find((s) => pathname === s.prefix || pathname.startsWith(s.prefix + "/"))
   if (section && !section.roles.includes(role)) {
     return NextResponse.redirect(new URL(ROLE_HOME[role] ?? "/login", req.nextUrl.origin))
   }

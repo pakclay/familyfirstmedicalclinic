@@ -13,11 +13,11 @@ export default async function ExpensesPage({
 }) {
   const session = await auth()
   if (!session?.user) redirect("/login")
-  if (session.user.role !== "CLINIC_ADMIN") {
+  if (session.user.role !== "BRANCH_ADMIN") {
     return (
       <div>
         <h1 className="text-2xl font-heading font-semibold">Expenses</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Only a clinic admin manages expenses.</p>
+        <p className="mt-2 text-sm text-muted-foreground">Only a branch admin manages expenses.</p>
       </div>
     )
   }

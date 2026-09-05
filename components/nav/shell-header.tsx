@@ -3,6 +3,7 @@ import { auth } from "@/auth"
 import { getAppName } from "@/lib/branding"
 import { navForRole } from "@/lib/nav"
 import { AppHeader, type HeaderNavItem } from "./app-header"
+import { ROLE_LABEL } from "@/lib/dto/user"
 import { Skeleton } from "@/components/ui/skeleton"
 
 /**
@@ -43,7 +44,7 @@ export async function ShellHeader({
 
   const items = navItems ?? navForRole(session.user.role)
   const userLabel = showRole
-    ? `${session.user.name} · ${session.user.role.replace("_", " ")}`
+    ? `${session.user.name} · ${ROLE_LABEL[session.user.role]}`
     : session.user.name ?? ""
 
   return <AppHeader navItems={items} userLabel={userLabel} brand={brand} />

@@ -148,10 +148,10 @@ describe("vitals", () => {
     expect(row.vitalsRecordedById).toBe(frontDeskA.id)
   })
 
-  it("lets a doctor record them too, and a clinic admin", async () => {
+  it("lets a doctor record them too, and a branch admin", async () => {
     expect((await recordVitals(doctorA, entryA.id, { temp: "37.0" })).ok).toBe(true)
-    const clinicAdmin: AbilitySubject = { ...frontDeskA, role: Role.CLINIC_ADMIN }
-    expect((await recordVitals(clinicAdmin, entryA.id, { pulse: "70" })).ok).toBe(true)
+    const branchAdmin: AbilitySubject = { ...frontDeskA, role: Role.BRANCH_ADMIN }
+    expect((await recordVitals(branchAdmin, entryA.id, { pulse: "70" })).ok).toBe(true)
   })
 
   it("drops blank fields rather than storing them as empty strings", async () => {

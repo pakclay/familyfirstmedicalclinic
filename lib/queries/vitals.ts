@@ -2,7 +2,7 @@ import { runWithRls } from "@/lib/db/rls"
 import { requireBranchId, type AbilitySubject } from "@/lib/permissions/ability"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import { vitalsSchema, toStoredVitals, isEmptyVitals } from "@/lib/validation/vitals"
-import type { Prisma } from "@prisma/client"
+import type { Prisma, Role } from "@prisma/client"
 
 /**
  * Recording triage vitals against a visit.
@@ -29,13 +29,13 @@ export type RecordVitalsResult = { ok: true; vitals: VitalsDTO } | { ok: false; 
 
 /**
  * Anyone physically present with the patient. §4 puts front desk on
- * check-in and doctors in the consultation room; a clinic admin covers the
+ * check-in and doctors in the consultation room; a branch admin covers the
  * desk in practice. A holding admin is excluded deliberately — they have no
  * branch, so requireBranchId below would throw anyway, and someone
  * administering the company from elsewhere has no business entering a
  * clinical measurement they did not take.
  */
-const CAN_RECORD_VITALS = ["FRONT_DESK", "DOCTOR", "CLINIC_ADMIN"] as const
+const CAN_RECORD_VITALS: readonly Role[] = ["FRONT_DESK", "DOCTOR", "BRANCH_ADMIN"]
 
 function vitalsInclude() {
   return { vitalsRecordedBy: { select: { name: true } } } satisfies Prisma.QueueEntryInclude
@@ -70,7 +70,7 @@ export async function recordVitals(
   queueEntryId: string,
   input: unknown
 ): Promise<RecordVitalsResult> {
-  if (!CAN_RECORD_VITALS.includes(user.role as (typeof CAN_RECORD_VITALS)[number])) {
+  if (!CAN_RECORD_VITALS.includes(user.role)) {
     return { ok: false, error: "Only clinic staff can record vitals." }
   }
 

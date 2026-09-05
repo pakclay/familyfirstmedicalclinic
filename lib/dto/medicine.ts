@@ -32,7 +32,7 @@ export function toMedicineOptionDTO(m: Medicine): MedicineOptionDTO {
   }
 }
 
-/** Full detail for the inventory screens (staff/clinic admin) — unlike the picker DTO, includes cost basis for valuation (§8). */
+/** Full detail for the inventory screens (staff/branch admin) — unlike the picker DTO, includes cost basis for valuation (§8). */
 export type MedicineDetailDTO = {
   id: string
   name: string

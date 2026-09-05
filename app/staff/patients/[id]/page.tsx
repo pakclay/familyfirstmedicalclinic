@@ -118,7 +118,7 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
                     <DispensedMedicineList
                       patientId={id}
                       medicines={consultation.medicines}
-                      canDelete={session.user.role === "CLINIC_ADMIN"}
+                      canDelete={session.user.role === "BRANCH_ADMIN"}
                     />
                   )}
                 </div>

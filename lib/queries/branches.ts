@@ -14,7 +14,7 @@ import type { OperatingHours } from "@/lib/validation/operating-hours"
 
 /**
  * Branch management (create/edit/list/deactivate any branch, under any
- * clinic) is holding-admin-only (§4's role table) — a clinic admin runs
+ * clinic) is holding-admin-only (§4's role table) — a branch admin runs
  * one branch, they don't get to create or reconfigure others. The action
  * layer already refuses anyone else, but every function here re-checks:
  * `branches` has no RLS policy of its own (same reasoning as `clinics`
@@ -198,14 +198,14 @@ export async function setBranchActive(
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Own-branch self-service (clinic admin) — §4's "clinic hours" row
+// Own-branch self-service (branch admin) — §4's "clinic hours" row
 // ─────────────────────────────────────────────────────────────────────────
 
 /**
  * Neither function below takes a branch id, by design. §5's hard rule is
  * that clinic/branch scoping comes from the authenticated user's
  * assignment and "never from a client-supplied parameter" — with no id in
- * the signature there is nothing for a caller to pass, so a clinic admin
+ * the signature there is nothing for a caller to pass, so a branch admin
  * cannot reach another branch's row even if the action layer were bypassed
  * entirely.
  *
@@ -214,10 +214,10 @@ export async function setBranchActive(
  * branch-settings page wired to them was the exact regression a review of
  * the original clinics feature warned about.
  */
-const NOT_A_CLINIC_ADMIN = "Only a clinic admin manages their branch's settings."
+const NOT_A_BRANCH_ADMIN = "Only a branch admin manages their branch's settings."
 
 /**
- * Gated on *having* an own branch rather than on being a clinic admin:
+ * Gated on *having* an own branch rather than on being a branch admin:
  * everything here (name, address, phone, hours) is already on the branch's
  * public `/book/{slug}` page, so it's not privileged reading for anyone
  * assigned to it. Writing it is — that's `updateOwnBranchSettings`, which
@@ -241,7 +241,7 @@ export async function updateOwnBranchSettings(
   actor: AbilitySubject,
   input: BranchSettingsInput
 ): Promise<ManageBranchResult> {
-  if (actor.role !== "CLINIC_ADMIN") return { ok: false, error: NOT_A_CLINIC_ADMIN }
+  if (actor.role !== "BRANCH_ADMIN") return { ok: false, error: NOT_A_BRANCH_ADMIN }
   const branchId = requireBranchId(actor)
 
   await runWithRls(actor, async (tx) => {

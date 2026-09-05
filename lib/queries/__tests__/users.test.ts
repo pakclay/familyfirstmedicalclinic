@@ -157,7 +157,7 @@ describe("user management", () => {
   let holding: { id: string }
   let branchA: { id: string }
   let branchB: { id: string }
-  let clinicAdminA: AbilitySubject
+  let branchAdminA: AbilitySubject
   let holdingAdmin: AbilitySubject
   let frontDeskInA: { id: string }
   let frontDeskInB: { id: string }
@@ -195,10 +195,10 @@ describe("user management", () => {
         name: "Clinic A Admin",
         email: `admin-a-${Date.now()}@test.local`,
         passwordHash: "x",
-        role: Role.CLINIC_ADMIN,
+        role: Role.BRANCH_ADMIN,
       },
     })
-    clinicAdminA = { id: adminUser.id, role: Role.CLINIC_ADMIN, branchId: branchA.id, holdingCompanyId: null }
+    branchAdminA = { id: adminUser.id, role: Role.BRANCH_ADMIN, branchId: branchA.id, holdingCompanyId: null }
 
     const holdingUser = await superuserPrisma.user.create({
       data: {
@@ -250,8 +250,8 @@ describe("user management", () => {
     await prisma.$disconnect()
   })
 
-  it("lets a clinic admin create a front desk account in their own branch", async () => {
-    const result = await createUser(clinicAdminA, {
+  it("lets a branch admin create a front desk account in their own branch", async () => {
+    const result = await createUser(branchAdminA, {
       name: "New Staff",
       email: `new-staff-${Date.now()}@test.local`,
       role: "FRONT_DESK",
@@ -268,17 +268,17 @@ describe("user management", () => {
     expect(log).toBeTruthy()
   })
 
-  it("blocks a clinic admin from creating a clinic admin account", async () => {
-    const result = await createUser(clinicAdminA, {
+  it("blocks a branch admin from creating a branch admin account", async () => {
+    const result = await createUser(branchAdminA, {
       name: "Sneaky Admin",
       email: `sneaky-${Date.now()}@test.local`,
-      role: "CLINIC_ADMIN",
+      role: "BRANCH_ADMIN",
     })
     expect(result).toEqual({ ok: false, error: "You can't create an account with that role." })
   })
 
-  it("ignores a clinic admin's attempt to assign a user to a different branch", async () => {
-    const result = await createUser(clinicAdminA, {
+  it("ignores a branch admin's attempt to assign a user to a different branch", async () => {
+    const result = await createUser(branchAdminA, {
       name: "Should Be In A",
       email: `should-be-a-${Date.now()}@test.local`,
       role: "FRONT_DESK",
@@ -316,8 +316,8 @@ describe("user management", () => {
     expect(second).toEqual({ ok: false, error: "An account with that email already exists." })
   })
 
-  it("scopes listUsers to the clinic admin's own branch, front desk/doctor only", async () => {
-    const rows = await listUsers(clinicAdminA)
+  it("scopes listUsers to the branch admin's own branch, front desk/doctor only", async () => {
+    const rows = await listUsers(branchAdminA)
     expect(rows.some((r) => r.id === frontDeskInA.id)).toBe(true)
     expect(rows.some((r) => r.id === frontDeskInB.id)).toBe(false)
     expect(rows.every((r) => r.role === "FRONT_DESK" || r.role === "DOCTOR")).toBe(true)
@@ -329,34 +329,34 @@ describe("user management", () => {
     expect(rows.some((r) => r.id === frontDeskInB.id)).toBe(true)
   })
 
-  it("returns null for a user outside the clinic admin's branch — not an error, not a leak", async () => {
-    const result = await getManagedUserById(clinicAdminA, frontDeskInB.id)
+  it("returns null for a user outside the branch admin's branch — not an error, not a leak", async () => {
+    const result = await getManagedUserById(branchAdminA, frontDeskInB.id)
     expect(result).toBeNull()
   })
 
-  it("lets a clinic admin update a front desk account in their branch", async () => {
-    const result = await updateUser(clinicAdminA, frontDeskInA.id, { name: "Front Desk A Renamed" })
+  it("lets a branch admin update a front desk account in their branch", async () => {
+    const result = await updateUser(branchAdminA, frontDeskInA.id, { name: "Front Desk A Renamed" })
     expect(result).toEqual({ ok: true })
     const row = await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInA.id } })
     expect(row.name).toBe("Front Desk A Renamed")
   })
 
-  it("blocks updating a user outside the clinic admin's branch", async () => {
-    const result = await updateUser(clinicAdminA, frontDeskInB.id, { name: "Hijacked" })
+  it("blocks updating a user outside the branch admin's branch", async () => {
+    const result = await updateUser(branchAdminA, frontDeskInB.id, { name: "Hijacked" })
     expect(result).toEqual({ ok: false, error: "User not found." })
   })
 
   it("prevents an admin from deactivating their own account", async () => {
-    const result = await setUserActive(clinicAdminA, clinicAdminA.id, false)
+    const result = await setUserActive(branchAdminA, branchAdminA.id, false)
     expect(result).toEqual({ ok: false, error: "You can't deactivate your own account." })
   })
 
   it("deactivates and reactivates a managed account, audit-logging each", async () => {
-    const off = await setUserActive(clinicAdminA, frontDeskInA.id, false)
+    const off = await setUserActive(branchAdminA, frontDeskInA.id, false)
     expect(off).toEqual({ ok: true })
     expect((await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInA.id } })).isActive).toBe(false)
 
-    const on = await setUserActive(clinicAdminA, frontDeskInA.id, true)
+    const on = await setUserActive(branchAdminA, frontDeskInA.id, true)
     expect(on).toEqual({ ok: true })
     expect((await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInA.id } })).isActive).toBe(true)
 
@@ -368,14 +368,14 @@ describe("user management", () => {
 
   it("forces a password reset", async () => {
     await superuserPrisma.user.update({ where: { id: frontDeskInA.id }, data: { mustChangePassword: false } })
-    const result = await forcePasswordReset(clinicAdminA, frontDeskInA.id)
+    const result = await forcePasswordReset(branchAdminA, frontDeskInA.id)
     expect(result).toEqual({ ok: true })
     expect((await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInA.id } })).mustChangePassword).toBe(
       true
     )
   })
 
-  it("promotes a front desk account to clinic admin", async () => {
+  it("promotes a front desk account to branch admin", async () => {
     const u = await superuserPrisma.user.create({
       data: {
         branchId: branchA.id,
@@ -385,9 +385,9 @@ describe("user management", () => {
         role: Role.FRONT_DESK,
       },
     })
-    expect(await changeUserRole(holdingAdmin, u.id, { role: "CLINIC_ADMIN" })).toEqual({ ok: true })
+    expect(await changeUserRole(holdingAdmin, u.id, { role: "BRANCH_ADMIN" })).toEqual({ ok: true })
     const row = await superuserPrisma.user.findUniqueOrThrow({ where: { id: u.id } })
-    expect(row.role).toBe(Role.CLINIC_ADMIN)
+    expect(row.role).toBe(Role.BRANCH_ADMIN)
     // Keeps the branch it already had — a straight role change should not
     // require restating where someone works.
     expect(row.branchId).toBe(branchA.id)
@@ -395,7 +395,7 @@ describe("user management", () => {
     const log = await superuserPrisma.auditLog.findFirst({
       where: { entityId: u.id, action: "user.role_changed" },
     })
-    expect(log!.changes).toMatchObject({ fromRole: "FRONT_DESK", toRole: "CLINIC_ADMIN" })
+    expect(log!.changes).toMatchObject({ fromRole: "FRONT_DESK", toRole: "BRANCH_ADMIN" })
   })
 
   it("creates a Doctor record when promoting to doctor, and reuses it on re-promotion", async () => {
@@ -458,7 +458,7 @@ describe("user management", () => {
         name: "Future Owner",
         email: `futureowner-${Date.now()}@test.local`,
         passwordHash: "x",
-        role: Role.CLINIC_ADMIN,
+        role: Role.BRANCH_ADMIN,
       },
     })
     expect(await changeUserRole(holdingAdmin, u.id, { role: "HOLDING_ADMIN" })).toEqual({ ok: true })
@@ -493,7 +493,7 @@ describe("user management", () => {
     }
 
     // The acting admin cannot demote themselves...
-    expect(await changeUserRole(otherSubject, other.id, { role: "CLINIC_ADMIN", branchId: branchA.id })).toEqual({
+    expect(await changeUserRole(otherSubject, other.id, { role: "BRANCH_ADMIN", branchId: branchA.id })).toEqual({
       ok: false,
       error: "You can't change your own role — ask another holding admin.",
     })
@@ -501,7 +501,7 @@ describe("user management", () => {
     // ...and demoting the *other* one leaves the actor in place, so an admin
     // always remains.
     expect(
-      await changeUserRole(otherSubject, holdingAdmin.id, { role: "CLINIC_ADMIN", branchId: branchA.id })
+      await changeUserRole(otherSubject, holdingAdmin.id, { role: "BRANCH_ADMIN", branchId: branchA.id })
     ).toEqual({ ok: true })
     const stillAdmin = await superuserPrisma.user.count({
       where: { role: Role.HOLDING_ADMIN, isActive: true, holdingCompanyId: holding.id },
@@ -527,7 +527,7 @@ describe("user management", () => {
 
   it("refuses a role change from anyone who isn't a holding admin", async () => {
     const before = await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInA.id } })
-    expect(await changeUserRole(clinicAdminA, frontDeskInA.id, { role: "CLINIC_ADMIN" })).toEqual({
+    expect(await changeUserRole(branchAdminA, frontDeskInA.id, { role: "BRANCH_ADMIN" })).toEqual({
       ok: false,
       error: "Only a holding admin can change a role.",
     })
@@ -653,8 +653,8 @@ describe("user management", () => {
   })
 
   it("refuses to issue the actor their own new password", async () => {
-    const before = await superuserPrisma.user.findUniqueOrThrow({ where: { id: clinicAdminA.id } })
-    const result = await regenerateTempPassword(clinicAdminA, clinicAdminA.id)
+    const before = await superuserPrisma.user.findUniqueOrThrow({ where: { id: branchAdminA.id } })
+    const result = await regenerateTempPassword(branchAdminA, branchAdminA.id)
     expect(result).toEqual({
       ok: false,
       error: "You can't issue yourself a new password — ask another admin.",
@@ -662,13 +662,13 @@ describe("user management", () => {
     // changeOwnPassword requires the current password, so self-service here
     // would let a stolen session rotate its own credentials and lock the
     // real owner out. The hash must be untouched.
-    const after = await superuserPrisma.user.findUniqueOrThrow({ where: { id: clinicAdminA.id } })
+    const after = await superuserPrisma.user.findUniqueOrThrow({ where: { id: branchAdminA.id } })
     expect(after.passwordHash).toBe(before.passwordHash)
   })
 
   it("refuses to issue a password for a user outside the actor's branch", async () => {
     const before = await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInB.id } })
-    const result = await regenerateTempPassword(clinicAdminA, frontDeskInB.id)
+    const result = await regenerateTempPassword(branchAdminA, frontDeskInB.id)
     expect(result).toEqual({ ok: false, error: "User not found." })
     const after = await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInB.id } })
     expect(after.passwordHash).toBe(before.passwordHash)
@@ -679,7 +679,7 @@ describe("user management", () => {
       where: { id: frontDeskInA.id },
       data: { failedLoginAttempts: 4, lockedUntil: new Date(Date.now() + 60_000) },
     })
-    const result = await unlockAccount(clinicAdminA, frontDeskInA.id)
+    const result = await unlockAccount(branchAdminA, frontDeskInA.id)
     expect(result).toEqual({ ok: true })
     const row = await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInA.id } })
     expect(row.failedLoginAttempts).toBe(0)
@@ -706,7 +706,7 @@ describe("updateUser — branch reassignment", () => {
   let branchB: { id: string }
   let inactiveBranch: { id: string }
   let holdingAdmin: AbilitySubject
-  let clinicAdminA: AbilitySubject
+  let branchAdminA: AbilitySubject
   let frontDeskInA: { id: string }
   let doctorUserId: string
   let doctorRowId: string
@@ -758,13 +758,13 @@ describe("updateUser — branch reassignment", () => {
     const admin = await superuserPrisma.user.create({
       data: {
         branchId: branchA.id,
-        name: "Move Clinic Admin A",
+        name: "Move Branch Admin A",
         email: `move-admin-a-${stamp}@test.local`,
         passwordHash: "x",
-        role: Role.CLINIC_ADMIN,
+        role: Role.BRANCH_ADMIN,
       },
     })
-    clinicAdminA = { id: admin.id, role: Role.CLINIC_ADMIN, branchId: branchA.id, holdingCompanyId: null }
+    branchAdminA = { id: admin.id, role: Role.BRANCH_ADMIN, branchId: branchA.id, holdingCompanyId: null }
 
     frontDeskInA = await superuserPrisma.user.create({
       data: {
@@ -942,8 +942,8 @@ describe("updateUser — branch reassignment", () => {
     )
   })
 
-  it("refuses a clinic admin moving their own staff into another branch", async () => {
-    const result = await updateUser(clinicAdminA, frontDeskInA.id, {
+  it("refuses a branch admin moving their own staff into another branch", async () => {
+    const result = await updateUser(branchAdminA, frontDeskInA.id, {
       name: "Move Front Desk A",
       branchId: siblingOfA.id,
     })
@@ -951,7 +951,7 @@ describe("updateUser — branch reassignment", () => {
       ok: false,
       error: "Only a holding admin can move a user to another branch.",
     })
-    // A clinic admin is confined to their own branch by canManageTarget, so
+    // A branch admin is confined to their own branch by canManageTarget, so
     // without this check the move would be a one-way exit from their scope.
     expect((await superuserPrisma.user.findUniqueOrThrow({ where: { id: frontDeskInA.id } })).branchId).toBe(branchA.id)
   })
@@ -1007,15 +1007,15 @@ describe("updateUser — branch reassignment", () => {
     expect(inSibling.some((u) => u.id === moved.id)).toBe(true)
   })
 
-  it("listUsersForBranch gives a clinic admin their own branch and nothing else", async () => {
-    const own = await listUsersForBranch(clinicAdminA, branchA.id)
+  it("listUsersForBranch gives a branch admin their own branch and nothing else", async () => {
+    const own = await listUsersForBranch(branchAdminA, branchA.id)
     expect(own.some((u) => u.id === frontDeskInA.id)).toBe(true)
-    // Clinic admins see front desk/doctor only — not their own peer row.
+    // Branch admins see front desk/doctor only — not their own peer row.
     expect(own.every((u) => u.role === "FRONT_DESK" || u.role === "DOCTOR")).toBe(true)
 
     // A sibling branch under the same clinic is not theirs to inspect.
-    expect(await listUsersForBranch(clinicAdminA, siblingOfA.id)).toEqual([])
-    expect(await listUsersForBranch(clinicAdminA, branchB.id)).toEqual([])
+    expect(await listUsersForBranch(branchAdminA, siblingOfA.id)).toEqual([])
+    expect(await listUsersForBranch(branchAdminA, branchB.id)).toEqual([])
   })
 
   it("keeps listUsersForClinic consistent with the move", async () => {

@@ -12,7 +12,7 @@ export default async function NewUserPage({
   const { clinicId, branchId } = await searchParams
   const session = await auth()
   if (!session?.user) redirect("/login")
-  if (session.user.role !== "HOLDING_ADMIN" && session.user.role !== "CLINIC_ADMIN") {
+  if (session.user.role !== "HOLDING_ADMIN" && session.user.role !== "BRANCH_ADMIN") {
     redirect("/console/users")
   }
 
@@ -24,7 +24,7 @@ export default async function NewUserPage({
   }
   const roles = assignableRoles(user)
 
-  // Only a holding admin ever sees the branch picker (a clinic admin is
+  // Only a holding admin ever sees the branch picker (a branch admin is
   // always creating within their own branch, decided server-side in
   // createUser regardless of what a form field might say) — no RLS on
   // `branches` either, but this is a read-only lookup list, not a write.

@@ -9,6 +9,60 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-09-06 — CLINIC_ADMIN renamed to BRANCH_ADMIN
+
+The role called CLINIC_ADMIN has been branch-scoped since the branch
+hierarchy landed (2026-08-24, "CLINIC_ADMIN stays single-location"): it has
+a `branchId` and runs exactly one location. The name predates branches as a
+tier and, once a genuine clinic-level admin was asked for, described the
+wrong thing. Renamed to what it is; the name CLINIC_ADMIN is freed for the
+clinic-level role that follows in its own entry.
+
+- **A rename, not a new role.** Every existing account keeps exactly the
+  access it has. `ALTER TYPE "Role" RENAME VALUE` preserves the enum's OID
+  and every row's value, so the accounts follow with no `UPDATE` and no
+  `WHERE` that could miss one. Prisma's own diff would emit a
+  create-new-type/swap sequence that cannot survive rows still holding the
+  old label — the migration is hand-written and must stay so.
+- **Shipped alone so the compiler does the sweep.** After the rename the
+  enum has no CLINIC_ADMIN member, so every stale `role === "CLINIC_ADMIN"`
+  is a TypeScript error rather than a silent grant to whatever that name
+  means next. That is why this lands as its own migration and commit, ahead
+  of reusing the name.
+- **Seven sites the compiler could not see** were the real risk, and each
+  was closed by giving it a type the enum can check, not by editing the
+  string: the two `z.enum([...])` role schemas in `lib/validation/user.ts`
+  are now `z.nativeEnum(Role)`; the two `ROLE_HOME` tables (`proxy.ts`,
+  `app/page.tsx`) and `SECTION_ACCESS`'s role lists are `Record<Role, …>` /
+  `Role[]` instead of `string`; and `lib/queries/vitals.ts`'s
+  `CAN_RECORD_VITALS` lost the cast that hid it — left alone, that one
+  would have handed clinical-vitals writes to the incoming
+  administration-only role. `ROLE_LABEL` and `ROLE_PROFILES` were already
+  made exhaustive (#47) for the same reason.
+- **`proxy.ts` now matches section prefixes exactly** (`/staff` or
+  `/staff/…`), where before `startsWith("/staff")` also matched `/staffroom`.
+  Found while retyping; corrected rather than preserved.
+- **Sessions do not self-heal, and are not signed out — they split.**
+  `auth()` re-reads the role on every request, so every page gate and
+  query sees BRANCH_ADMIN immediately. But the JWT cookie's `role` claim is
+  never rewritten: the RSC `auth()` path discards `Set-Cookie`, and
+  `proxy.ts` is built from `auth.config.ts`, which has no `jwt` callback,
+  so it re-issues the cookie with the stale claim indefinitely. Effect is
+  confined to proxy routing and is denial-only (a branch admin loses
+  `/staff` until they sign in again), never escalation. Rotating
+  `AUTH_SECRET` on deploy collapses it to one forced re-login.
+- **34 `audit_logs` rows carry `"CLINIC_ADMIN"` as free text in `changes`.**
+  `RENAME VALUE` cannot touch them, the table is append-only by design,
+  and the audit-log page renders `changes` as raw JSON. Accepted and
+  recorded here rather than backfilled: they describe the role as it was
+  named when the action happened, which is what an audit log is for.
+- **Prose followed the rename** in code comments, user-visible strings,
+  test names, SECURITY.md, DEMO.md and README.md. SPEC.md's role table is
+  deliberately untouched here — it changes in substance, not just name,
+  when the clinic-level role lands, and gets one coherent rewrite then.
+  Seeded emails (`admin.<branch-slug>@…`) are unchanged: DEMO.md names one
+  and muscle memory depends on them.
+
 ## 2026-09-05 — Console navigation latency
 
 Clicking a console nav item took ~3s in production while the same click took

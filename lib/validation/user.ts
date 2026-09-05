@@ -1,11 +1,12 @@
 import { z } from "zod"
+import { Role } from "@prisma/client"
 
 const baseUserFields = {
   name: z.string().trim().min(1, "Name is required"),
   email: z.string().trim().min(1, "Email is required").email("Enter a valid email"),
   phone: z.string().trim().optional(),
-  role: z.enum(["FRONT_DESK", "DOCTOR", "CLINIC_ADMIN", "HOLDING_ADMIN"]),
-  // Empty string for a clinic admin creating within their own branch — the
+  role: z.nativeEnum(Role),
+  // Empty string for a branch admin creating within their own branch — the
   // query layer fills that in; a holding admin must pick one explicitly
   // unless the role is HOLDING_ADMIN, which has no branch at all.
   branchId: z.string().optional(),
@@ -54,7 +55,7 @@ export const editUserSchema = z.object({
   licenseNumber: z.string().trim().optional(),
   consultationFeePesos: z.string().trim().optional(),
   // Which branch the user works at. Optional and absent-means-unchanged, so
-  // a form that never renders the picker (a clinic admin's, or a holding
+  // a form that never renders the picker (a branch admin's, or a holding
   // admin's own branchless account) can keep posting the same payload it
   // always has. updateUser decides whether the actor may act on it at all.
   branchId: z.string().optional(),
@@ -74,7 +75,7 @@ export type EditUserInput = z.infer<typeof editUserSchema>
  * side that can see whether one exists.
  */
 export const changeRoleSchema = z.object({
-  role: z.enum(["FRONT_DESK", "DOCTOR", "CLINIC_ADMIN", "HOLDING_ADMIN"]),
+  role: z.nativeEnum(Role),
   branchId: z.string().optional(),
   licenseNumber: z.string().trim().optional(),
   specialization: z.string().trim().optional(),

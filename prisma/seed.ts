@@ -137,17 +137,17 @@ async function main() {
         },
       })
 
-      const clinicAdminEmail = `admin.${b.slug}@familyfirst.example`
-      const clinicAdmin = await prisma.user.create({
+      const branchAdminEmail = `admin.${b.slug}@familyfirst.example`
+      const branchAdmin = await prisma.user.create({
         data: {
           branchId: branch.id,
-          name: `${b.city} Clinic Admin`,
-          email: clinicAdminEmail,
+          name: `${b.city} Branch Admin`,
+          email: branchAdminEmail,
           passwordHash,
-          role: Role.CLINIC_ADMIN,
+          role: Role.BRANCH_ADMIN,
         },
       })
-      createdUsers.push({ role: "CLINIC_ADMIN", email: clinicAdminEmail, branch: branchLabel })
+      createdUsers.push({ role: "BRANCH_ADMIN", email: branchAdminEmail, branch: branchLabel })
 
       // current_stock only ever changes through a stock_movements row (§6) —
       // seeding respects that too, rather than setting the field directly,
@@ -176,7 +176,7 @@ async function main() {
             quantityChange: m.stock,
             balanceAfter: m.stock,
             reason: "Initial stock (seed)",
-            performedByUserId: clinicAdmin.id,
+            performedByUserId: branchAdmin.id,
           },
         })
         await prisma.medicine.update({ where: { id: medicine.id }, data: { currentStock: m.stock } })

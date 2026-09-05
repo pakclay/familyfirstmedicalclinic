@@ -28,7 +28,7 @@ import type { AbilitySubject } from "@/lib/permissions/ability"
  */
 describe("inventory", () => {
   let branch: { id: string; timezone: string }
-  let clinicAdmin: AbilitySubject
+  let branchAdmin: AbilitySubject
   let frontDesk: AbilitySubject
   let doctorUser: AbilitySubject
   let doctorId: string
@@ -38,7 +38,7 @@ describe("inventory", () => {
   // Moving inventory from clinic_id to branch_id introduced a boundary no
   // cross-*clinic* fixture can exercise: two branches under ONE clinic.
   // `siblingBranch` is a second branch of this file's own clinic — the
-  // caller (`clinicAdmin`) shares a parent clinic with it and must still
+  // caller (`branchAdmin`) shares a parent clinic with it and must still
   // see nothing. `branchB` lives under a second clinic of the same holding
   // company and is the older cross-clinic control, kept alongside so both
   // boundaries are proved by the same tests.
@@ -153,9 +153,9 @@ describe("inventory", () => {
     branch = { id: branchRow.id, timezone: branchRow.timezone }
 
     const adminUser = await superuserPrisma.user.create({
-      data: { branchId: branch.id, name: "Admin", email: `admin-inv-${Date.now()}@test.local`, passwordHash: "x", role: Role.CLINIC_ADMIN },
+      data: { branchId: branch.id, name: "Admin", email: `admin-inv-${Date.now()}@test.local`, passwordHash: "x", role: Role.BRANCH_ADMIN },
     })
-    clinicAdmin = { id: adminUser.id, role: Role.CLINIC_ADMIN, branchId: branch.id, holdingCompanyId: null }
+    branchAdmin = { id: adminUser.id, role: Role.BRANCH_ADMIN, branchId: branch.id, holdingCompanyId: null }
 
     const fdUser = await superuserPrisma.user.create({
       data: { branchId: branch.id, name: "Front Desk", email: `fd-inv-${Date.now()}@test.local`, passwordHash: "x", role: Role.FRONT_DESK },
@@ -229,10 +229,10 @@ describe("inventory", () => {
         name: "Sibling Admin",
         email: `inv-sib-admin-${stamp}@test.local`,
         passwordHash: "x",
-        role: Role.CLINIC_ADMIN,
+        role: Role.BRANCH_ADMIN,
       },
     })
-    siblingAdmin = { id: sibAdminUser.id, role: Role.CLINIC_ADMIN, branchId: siblingBranch.id, holdingCompanyId: null }
+    siblingAdmin = { id: sibAdminUser.id, role: Role.BRANCH_ADMIN, branchId: siblingBranch.id, holdingCompanyId: null }
 
     const bbAdminUser = await superuserPrisma.user.create({
       data: {
@@ -240,10 +240,10 @@ describe("inventory", () => {
         name: "Branch B Admin",
         email: `inv-bb-admin-${stamp}@test.local`,
         passwordHash: "x",
-        role: Role.CLINIC_ADMIN,
+        role: Role.BRANCH_ADMIN,
       },
     })
-    branchBAdmin = { id: bbAdminUser.id, role: Role.CLINIC_ADMIN, branchId: branchB.id, holdingCompanyId: null }
+    branchBAdmin = { id: bbAdminUser.id, role: Role.BRANCH_ADMIN, branchId: branchB.id, holdingCompanyId: null }
 
     siblingMeds = {
       ledger: await createMedicineIn(siblingBranch.id, { name: "Sibling Ledger Med", currentStock: 40, reorderLevel: 5 }),
@@ -434,7 +434,7 @@ describe("inventory", () => {
     const dispensedRow = await superuserPrisma.medicineDispensed.findFirstOrThrow({ where: { consultationId } })
     const originalStockMovementId = dispensedRow.stockMovementId
 
-    await deleteDispensedMedicine(clinicAdmin, dispensedRow.id, "Doctor recorded the wrong medicine")
+    await deleteDispensedMedicine(branchAdmin, dispensedRow.id, "Doctor recorded the wrong medicine")
 
     const afterDelete = await superuserPrisma.medicine.findUniqueOrThrow({ where: { id: medicine.id } })
     expect(afterDelete.currentStock).toBe(24) // back to original
@@ -454,7 +454,7 @@ describe("inventory", () => {
     expect(softDeleted.deletedAt).toBeTruthy()
   })
 
-  it("only a clinic admin can delete a dispensed row", async () => {
+  it("only a branch admin can delete a dispensed row", async () => {
     const medicine = await createMedicineDirect({ name: "Cetirizine", currentStock: 10 })
     const entry = await createQueueEntry()
     const { consultationId } = await saveConsultation(doctorUser, entry.id, {
@@ -470,7 +470,7 @@ describe("inventory", () => {
   it("current_stock equals the sum of the movement ledger after a mixed receipt/dispense/adjustment/return sequence", async () => {
     const medicine = await createMedicineDirect({ name: "Mixed Sequence Med", currentStock: 0 })
 
-    await receiveStock(clinicAdmin, { medicineId: medicine.id, quantity: 100, unitCost: 100 })
+    await receiveStock(branchAdmin, { medicineId: medicine.id, quantity: 100, unitCost: 100 })
     const entryA = await createQueueEntry()
     await saveConsultation(doctorUser, entryA.id, {
       chiefComplaint: "a",
@@ -478,8 +478,8 @@ describe("inventory", () => {
       payment: { amount: 0, method: "CASH" },
     })
     const dispensedA = await superuserPrisma.medicineDispensed.findFirstOrThrow({ where: { consultationId: (await superuserPrisma.consultation.findFirstOrThrow({ where: { queueEntryId: entryA.id } })).id } })
-    await deleteDispensedMedicine(clinicAdmin, dispensedA.id, "correction")
-    await submitPhysicalCount(clinicAdmin, { reason: "monthly count", counts: [{ medicineId: medicine.id, countedQuantity: 95 }] })
+    await deleteDispensedMedicine(branchAdmin, dispensedA.id, "correction")
+    await submitPhysicalCount(branchAdmin, { reason: "monthly count", counts: [{ medicineId: medicine.id, countedQuantity: 95 }] })
 
     const medicineAfter = await superuserPrisma.medicine.findUniqueOrThrow({ where: { id: medicine.id } })
     const movements = await superuserPrisma.stockMovement.findMany({ where: { medicineId: medicine.id } })
@@ -520,7 +520,7 @@ describe("inventory", () => {
     const medicine = await createMedicineDirect({ name: "Expiry Med", currentStock: 10, expiryDate: oldExpiry })
 
     const newExpiry = new Date("2027-01-01")
-    const updated = await receiveStock(clinicAdmin, {
+    const updated = await receiveStock(branchAdmin, {
       medicineId: medicine.id,
       quantity: 50,
       unitCost: 120,
@@ -541,7 +541,7 @@ describe("inventory", () => {
     const underCounted = await createMedicineDirect({ name: "Under Counted", currentStock: 20 })
     const unchanged = await createMedicineDirect({ name: "Unchanged", currentStock: 20 })
 
-    const result = await submitPhysicalCount(clinicAdmin, {
+    const result = await submitPhysicalCount(branchAdmin, {
       reason: "Q3 physical count",
       counts: [
         { medicineId: overCounted.id, countedQuantity: 25 }, // +5
@@ -561,7 +561,7 @@ describe("inventory", () => {
     expect(overMovement.quantityChange).toBe(5)
   })
 
-  it("only a clinic admin can create or edit a catalog medicine", async () => {
+  it("only a branch admin can create or edit a catalog medicine", async () => {
     await expect(
       createMedicine(frontDesk, {
         name: "x",
@@ -574,7 +574,7 @@ describe("inventory", () => {
       })
     ).rejects.toBeInstanceOf(ForbiddenError)
 
-    const created = await createMedicine(clinicAdmin, {
+    const created = await createMedicine(branchAdmin, {
       name: "New Catalog Med",
       form: "TABLET",
       unit: "PIECE",
@@ -597,7 +597,7 @@ describe("inventory", () => {
       })
     ).rejects.toBeInstanceOf(ForbiddenError)
 
-    const updated = await updateMedicine(clinicAdmin, created.id, {
+    const updated = await updateMedicine(branchAdmin, created.id, {
       name: "New Catalog Med",
       form: "TABLET",
       unit: "PIECE",
@@ -624,18 +624,18 @@ describe("inventory", () => {
       expiryDate: new Date(Date.now() - 10 * 86_400_000),
     })
 
-    const lowStockList = await listMedicines(clinicAdmin, { filter: "low-stock" })
+    const lowStockList = await listMedicines(branchAdmin, { filter: "low-stock" })
     expect(lowStockList.map((m) => m.id)).toContain(low.id)
     expect(lowStockList.map((m) => m.id)).not.toContain(fine.id)
 
-    const expiringList = await listMedicines(clinicAdmin, { filter: "expiring" })
+    const expiringList = await listMedicines(branchAdmin, { filter: "expiring" })
     expect(expiringList.map((m) => m.id)).toContain(expiringSoon.id)
     expect(expiringList.map((m) => m.id)).not.toContain(expired.id)
 
-    const expiredList = await listMedicines(clinicAdmin, { filter: "expired" })
+    const expiredList = await listMedicines(branchAdmin, { filter: "expired" })
     expect(expiredList.map((m) => m.id)).toContain(expired.id)
 
-    const panels = await getInventoryDashboardPanels(clinicAdmin)
+    const panels = await getInventoryDashboardPanels(branchAdmin)
     expect(panels.lowStock.map((m) => m.id)).toContain(low.id)
     expect(panels.expiringSoon.map((m) => m.id)).toContain(expiringSoon.id)
     expect(panels.expired.map((m) => m.id)).toContain(expired.id)
@@ -650,7 +650,7 @@ describe("inventory", () => {
       data: { branchId: otherBranch.id, name: "Other Branch Med", form: MedicineForm.TABLET, unit: MedicineUnit.PIECE, currentStock: 10, reorderLevel: 5, unitCost: 100, sellingPrice: 200 },
     })
 
-    const result = await getMedicineWithLedger(clinicAdmin, otherMedicine.id)
+    const result = await getMedicineWithLedger(branchAdmin, otherMedicine.id)
     expect(result).toBeNull()
 
     await superuserPrisma.medicine.delete({ where: { id: otherMedicine.id } })
@@ -672,7 +672,7 @@ describe("inventory", () => {
     // Positive control A: the caller's own medicine reads back fine, so a
     // null below is about the branch, not about the function being broken.
     const own = await createMedicineDirect({ name: "Own Ledger Med", currentStock: 12 })
-    const ownResult = await getMedicineWithLedger(clinicAdmin, own.id)
+    const ownResult = await getMedicineWithLedger(branchAdmin, own.id)
     expect(ownResult?.medicine.id).toBe(own.id)
 
     // Positive control B: the sibling's medicine genuinely exists AND has a
@@ -685,11 +685,11 @@ describe("inventory", () => {
     // a null, NOT a ForbiddenError, unlike updateMedicine/receiveStock in
     // the same file. Asserting what the code actually does today; the
     // throw-vs-null inconsistency is recorded as a separate decision.
-    const sibling = await getMedicineWithLedger(clinicAdmin, siblingMeds.ledger.id)
+    const sibling = await getMedicineWithLedger(branchAdmin, siblingMeds.ledger.id)
     expect(sibling).toBeNull()
 
     // and the cross-clinic control still holds at the same call site
-    const crossClinic = await getMedicineWithLedger(clinicAdmin, branchBMeds.plain.id)
+    const crossClinic = await getMedicineWithLedger(branchAdmin, branchBMeds.plain.id)
     expect(crossClinic).toBeNull()
   })
 
@@ -708,7 +708,7 @@ describe("inventory", () => {
       expiryDate: new Date(Date.now() - 10 * 86_400_000),
     })
 
-    const allIds = (await listMedicines(clinicAdmin)).map((m) => m.id)
+    const allIds = (await listMedicines(branchAdmin)).map((m) => m.id)
     expect(allIds).toContain(ownLow.id) // positive control
     expect(allIds).toContain(ownExpiring.id)
     expect(allIds).toContain(ownExpired.id)
@@ -729,37 +729,37 @@ describe("inventory", () => {
     // The filtered variants run a different code path from the default
     // list (post-filtering on the DTO flags), so each is exercised against
     // a foreign row that WOULD match the filter.
-    const lowIds = (await listMedicines(clinicAdmin, { filter: "low-stock" })).map((m) => m.id)
+    const lowIds = (await listMedicines(branchAdmin, { filter: "low-stock" })).map((m) => m.id)
     expect(lowIds).toContain(ownLow.id)
     expect(lowIds).not.toContain(siblingMeds.low.id)
     expect(lowIds).not.toContain(branchBMeds.low.id)
 
-    const expiringIds = (await listMedicines(clinicAdmin, { filter: "expiring" })).map((m) => m.id)
+    const expiringIds = (await listMedicines(branchAdmin, { filter: "expiring" })).map((m) => m.id)
     expect(expiringIds).toContain(ownExpiring.id)
     expect(expiringIds).not.toContain(siblingMeds.expiring.id)
     expect(expiringIds).not.toContain(branchBMeds.expiring.id)
 
-    const expiredIds = (await listMedicines(clinicAdmin, { filter: "expired" })).map((m) => m.id)
+    const expiredIds = (await listMedicines(branchAdmin, { filter: "expired" })).map((m) => m.id)
     expect(expiredIds).toContain(ownExpired.id)
     expect(expiredIds).not.toContain(siblingMeds.expired.id)
     expect(expiredIds).not.toContain(branchBMeds.expired.id)
 
     // search is a separate where-clause branch — the sibling's names must
     // stay invisible even when the search term matches them exactly
-    const searchIds = (await listMedicines(clinicAdmin, { search: "Med" })).map((m) => m.id)
+    const searchIds = (await listMedicines(branchAdmin, { search: "Med" })).map((m) => m.id)
     expect(searchIds).toContain(ownLow.id)
     for (const foreignId of foreignMedicineIds()) {
       expect(searchIds).not.toContain(foreignId)
     }
 
     // includeInactive widens the where-clause; it must not widen the branch
-    const inactiveIds = (await listMedicines(clinicAdmin, { includeInactive: true })).map((m) => m.id)
+    const inactiveIds = (await listMedicines(branchAdmin, { includeInactive: true })).map((m) => m.id)
     expect(inactiveIds).toContain(ownLow.id)
     for (const foreignId of foreignMedicineIds()) {
       expect(inactiveIds).not.toContain(foreignId)
     }
 
-    const panels = await getInventoryDashboardPanels(clinicAdmin)
+    const panels = await getInventoryDashboardPanels(branchAdmin)
     expect(panels.lowStock.map((m) => m.id)).toContain(ownLow.id)
     expect(panels.lowStock.map((m) => m.id)).not.toContain(siblingMeds.low.id)
     expect(panels.lowStock.map((m) => m.id)).not.toContain(branchBMeds.low.id)
@@ -774,10 +774,10 @@ describe("inventory", () => {
   it("receiveStock into a sibling branch's medicine is refused and writes no movement row", async () => {
     const before = await superuserPrisma.medicine.findUniqueOrThrow({ where: { id: siblingMeds.receive.id } })
 
-    // CLINIC_ADMIN passes receiveStock's role gate, so this rejection is
+    // BRANCH_ADMIN passes receiveStock's role gate, so this rejection is
     // the branch check firing, not the role check.
     await expect(
-      receiveStock(clinicAdmin, { medicineId: siblingMeds.receive.id, quantity: 25, unitCost: 999 })
+      receiveStock(branchAdmin, { medicineId: siblingMeds.receive.id, quantity: 25, unitCost: 999 })
     ).rejects.toBeInstanceOf(ForbiddenError)
 
     // The rejection is not the point — this is. A ForbiddenError thrown
@@ -791,7 +791,7 @@ describe("inventory", () => {
     // Positive control: the identical call against the caller's own
     // medicine does move stock and does write exactly one movement.
     const own = await createMedicineDirect({ name: "Own Receive Med", currentStock: 10 })
-    const updated = await receiveStock(clinicAdmin, { medicineId: own.id, quantity: 25, unitCost: 999 })
+    const updated = await receiveStock(branchAdmin, { medicineId: own.id, quantity: 25, unitCost: 999 })
     expect(updated.currentStock).toBe(35)
     expect(await superuserPrisma.stockMovement.count({ where: { medicineId: own.id } })).toBe(1)
   })
@@ -809,9 +809,9 @@ describe("inventory", () => {
     }
 
     // Distinct from the existing role test above: that one proves a
-    // FRONT_DESK is blocked. This caller IS a clinic admin — the only
+    // FRONT_DESK is blocked. This caller IS a branch admin — the only
     // thing standing between it and the row is the branch.
-    await expect(updateMedicine(clinicAdmin, siblingMeds.update.id, payload)).rejects.toBeInstanceOf(ForbiddenError)
+    await expect(updateMedicine(branchAdmin, siblingMeds.update.id, payload)).rejects.toBeInstanceOf(ForbiddenError)
 
     const after = await superuserPrisma.medicine.findUniqueOrThrow({ where: { id: siblingMeds.update.id } })
     expect(after.reorderLevel).toBe(before.reorderLevel)
@@ -821,7 +821,7 @@ describe("inventory", () => {
 
     // Positive control: same admin, same payload, own branch — it applies.
     const own = await createMedicineDirect({ name: "Own Update Med", currentStock: 10, reorderLevel: 7 })
-    const updated = await updateMedicine(clinicAdmin, own.id, payload)
+    const updated = await updateMedicine(branchAdmin, own.id, payload)
     expect(updated.reorderLevel).toBe(999)
     expect(updated.isActive).toBe(false)
   })
@@ -830,7 +830,7 @@ describe("inventory", () => {
     const own = await createMedicineDirect({ name: "Own Counted Med", currentStock: 20 })
     const siblingBefore = await superuserPrisma.medicine.findUniqueOrThrow({ where: { id: siblingMeds.count.id } })
 
-    const result = await submitPhysicalCount(clinicAdmin, {
+    const result = await submitPhysicalCount(branchAdmin, {
       reason: "mixed-branch count",
       counts: [
         { medicineId: own.id, countedQuantity: 25 }, // +5, in branch
@@ -858,7 +858,7 @@ describe("inventory", () => {
 
   it("deleteDispensedMedicine on a sibling branch's dispensed row writes no compensating return", async () => {
     await expect(
-      deleteDispensedMedicine(clinicAdmin, siblingDispensedId, "not mine to correct")
+      deleteDispensedMedicine(branchAdmin, siblingDispensedId, "not mine to correct")
     ).rejects.toBeInstanceOf(ForbiddenError)
 
     const row = await superuserPrisma.medicineDispensed.findUniqueOrThrow({ where: { id: siblingDispensedId } })
@@ -884,7 +884,7 @@ describe("inventory", () => {
       payment: { amount: 0, method: "CASH" },
     })
     const ownDispensed = await superuserPrisma.medicineDispensed.findFirstOrThrow({ where: { consultationId } })
-    await deleteDispensedMedicine(clinicAdmin, ownDispensed.id, "genuine correction")
+    await deleteDispensedMedicine(branchAdmin, ownDispensed.id, "genuine correction")
 
     expect((await superuserPrisma.medicineDispensed.findUniqueOrThrow({ where: { id: ownDispensed.id } })).deletedAt).toBeTruthy()
     expect(
@@ -899,8 +899,8 @@ describe("inventory", () => {
     // `prisma` (APP_DATABASE_URL, non-superuser) — NOT superuserPrisma,
     // which bypasses RLS and would make the negative half meaningless.
     const hidden = await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.role', ${Role.CLINIC_ADMIN}, true)`
-      await tx.$executeRaw`SELECT set_config('app.user_id', ${clinicAdmin.id}, true)`
+      await tx.$executeRaw`SELECT set_config('app.role', ${Role.BRANCH_ADMIN}, true)`
+      await tx.$executeRaw`SELECT set_config('app.user_id', ${branchAdmin.id}, true)`
       await tx.$executeRaw`SELECT set_config('app.branch_id', ${branch.id}, true)`
       // deliberately unfiltered by branch — proves the policy hides these,
       // not the application's own where-clause
@@ -917,7 +917,7 @@ describe("inventory", () => {
     // unconditionally — or a fixture that was never written — would satisfy
     // the assertions above just as well.
     const visible = await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.role', ${Role.CLINIC_ADMIN}, true)`
+      await tx.$executeRaw`SELECT set_config('app.role', ${Role.BRANCH_ADMIN}, true)`
       await tx.$executeRaw`SELECT set_config('app.user_id', ${siblingAdmin.id}, true)`
       await tx.$executeRaw`SELECT set_config('app.branch_id', ${siblingBranch.id}, true)`
       return {
@@ -943,8 +943,8 @@ describe("inventory", () => {
     })
 
     const hidden = await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.role', ${Role.CLINIC_ADMIN}, true)`
-      await tx.$executeRaw`SELECT set_config('app.user_id', ${clinicAdmin.id}, true)`
+      await tx.$executeRaw`SELECT set_config('app.role', ${Role.BRANCH_ADMIN}, true)`
+      await tx.$executeRaw`SELECT set_config('app.user_id', ${branchAdmin.id}, true)`
       await tx.$executeRaw`SELECT set_config('app.branch_id', ${branch.id}, true)`
       return {
         medicines: await tx.medicine.findMany({ where: { id: branchBMeds.plain.id } }),
@@ -955,7 +955,7 @@ describe("inventory", () => {
     expect(hidden.movements).toHaveLength(0)
 
     const visible = await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.role', ${Role.CLINIC_ADMIN}, true)`
+      await tx.$executeRaw`SELECT set_config('app.role', ${Role.BRANCH_ADMIN}, true)`
       await tx.$executeRaw`SELECT set_config('app.user_id', ${branchBAdmin.id}, true)`
       await tx.$executeRaw`SELECT set_config('app.branch_id', ${branchB.id}, true)`
       return {
@@ -972,7 +972,7 @@ describe("inventory", () => {
   it("listDispensableMedicines is scoped to the caller's own branch", async () => {
     const own = await createMedicineDirect({ name: "Own Dispensable Med", currentStock: 10 })
 
-    const ids = (await listDispensableMedicines(clinicAdmin)).map((m) => m.id)
+    const ids = (await listDispensableMedicines(branchAdmin)).map((m) => m.id)
     expect(ids).toContain(own.id) // positive control
     expect(ids).not.toContain(siblingMeds.ledger.id)
     expect(ids).not.toContain(siblingMeds.low.id)

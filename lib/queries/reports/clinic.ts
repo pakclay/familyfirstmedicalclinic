@@ -24,7 +24,7 @@ export type BranchReportData = {
 
 /**
  * §8 "Clinic level" report — now scoped per branch, the physical location
- * a Clinic Admin actually runs. Fetches each dataset with its own targeted
+ * a Branch Admin actually runs. Fetches each dataset with its own targeted
  * query and derives everything else in JS — a handful of extra round
  * trips, but each one reads plainly and the data volumes an MVP branch
  * produces in a month are nowhere near where that would matter.

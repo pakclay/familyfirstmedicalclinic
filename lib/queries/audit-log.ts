@@ -137,7 +137,7 @@ function trimmed(value: string | undefined): string {
  */
 export async function listAuditLog(user: AbilitySubject, params: AuditLogFilters = {}): Promise<AuditLogPage> {
   // §4's role table gives "view audit log" to the Holding Admin only, and
-  // proxy.ts lets CLINIC_ADMIN into /console too — so the narrowing has to
+  // proxy.ts lets BRANCH_ADMIN into /console too — so the narrowing has to
   // happen here. Throwing (rather than returning []) is required by §4.2 and
   // matters doubly on this table: an empty array is also what a broken RLS
   // setup produces, and the two must not look alike.

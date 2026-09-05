@@ -14,7 +14,7 @@ datasource db {
 enum Role {
   FRONT_DESK
   DOCTOR
-  CLINIC_ADMIN
+  BRANCH_ADMIN
   HOLDING_ADMIN
 }
 

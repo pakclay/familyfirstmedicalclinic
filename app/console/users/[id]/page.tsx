@@ -10,7 +10,7 @@ import { UserDetailActions } from "./user-detail-actions"
 export default async function EditUserPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await auth()
   if (!session?.user) redirect("/login")
-  if (session.user.role !== "HOLDING_ADMIN" && session.user.role !== "CLINIC_ADMIN") {
+  if (session.user.role !== "HOLDING_ADMIN" && session.user.role !== "BRANCH_ADMIN") {
     redirect("/console/users")
   }
 

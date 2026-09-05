@@ -26,7 +26,7 @@ export default async function RemittancePage() {
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const status = await getMyRemittanceStatus(user)
-  const pending = session.user.role === "CLINIC_ADMIN" ? await listPendingRemittances(user) : null
+  const pending = session.user.role === "BRANCH_ADMIN" ? await listPendingRemittances(user) : null
 
   return (
     <div className="mx-auto max-w-md">
@@ -45,7 +45,7 @@ export default async function RemittancePage() {
                 ₱{(status.alreadySubmitted.variance / 100).toFixed(2)} variance
               </span>
             </p>
-            <p className="text-muted-foreground">{status.alreadySubmitted.confirmed ? "Confirmed by clinic admin." : "Awaiting confirmation."}</p>
+            <p className="text-muted-foreground">{status.alreadySubmitted.confirmed ? "Confirmed by branch admin." : "Awaiting confirmation."}</p>
           </div>
         ) : (
           <div className="mt-3">

@@ -11,7 +11,7 @@ import type { User, Doctor, Role } from "@prisma/client"
 export const ROLE_LABEL: Record<Role, string> = {
   FRONT_DESK: "Front desk",
   DOCTOR: "Doctor",
-  CLINIC_ADMIN: "Clinic admin",
+  BRANCH_ADMIN: "Branch admin",
   HOLDING_ADMIN: "Holding admin",
 }
 

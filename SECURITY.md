@@ -96,9 +96,9 @@ patient data.
   still not built — see below.
 - **Admin-managed user accounts, scoped by role.** A Holding Admin can
   create, edit, deactivate/reactivate, force a password reset on, or
-  unlock any account in any clinic; a Clinic Admin can do the same but
+  unlock any account in any clinic; a Branch Admin can do the same but
   only for front desk/doctor accounts in their own clinic — enforced in
-  `lib/queries/users.ts`, not just hidden in the UI (a Clinic Admin's own
+  `lib/queries/users.ts`, not just hidden in the UI (a Branch Admin's own
   account and any other clinic's accounts return "not found," not a
   filtered list, so there's nothing to enumerate). Admin-created accounts
   get a random one-time temporary password shown once on screen, never
@@ -135,7 +135,7 @@ patient data.
   the actor's own holding company itself, and the client-supplied filters
   are AND-ed with that scope so none of them can widen it.
 - **Clinic self-service is scoped by construction, not by a check.** The
-  clinic-settings functions a clinic admin uses to edit their own clinic
+  clinic-settings functions a branch admin uses to edit their own clinic
   (`getOwnClinic`, `updateOwnClinicSettings`) take no clinic id parameter
   at all — the clinic is resolved from the session via `requireClinicId`,
   so there is nothing a caller could point at another clinic, which is
@@ -143,7 +143,7 @@ patient data.
   function signature rather than by a validation step that could be
   skipped. The set of editable fields is an explicit allowlist and each
   column is written by name rather than spreading the request payload, so
-  a clinic admin cannot reach `name`, `slug`, `timezone`, `isActive`, or
+  a branch admin cannot reach `name`, `slug`, `timezone`, `isActive`, or
   `holdingCompanyId` even indirectly.
 - **A real data-retention job exists** (`lib/retention/`) — not just
   soft-delete flags that hide a row from the UI while it sits in the

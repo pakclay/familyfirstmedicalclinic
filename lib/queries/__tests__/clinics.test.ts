@@ -16,7 +16,7 @@ describe("clinic management", () => {
   let existingClinic: { id: string }
   let existingBranch: { id: string }
   let holdingAdmin: AbilitySubject
-  let clinicAdmin: AbilitySubject
+  let branchAdmin: AbilitySubject
 
   beforeAll(async () => {
     holding = await superuserPrisma.holdingCompany.create({ data: { name: "Test Holding — clinic mgmt" } })
@@ -24,8 +24,8 @@ describe("clinic management", () => {
       data: { holdingCompanyId: holding.id, name: "AAA Existing Clinic" },
     })
     // Clinic is purely organizational after the branch-hierarchy migration
-    // (see DECISIONS.md) — a CLINIC_ADMIN's AbilitySubject needs a real
-    // branchId, so this fixture exists purely to give clinicAdmin somewhere
+    // (see DECISIONS.md) — a BRANCH_ADMIN's AbilitySubject needs a real
+    // branchId, so this fixture exists purely to give branchAdmin somewhere
     // to belong; none of this file's tests exercise Branch behavior itself
     // (that's lib/queries/__tests__/branches.test.ts).
     existingBranch = await superuserPrisma.branch.create({
@@ -54,13 +54,13 @@ describe("clinic management", () => {
     const adminUser = await superuserPrisma.user.create({
       data: {
         branchId: existingBranch.id,
-        name: "Clinic Admin",
+        name: "Branch Admin",
         email: `admin-clinics-${Date.now()}@test.local`,
         passwordHash: "x",
-        role: Role.CLINIC_ADMIN,
+        role: Role.BRANCH_ADMIN,
       },
     })
-    clinicAdmin = { id: adminUser.id, role: Role.CLINIC_ADMIN, branchId: existingBranch.id, holdingCompanyId: null }
+    branchAdmin = { id: adminUser.id, role: Role.BRANCH_ADMIN, branchId: existingBranch.id, holdingCompanyId: null }
   })
 
   afterAll(async () => {
@@ -106,14 +106,14 @@ describe("clinic management", () => {
     expect(log!.changes).toEqual({ name: "Makati Clinic" })
   })
 
-  it("refuses every mutation for a clinic admin, without touching the database", async () => {
+  it("refuses every mutation for a branch admin, without touching the database", async () => {
     const denied = { ok: false, error: "Only a holding admin manages clinics." }
 
-    const created = await createClinic(clinicAdmin, clinicInput({ name: "Sneaky Clinic" }))
+    const created = await createClinic(branchAdmin, clinicInput({ name: "Sneaky Clinic" }))
     expect(created).toEqual(denied)
 
     const edit: EditClinicInput = { name: "Hijacked" }
-    expect(await updateClinic(clinicAdmin, existingClinic.id, edit)).toEqual(denied)
+    expect(await updateClinic(branchAdmin, existingClinic.id, edit)).toEqual(denied)
 
     const untouched = await superuserPrisma.clinic.findUniqueOrThrow({ where: { id: existingClinic.id } })
     expect(untouched.name).toBe("AAA Existing Clinic")
@@ -134,10 +134,10 @@ describe("clinic management", () => {
     expect(names.indexOf("AAA Existing Clinic")).toBeLessThan(names.indexOf("ZZZ Another Clinic"))
   })
 
-  it("throws rather than returning an empty list to a clinic admin", async () => {
+  it("throws rather than returning an empty list to a branch admin", async () => {
     // §4.2: a forbidden read fails as a 403-equivalent. An empty list would
     // render as a plausible "No clinics yet." and hide a broken gate.
-    await expect(listClinics(clinicAdmin)).rejects.toBeInstanceOf(ForbiddenError)
+    await expect(listClinics(branchAdmin)).rejects.toBeInstanceOf(ForbiddenError)
   })
 
   it("gets a clinic by id for a holding admin", async () => {
@@ -145,8 +145,8 @@ describe("clinic management", () => {
     expect(clinic?.name).toBe("AAA Existing Clinic")
   })
 
-  it("throws for a clinic admin, and returns null only for an unknown id", async () => {
-    await expect(getClinicById(clinicAdmin, existingClinic.id)).rejects.toBeInstanceOf(ForbiddenError)
+  it("throws for a branch admin, and returns null only for an unknown id", async () => {
+    await expect(getClinicById(branchAdmin, existingClinic.id)).rejects.toBeInstanceOf(ForbiddenError)
     expect(await getClinicById(holdingAdmin, "00000000-0000-0000-0000-000000000000")).toBeNull()
   })
 

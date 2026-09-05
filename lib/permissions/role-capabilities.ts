@@ -4,7 +4,7 @@ import type { Role } from "@prisma/client"
  * What each role can actually do, as data.
  *
  * Written to be shown to a holding admin before they change someone's role,
- * because "CLINIC_ADMIN" on its own does not tell you that the person will
+ * because "BRANCH_ADMIN" on its own does not tell you that the person will
  * lose the consultation screen or gain the ability to confirm remittances.
  *
  * This is a description of the enforcement, never the enforcement itself —
@@ -76,9 +76,9 @@ const PROFILE_BY_ROLE: Record<Role, RoleProfile> = {
       { label: "Manage accounts", enforcedIn: "lib/permissions/ability.ts" },
     ],
   },
-  CLINIC_ADMIN: {
-    role: "CLINIC_ADMIN",
-    label: "Clinic admin",
+  BRANCH_ADMIN: {
+    role: "BRANCH_ADMIN",
+    label: "Branch admin",
     summary: "Runs one branch: its staff, stock, expenses and reports. Not the whole clinic.",
     scope: "branch",
     sections: ["/staff", "/console"],

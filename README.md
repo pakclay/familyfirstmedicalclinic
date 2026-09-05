@@ -20,7 +20,7 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000). Seeded logins (one
-holding admin, plus a clinic admin/2 front desk/3 doctors per clinic) are
+holding admin, plus a branch admin/2 front desk/3 doctors per clinic) are
 printed by `npm run db:seed`, all sharing one dev password.
 
 Copy `.env.example` to `.env` (Prisma reads `DATABASE_URL` from here) and

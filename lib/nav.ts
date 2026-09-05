@@ -2,10 +2,10 @@ import type { Role } from "@prisma/client"
 
 export type NavItem = { label: string; href: string }
 
-const CLINIC_ADMIN_NAV: NavItem[] = [
+const BRANCH_ADMIN_NAV: NavItem[] = [
   { label: "Dashboard", href: "/console/dashboard" },
   // lives under /staff — shared with front desk rather than reimplemented
-  // per role; proxy.ts already allows CLINIC_ADMIN/HOLDING_ADMIN there.
+  // per role; proxy.ts already allows BRANCH_ADMIN/HOLDING_ADMIN there.
   { label: "Patients", href: "/staff/patients" },
   { label: "Reports", href: "/console/reports" },
   { label: "Expenses", href: "/console/expenses" },
@@ -27,6 +27,6 @@ const HOLDING_ADMIN_NAV: NavItem[] = [
 
 export function navForRole(role: Role): NavItem[] {
   if (role === "HOLDING_ADMIN") return HOLDING_ADMIN_NAV
-  if (role === "CLINIC_ADMIN") return CLINIC_ADMIN_NAV
+  if (role === "BRANCH_ADMIN") return BRANCH_ADMIN_NAV
   return []
 }

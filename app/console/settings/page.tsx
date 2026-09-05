@@ -27,11 +27,11 @@ export default async function ClinicSettingsPage() {
     )
   }
 
-  if (session.user.role !== "CLINIC_ADMIN") {
+  if (session.user.role !== "BRANCH_ADMIN") {
     return (
       <div>
         <h1 className="text-2xl font-heading font-semibold">Clinic settings</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Only a clinic admin changes clinic settings.</p>
+        <p className="mt-2 text-sm text-muted-foreground">Only a branch admin changes clinic settings.</p>
       </div>
     )
   }
