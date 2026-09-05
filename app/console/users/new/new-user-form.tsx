@@ -52,6 +52,20 @@ export function NewUserForm({
     setForm((f) => ({ ...f, [key]: value }))
   }
 
+  /**
+   * Same reset the branch form needs: the inputs are controlled by `form`,
+   * and a successful submit only sets `created`, so clearing that alone
+   * brought the form back still holding the account just created — with the
+   * previous person's name and email sitting under a fresh temporary
+   * password. The preselected branch is kept, since that comes from the URL
+   * the admin arrived on rather than from anything they typed.
+   */
+  function addAnother() {
+    setCreated(null)
+    setForm({ ...initial, branchId: defaultBranchId ?? "" })
+    setError(null)
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setPending(true)
@@ -82,7 +96,7 @@ export function NewUserForm({
             They&rsquo;ll be asked to set their own password the first time they sign in.
           </p>
           <div className="mt-4 flex gap-2">
-            <Button type="button" variant="outline" onClick={() => setCreated(null)}>
+            <Button type="button" variant="outline" onClick={addAnother}>
               Add another
             </Button>
             <Button type="button" asChild>

@@ -48,6 +48,23 @@ export function NewBranchForm({ clinicId }: { clinicId: string }) {
     setForm((f) => ({ ...f, [key]: value }))
   }
 
+  /**
+   * Every input here is controlled by `form`/`hours`, and a successful submit
+   * only sets `created` — so clearing that alone brought the form back still
+   * holding the branch that had just been saved, inviting a duplicate or a
+   * half-edited copy of it. The fields are reset with it.
+   *
+   * `defaultDayForms` is called, not passed: it's a factory (it's used as
+   * useState's lazy initialiser above), and handing the function itself to a
+   * setter would make React read it as a functional update instead.
+   */
+  function addAnother() {
+    setCreated(null)
+    setForm(initial)
+    setHours(defaultDayForms())
+    setError(null)
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setPending(true)
@@ -73,7 +90,7 @@ export function NewBranchForm({ clinicId }: { clinicId: string }) {
             display is <span className="font-mono">/display/{created.slug}</span>.
           </p>
           <div className="mt-4 flex gap-2">
-            <Button type="button" variant="outline" onClick={() => setCreated(null)}>
+            <Button type="button" variant="outline" onClick={addAnother}>
               Add another
             </Button>
             <Button type="button" asChild>
