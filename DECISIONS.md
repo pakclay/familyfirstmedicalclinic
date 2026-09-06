@@ -9,6 +9,68 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-09-06 — Production ran out of database connections (EMAXCONNSESSION)
+
+A doctor completing a consultation was shown, in the form itself:
+"Error querying the database: FATAL: (EMAXCONNSESSION) max clients reached
+in session mode - max clients are limited to pool_size: 15". Two separate
+faults, one incident.
+
+- **`APP_DATABASE_URL` pointed at Supabase's pooler in session mode.** In
+  session mode every client gets a dedicated backend and the pooler admits
+  at most `pool_size` of them — 15 here. Each warm Vercel instance holds its
+  own Prisma pool (default `cpus × 2 + 1` connections), so a handful of
+  concurrent instances is the whole budget, and the request that asks for
+  the sixteenth fails hard rather than waiting. Which request that is comes
+  down to timing; on this day it was a payment being recorded.
+- **The fix is transaction mode, and it is a configuration change, not a
+  code change.** Port 6543 with `?pgbouncer=true&connection_limit=5`. The
+  pooler then multiplexes a few hundred clients over the same 15 backends,
+  holding one only for the duration of a transaction. `DATABASE_URL` stays
+  on a direct/session connection — Prisma Migrate needs one, and it only
+  runs at build time. Nothing in the repository can make this change: the
+  URL lives in Vercel's environment. What the code can do is refuse to be
+  quiet about the wrong shape, so `lib/db/prisma.ts` now logs an error at
+  startup for a Supabase pooler on port 5432, or on 6543 without
+  `pgbouncer=true`. It inspects the shape only and never prints the URL.
+- **Why transaction mode is safe for the RLS design.** It would not be for
+  an app that set session-level state: a `SET` outside a transaction would
+  stay on the backend and be inherited by the next tenant's request. This
+  app never does that. Every GUC is set with `set_config(…, true)` —
+  transaction-local — inside an interactive `$transaction`, which Prisma
+  pins to one connection until commit (lib/db/rls.ts, and the one-off in
+  lib/queries/patients.ts). The queue's locks are `pg_advisory_xact_lock`,
+  released at commit. The rate limiter's upsert is a single statement on
+  the bare client. `pgbouncer=true` makes Prisma stop assuming prepared
+  statements outlive a transaction, which under a transaction pooler they
+  do not. Audited by grepping every `set_config`, `SET`, `$executeRaw`,
+  `$queryRaw` and advisory-lock call in lib/, app/ and auth.ts.
+- **`connection_limit=5`, not Prisma's serverless default of 1.** With 1,
+  every query inside one instance serialises; under Vercel's concurrent
+  request handling that turns a busy instance into a queue. Five per
+  instance against a transaction-mode client ceiling in the hundreds leaves
+  room for many instances without any of them starving the others.
+- **The raw error reached the screen — that was the second fault.** Two
+  server actions ended with `if (err instanceof Error) return { error:
+  err.message }`. Right for the errors this codebase throws on purpose,
+  whose messages are written for the person reading them; wrong for a
+  Prisma error, whose message is written for us and, here, disclosed the
+  pooler and its size. `lib/db/errors.ts` — `isDatabaseError` over every
+  Prisma error class, including the initialization and unknown ones the
+  pooler failure arrives as — routes those to the server log and a message
+  that says the database was busy and nothing was saved. Our own errors
+  still pass through unchanged.
+- **Not changed: retry.** The action reports the failure and the doctor
+  retries by hand. An automatic retry around a payment write would need to
+  be idempotent first, and that is a larger change than an incident fix
+  should carry.
+
+Verified: the URL check's unit test (flags 5432, flags 6543 without the
+flag, silent for the correct shape and local Postgres, never prints the
+URL); the full suite; tsc; eslint. Not verifiable from here: the production
+change itself, which the owner makes in Vercel — the startup log line will
+say whether it took.
+
 ## 2026-09-06 — Per-IP rate limiting on login and public booking
 
 Issue #7 asked for two things: throttle sign-in and booking attempts by

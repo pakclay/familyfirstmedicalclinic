@@ -47,7 +47,16 @@ patient data.
 - **Secrets stay out of the app config.** `.env.example` documents every
   variable with no real values committed; the runtime DB connection
   (`APP_DATABASE_URL`) and the migration connection (`DATABASE_URL`) are
-  deliberately separate credentials with different privilege levels.
+  deliberately separate credentials with different privilege levels — and,
+  in production, separate pooler modes: the app on Supabase's transaction
+  pooler (port 6543), migrations on a session/direct connection. That split
+  is an availability control as much as a convenience: session mode caps
+  clients at `pool_size`, and on 2026-09-06 it ran out under normal clinic
+  load. It is safe for RLS only because every GUC this app sets is
+  transaction-local (`set_config(…, true)` inside `$transaction`) — see
+  lib/db/prisma.ts. Server actions also no longer echo raw database errors
+  to the browser (lib/db/errors.ts); that message named the pooler and its
+  size to whoever was looking.
 - **Outbound notifications default to a mock channel** — `MockChannel`
   logs to the console and the `notifications` table instead of actually
   texting or messaging anyone. Real `SmsChannel`/`MessengerChannel`

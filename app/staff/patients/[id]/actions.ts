@@ -5,6 +5,7 @@ import { auth } from "@/auth"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import type { AbilitySubject } from "@/lib/permissions/ability"
 import { deleteDispensedMedicine } from "@/lib/queries/inventory"
+import { isDatabaseError, DATABASE_ERROR_MESSAGE } from "@/lib/db/errors"
 
 async function actingUser(): Promise<AbilitySubject> {
   const session = await auth()
@@ -30,6 +31,10 @@ export async function deleteDispensedMedicineAction(
     return { ok: true }
   } catch (err) {
     if (err instanceof ForbiddenError) return { ok: false, error: err.message }
+    if (isDatabaseError(err)) {
+      console.error("[patients] deleteDispensedMedicine failed at the database", err)
+      return { ok: false, error: DATABASE_ERROR_MESSAGE }
+    }
     if (err instanceof Error) return { ok: false, error: err.message }
     return { ok: false, error: "Something went wrong. Please try again." }
   }
