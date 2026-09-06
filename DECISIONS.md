@@ -108,10 +108,24 @@ in the schema's datasource block. Done by hand instead, as one change.
   port 5432 and no longer demands `pgbouncer=true`, which would now be
   asking for a flag that does nothing.
 - **A deprecation warning from `pg` during tests** — "Calling
-  client.query() when the client is already executing a query" — comes
-  from the adapter issuing a query on a client mid-query, which `pg` 8
-  queues and `pg` 9 will refuse. Nothing fails on it; noted so it is not
-  mistaken for a regression when it shows up in a log.
+  client.query() when the client is already executing a query" — turned
+  was two-thirds ours. Two query functions fanned out with `Promise.all`
+  *inside* a `runWithRls` transaction: the holding report's three
+  aggregates and the audit log's count-plus-dropdowns. On the old engine
+  that never overlapped anything (one connection per interactive
+  transaction, and the code said so); on a single node-postgres client
+  `pg` 8 queues the extra queries with this warning and `pg` 9 will refuse
+  them. Both are now sequential awaits — the same round trips as before,
+  minus the warning. The page-level `Promise.all`s over separate query
+  functions are fine: each opens its own transaction on its own pooled
+  connection. The one occurrence left, under `--trace-deprecation`, is
+  Prisma's own query interpreter loading sibling `include` relations
+  concurrently inside a transaction — here `sendFollowUpReminder`'s
+  patient/doctor/branch includes — which is prisma/prisma#29407 and
+  #29646, open upstream. Nothing fails on it, and there is no clean way to
+  avoid it short of splitting every multi-include read inside a
+  transaction into separate queries, which would be paying now for a
+  problem that arrives with `pg` 9.
 - **Not upgraded alongside.** ESLint 10 (#34): `eslint-plugin-react`,
   pinned inside `eslint-config-next`, still calls `context.getFilename`,
   which ESLint 10 removed, and no published version supports 10.

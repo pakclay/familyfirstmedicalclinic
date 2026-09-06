@@ -195,16 +195,24 @@ patient data.
 
 ## What must be hardened before real patient data goes in
 
-- **TLS.** Nothing in this repo terminates TLS — `npm run dev`/`start`
-  serve plain HTTP. Production needs a reverse proxy or platform (nginx,
-  Caddy, a managed load balancer) terminating HTTPS in front of the app,
-  with HTTP disabled or redirected, before any real credential or patient
-  record crosses the network.
-- **Backups.** There is no backup strategy — a local dev Postgres
-  instance with no scheduled dumps, no point-in-time recovery, no tested
-  restore procedure. Before real data: automated daily backups, an
-  offsite/separate-region copy, and an actual rehearsed restore (not just
-  a cron job nobody has verified works).
+- **TLS.** Terminated by the hosting platform: production runs on Vercel,
+  which serves HTTPS, answers plain HTTP with a 308 to HTTPS, and sends
+  HSTS (two years, `includeSubDomains`, `preload`) — verified with curl on
+  2026-09-07. The app's own link to the database is encrypted as well:
+  since Prisma 7 (`lib/db/client-factory.ts`) a remote host gets TLS by
+  default, without certificate verification unless the URL says
+  `sslmode=verify-full`. The remaining infrastructure step is Supabase's
+  "Enforce SSL on incoming connections" switch, to be turned on together
+  with `sslmode=verify-full` on both database URLs. `npm run dev`/`start`
+  still serve plain HTTP, which is fine only because nothing real sits
+  behind them.
+- **Backups.** Still none. The production database is on Supabase's Free
+  plan, which takes no automated backups at all (daily backups start on
+  Pro; point-in-time recovery is a paid add-on), and no restore has ever
+  been rehearsed. Before real data: either the Pro plan, or a scheduled
+  `pg_dump` (a GitHub Actions cron with the direct `DATABASE_URL` as a
+  secret) to offsite storage in another region — and an actual rehearsed
+  restore either way, not just a job nobody has verified works.
 - **Encryption at rest.** The database has no at-rest encryption
   configured at the application level; this depends entirely on the
   hosting platform's disk/volume encryption (most managed Postgres
@@ -224,11 +232,12 @@ patient data.
   queue entries/notifications past their configured retention window
   (`lib/retention/policy.ts`), with the deletion order and cascade logic
   actually enforced rather than left to soft-delete flags nobody purges.
-  What's still missing is running it on an actual schedule (cron / a
-  hosting platform's scheduled jobs / a GitHub Actions cron once there's
-  a real `DATABASE_URL` to point it at) — deferred alongside TLS and
-  backups above until a hosting platform is chosen, since there's nothing
-  real to schedule it against yet. The retention *periods* themselves
+  What's still missing is running it on an actual schedule. Hosting is
+  now chosen (Vercel + Supabase), so the options are concrete: a GitHub
+  Actions cron with the direct `DATABASE_URL` as a secret, or Vercel Cron
+  hitting a protected route. Neither is wired, on purpose — an automatic
+  purge of patient records is switched on by a decision, not by a
+  default. The retention *periods* themselves
   (see `lib/retention/policy.ts`) are defensible defaults, not a legal
   opinion — confirm them against actual PH medical-records and BIR
   requirements before this runs against real patient data.

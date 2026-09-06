@@ -245,16 +245,24 @@ export async function listAuditLog(user: AbilitySubject, params: AuditLogFilters
     // account name and every branch in the entire database to any holding
     // admin — the dropdowns would leak the tenant boundary even while the
     // table itself respected it.
-    const [total, actionGroups, entityTypeGroups, users] = await Promise.all([
-      tx.auditLog.count({ where }),
-      tx.auditLog.groupBy({ by: ["action"], where: holdingScope, orderBy: { action: "asc" } }),
-      tx.auditLog.groupBy({ by: ["entityType"], where: holdingScope, orderBy: { entityType: "asc" } }),
-      tx.user.findMany({
-        where: { OR: [{ branch: { clinic: { holdingCompanyId } } }, { holdingCompanyId }, { clinic: { holdingCompanyId } }] },
-        select: { id: true, name: true },
-        orderBy: { name: "asc" },
-      }),
-    ])
+    //
+    // Awaited one after another, not in a Promise.all: the transaction is a
+    // single node-postgres client (Prisma 7), which queues a query issued
+    // while another is in flight — a deprecation warning today, a refusal
+    // in pg 9 — and the old engine ran them sequentially on its one
+    // connection anyway, so nothing is lost.
+    const total = await tx.auditLog.count({ where })
+    const actionGroups = await tx.auditLog.groupBy({ by: ["action"], where: holdingScope, orderBy: { action: "asc" } })
+    const entityTypeGroups = await tx.auditLog.groupBy({
+      by: ["entityType"],
+      where: holdingScope,
+      orderBy: { entityType: "asc" },
+    })
+    const users = await tx.user.findMany({
+      where: { OR: [{ branch: { clinic: { holdingCompanyId } } }, { holdingCompanyId }, { clinic: { holdingCompanyId } }] },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    })
 
     const pageCount = Math.max(1, Math.ceil(total / pageSize))
     // Clamp past-the-end requests to the last page rather than serving a

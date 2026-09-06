@@ -53,11 +53,18 @@ export async function getHoldingConsolidatedReport(user: AbilitySubject, params:
     //
     // This used to be a `for` loop over branches issuing three aggregates
     // each — 1 + 3N statements, and because an interactive transaction runs
-    // on a single connection, the inner `Promise.all` did not overlap them
-    // either. Every one was a sequential round trip, which is what made this
-    // the slowest screen in the console. It is now 1 + 3×(distinct zones),
-    // i.e. four statements for any number of branches in one timezone, and
-    // it degrades to the old cost only in the case it was always paying for.
+    // on a single connection, a `Promise.all` around them never overlapped
+    // them either. Every one was a sequential round trip, which is what made
+    // this the slowest screen in the console. It is now 1 + 3×(distinct
+    // zones), i.e. four statements for any number of branches in one
+    // timezone, and it degrades to the old cost only in the case it was
+    // always paying for.
+    //
+    // The three aggregates are awaited one after another on purpose. Since
+    // Prisma 7 the transaction is a single node-postgres client, and pg
+    // queues a query issued while another is in flight — with a deprecation
+    // warning today and a hard refusal in pg 9. Sequential awaits are the
+    // same round trips the engine always made, minus the warning.
     const byTimezone = new Map<string, string[]>()
     for (const branch of branches) {
       const ids = byTimezone.get(branch.timezone)
@@ -73,23 +80,21 @@ export async function getHoldingConsolidatedReport(user: AbilitySubject, params:
       const instantRange = resolveReportInstantRange(params, timezone)
       const dateOnlyRange = resolveReportDateOnlyRange(params, timezone)
 
-      const [revenueRows, expenseRows, visitRows] = await Promise.all([
-        tx.payment.groupBy({
-          by: ["branchId"],
-          where: { branchId: { in: branchIds }, receivedAt: { gte: instantRange.start, lt: instantRange.end } },
-          _sum: { amount: true },
-        }),
-        tx.expense.groupBy({
-          by: ["branchId"],
-          where: { branchId: { in: branchIds }, expenseDate: { gte: dateOnlyRange.start, lte: dateOnlyRange.end } },
-          _sum: { amount: true },
-        }),
-        tx.queueEntry.groupBy({
-          by: ["branchId"],
-          where: { branchId: { in: branchIds }, checkedInAt: { gte: instantRange.start, lt: instantRange.end } },
-          _count: { _all: true },
-        }),
-      ])
+      const revenueRows = await tx.payment.groupBy({
+        by: ["branchId"],
+        where: { branchId: { in: branchIds }, receivedAt: { gte: instantRange.start, lt: instantRange.end } },
+        _sum: { amount: true },
+      })
+      const expenseRows = await tx.expense.groupBy({
+        by: ["branchId"],
+        where: { branchId: { in: branchIds }, expenseDate: { gte: dateOnlyRange.start, lte: dateOnlyRange.end } },
+        _sum: { amount: true },
+      })
+      const visitRows = await tx.queueEntry.groupBy({
+        by: ["branchId"],
+        where: { branchId: { in: branchIds }, checkedInAt: { gte: instantRange.start, lt: instantRange.end } },
+        _count: { _all: true },
+      })
 
       // A branch with no rows in range is simply absent from the grouped
       // result, which is the same zero the per-branch aggregate produced.
