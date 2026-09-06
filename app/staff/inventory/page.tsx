@@ -54,7 +54,9 @@ export default async function InventoryListPage({
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const medicines = await listMedicines(user, { search: q, filter: activeFilter === "all" ? undefined : activeFilter })
-  const isBranchAdmin = session.user.role === "BRANCH_ADMIN"
+  // Mirrors requireCatalogManager in lib/queries/inventory.ts — the
+  // button is a convenience, the query layer is the gate.
+  const canManageCatalog = session.user.role === "BRANCH_ADMIN" || session.user.role === "DOCTOR"
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -67,7 +69,7 @@ export default async function InventoryListPage({
           <Button asChild variant="outline" size="sm">
             <Link href="/staff/inventory/count">Physical count</Link>
           </Button>
-          {isBranchAdmin && (
+          {canManageCatalog && (
             <Button asChild size="sm">
               <Link href="/staff/inventory/new">Add medicine</Link>
             </Button>

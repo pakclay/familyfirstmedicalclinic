@@ -62,7 +62,9 @@ already-encoded JWT claims rather than a DB read on every navigation:
 - `proxy.ts` — route gating, built on `auth.config.ts` only. Redirects
   signed-out requests to `/login`, and redirects a signed-in user's role to
   its home page if it doesn't match the section (`/staff`, `/doctor`,
-  `/console`) it's not allowed into. Public prefixes (`/book/`, `/q/`,
+  `/console`) it's not allowed into — the one exception being
+  `/staff/inventory`, the medicine pages, which a doctor may also enter.
+  Public prefixes (`/book/`, `/q/`,
   `/display/`, `/login`, `/api/auth`) skip this entirely — patients never
   authenticate (§4). Named `proxy.ts` per the Next.js 16 convention (the
   older `middleware.ts` name still works but is deprecated); unlike the old

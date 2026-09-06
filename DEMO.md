@@ -149,7 +149,8 @@ matching `dispense` movement; deleting that row returns stock to 24 via a
 `return` movement (never an edit); a failed save leaves stock untouched;
 `current_stock` always equals the sum of the movement ledger.
 
-1. As branch admin, go to `/staff/inventory` and open any medicine's
+1. As branch admin (or as a doctor — **Medicines** in their nav reaches
+   the same pages), go to `/staff/inventory` and open any medicine's
    detail page — the **movement ledger** lists every receipt/dispense/
    adjustment/return with a running balance.
 2. **Receive stock**: add 50 units to a medicine, confirm `current_stock`

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation"
+import type { Role } from "@prisma/client"
 import { auth } from "@/auth"
 import { getAppName } from "@/lib/branding"
 import { navForRole } from "@/lib/nav"
@@ -28,8 +29,12 @@ export async function ShellHeader({
   navItems,
   showRole = false,
 }: {
-  /** Omit to derive the nav from the signed-in user's role (the console). */
-  navItems?: HeaderNavItem[]
+  /**
+   * Omit to derive the nav from the signed-in user's role (the console).
+   * A function gets the role and picks — the staff shell uses it to keep
+   * a doctor's own nav on the one /staff page they can reach.
+   */
+  navItems?: HeaderNavItem[] | ((role: Role) => HeaderNavItem[])
   /** The console names the role next to the user; staff and doctor don't. */
   showRole?: boolean
 }) {
@@ -42,7 +47,8 @@ export async function ShellHeader({
   // than the header.
   if (!session?.user) redirect("/login")
 
-  const items = navItems ?? navForRole(session.user.role)
+  const items =
+    typeof navItems === "function" ? navItems(session.user.role) : (navItems ?? navForRole(session.user.role))
   const userLabel = showRole
     ? `${session.user.name} · ${ROLE_LABEL[session.user.role]}`
     : session.user.name ?? ""

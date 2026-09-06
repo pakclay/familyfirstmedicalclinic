@@ -1,11 +1,6 @@
 import { Suspense } from "react"
 import { ShellHeader, ShellHeaderSkeleton } from "@/components/nav/shell-header"
-
-const DOCTOR_NAV = [
-  { label: "My queue", href: "/doctor/queue" },
-  { label: "My collections", href: "/doctor/collections" },
-  { label: "Remittance", href: "/doctor/remittance" },
-]
+import { DOCTOR_NAV } from "@/lib/nav"
 
 /** Not async on purpose — see components/nav/shell-header.tsx. */
 export default function DoctorLayout({ children }: { children: React.ReactNode }) {

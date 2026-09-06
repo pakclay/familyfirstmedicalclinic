@@ -5,7 +5,7 @@ import { ReceiveStockForm } from "./receive-stock-form"
 export default async function ReceiveStockPage() {
   const session = await auth()
   if (!session?.user) redirect("/login")
-  if (session.user.role === "HOLDING_ADMIN" || session.user.role === "DOCTOR") redirect("/staff/inventory")
+  if (session.user.role === "HOLDING_ADMIN") redirect("/staff/inventory")
 
   return (
     <div className="mx-auto max-w-md">

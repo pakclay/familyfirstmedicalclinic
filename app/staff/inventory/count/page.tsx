@@ -7,7 +7,7 @@ import { PhysicalCountForm } from "./physical-count-form"
 export default async function PhysicalCountPage() {
   const session = await auth()
   if (!session?.user) redirect("/login")
-  if (session.user.role === "HOLDING_ADMIN" || session.user.role === "DOCTOR") redirect("/staff/inventory")
+  if (session.user.role === "HOLDING_ADMIN") redirect("/staff/inventory")
 
   const user: AbilitySubject = {
     id: session.user.id,
