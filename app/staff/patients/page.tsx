@@ -5,11 +5,12 @@ import { listPatients } from "@/lib/queries/patients"
 import type { AbilitySubject } from "@/lib/permissions/ability"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { firstParam, type SearchParam } from "@/lib/utils/search-params"
 
 export default async function StaffPatientsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>
+  searchParams: Promise<{ q?: SearchParam }>
 }) {
   const session = await auth()
   if (!session?.user) redirect("/login")
@@ -25,7 +26,7 @@ export default async function StaffPatientsPage({
     )
   }
 
-  const { q } = await searchParams
+  const q = firstParam((await searchParams).q)
   const user: AbilitySubject = {
     id: session.user.id,
     role: session.user.role,

@@ -6,6 +6,7 @@ import type { AbilitySubject } from "@/lib/permissions/ability"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { firstParam, type SearchParam } from "@/lib/utils/search-params"
 
 const FILTERS: { value: InventoryFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -26,7 +27,7 @@ const FORM_LABEL: Record<string, string> = {
 export default async function InventoryListPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; filter?: string }>
+  searchParams: Promise<{ q?: SearchParam; filter?: SearchParam }>
 }) {
   const session = await auth()
   if (!session?.user) redirect("/login")
@@ -41,7 +42,9 @@ export default async function InventoryListPage({
     )
   }
 
-  const { q, filter } = await searchParams
+  const params = await searchParams
+  const q = firstParam(params.q)
+  const filter = firstParam(params.filter)
   const activeFilter = (FILTERS.find((f) => f.value === filter)?.value ?? "all") as InventoryFilter
   const user: AbilitySubject = {
     id: session.user.id,

@@ -180,6 +180,33 @@ describe("holding-company isolation", () => {
     expect(rows.some((u) => u.id === ownerBId)).toBe(false)
   })
 
+  /**
+   * The searchable list, across the same boundary — and the only test in the
+   * repo that can see this arm fail. listUsers ANDs its search onto the
+   * scope; spreading it instead would REPLACE holdingCompanyScope (itself a
+   * top-level OR) with the search terms, and `users` has no RLS, so the
+   * result would be every matching account in every company. users.test.ts
+   * cannot catch that: it builds one holding company, where "my company's
+   * rows" and "every row" are the same set. Verified load-bearing by
+   * mutation — spreading only the holding arm leaves that whole suite green.
+   */
+  it("listUsers cannot be widened past the caller's company by a search term", async () => {
+    const searchForB = `tenant-b-staff-${stamp}`
+    // Positive control first: the term really does match a live account, so
+    // the assertion below fails for the right reason rather than because
+    // nothing anywhere matches.
+    expect((await listUsers(adminB, { search: searchForB })).some((u) => u.id === staffBId)).toBe(true)
+    expect(await listUsers(adminA, { search: searchForB })).toEqual([])
+    // Same probe by name and by branch name — the other two searchable
+    // columns, each its own arm of the search OR.
+    expect(await listUsers(adminA, { search: "Tenant B Staff" })).toEqual([])
+    expect(await listUsers(adminA, { search: "Tenant B Branch" })).toEqual([])
+    // A search that matches in BOTH companies returns only the caller's own.
+    const shared = await listUsers(adminA, { search: `staff-${stamp}` })
+    expect(shared.some((u) => u.id === staffAId)).toBe(true)
+    expect(shared.some((u) => u.id === staffBId)).toBe(false)
+  })
+
   it("listUsers still includes the caller's own branchless holding admin", async () => {
     const rows = await listUsers(adminA)
     expect(rows.some((u) => u.id === adminA.id)).toBe(true)

@@ -5,11 +5,12 @@ import type { AbilitySubject } from "@/lib/permissions/ability"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { NewExpenseForm } from "./new-expense-form"
+import { firstParam, type SearchParam } from "@/lib/utils/search-params"
 
 export default async function ExpensesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ start?: string; end?: string }>
+  searchParams: Promise<{ start?: SearchParam; end?: SearchParam }>
 }) {
   const session = await auth()
   if (!session?.user) redirect("/login")
@@ -22,7 +23,9 @@ export default async function ExpensesPage({
     )
   }
 
-  const { start, end } = await searchParams
+  const params = await searchParams
+  const start = firstParam(params.start)
+  const end = firstParam(params.end)
 
   const user: AbilitySubject = {
     id: session.user.id,
