@@ -1,11 +1,13 @@
-import { PrismaClient } from "@prisma/client"
 import { previewExpiredRecords, purgeExpiredRecords, type RetentionCounts } from "@/lib/retention/purge"
+import { createPrismaClient } from "../lib/db/client-factory"
+import { loadEnvFiles, requireDatabaseUrl } from "../lib/db/env-files"
 
 // Connects via DATABASE_URL (the migration/superuser role), same as
 // prisma/seed.ts — this operation needs DELETE, which the app's runtime
 // APP_DATABASE_URL role deliberately doesn't have. See
 // prisma/grant-app-role.sql and lib/retention/purge.ts.
-const prisma = new PrismaClient()
+loadEnvFiles()
+const prisma = createPrismaClient(requireDatabaseUrl())
 
 const EXECUTE = process.argv.includes("--execute")
 

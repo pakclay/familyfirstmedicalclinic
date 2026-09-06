@@ -1,4 +1,5 @@
-import { PrismaClient } from "@prisma/client"
+import { createPrismaClient } from "../lib/db/client-factory"
+import { loadEnvFiles } from "../lib/db/env-files"
 
 /**
  * Creates and grants the non-superuser role that APP_DATABASE_URL connects
@@ -22,26 +23,18 @@ import { PrismaClient } from "@prisma/client"
  * schema drops them while leaving the role itself in place.
  */
 
-// Same pattern as lib/test/setup-env.ts: load the env files when they exist,
-// and rely on real environment variables when they don't — which is the case
-// in CI and on Vercel, where there is no .env on disk.
-for (const file of [".env", ".env.local"]) {
-  try {
-    process.loadEnvFile(file)
-  } catch {
-    // Absent is normal outside a developer machine.
-  }
-}
+// Load the env files when they exist, and rely on real environment variables
+// when they don't — which is the case in CI and on Vercel, where there is no
+// .env on disk.
+loadEnvFiles()
 
 function fail(message: string): never {
   console.error(`ensure-app-role: ${message}`)
   process.exit(1)
 }
 
-const superuserUrl = process.env.DATABASE_URL
+const superuserUrl = process.env.DATABASE_URL ?? fail("DATABASE_URL is not set — nothing to connect as.")
 const appUrl = process.env.APP_DATABASE_URL
-
-if (!superuserUrl) fail("DATABASE_URL is not set — nothing to connect as.")
 if (!appUrl) {
   // Not an error worth failing a deploy over: a database with no app role
   // still runs, it just runs without the RLS backstop. Say so loudly rather
@@ -75,7 +68,7 @@ if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(role)) {
 const literal = (value: string) => `'${value.replace(/'/g, "''")}'`
 
 async function main() {
-  const prisma = new PrismaClient({ datasources: { db: { url: superuserUrl } } })
+  const prisma = createPrismaClient(superuserUrl)
 
   try {
     const existing = await prisma.$queryRawUnsafe<{ count: bigint }[]>(

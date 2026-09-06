@@ -1,4 +1,5 @@
-import { PrismaClient } from "@prisma/client"
+import { createPrismaClient } from "@/lib/db/client-factory"
+import { requireDatabaseUrl } from "@/lib/db/env-files"
 
 /**
  * Test-only escape hatch for fixture teardown. The RLS migration
@@ -11,6 +12,4 @@ import { PrismaClient } from "@prisma/client"
  * bypasses RLS) instead of the app's normal APP_DATABASE_URL connection.
  * Import this only from test files.
  */
-export const superuserPrisma = new PrismaClient({
-  datasources: { db: { url: process.env.DATABASE_URL } },
-})
+export const superuserPrisma = createPrismaClient(requireDatabaseUrl())
