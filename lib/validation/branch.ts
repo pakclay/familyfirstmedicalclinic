@@ -59,12 +59,18 @@ export type EditBranchInput = z.infer<typeof editBranchSchema>
  * a later addition to editableBranchFields fail closed rather than
  * silently widening what a branch admin can edit.
  */
-export const branchSettingsSchema = z.object({
+export const branchSettingsSchema = z
+  .object({
   address: editableBranchFields.address,
   city: editableBranchFields.city,
   phone: editableBranchFields.phone,
   facebookPageUrl: editableBranchFields.facebookPageUrl,
   operatingHours: editableBranchFields.operatingHours,
+  // The system fee (lib/utils/billing.ts): a toggle and an amount in
+  // centavos. The amount is kept and validated even while the fee is off,
+  // so switching it back on doesn't mean typing it again.
+  systemFeeEnabled: z.boolean(),
+  systemFeeAmount: z.coerce.number().int().min(0, "The system fee can't be negative"),
   // What the calling board says when a patient is called. Blank means
   // "use the default" and is stored as NULL by the query layer, the same
   // shape as facebookPageUrl; anything else must pass the placeholder
@@ -80,6 +86,17 @@ export const branchSettingsSchema = z.object({
       const problem = announcementTemplateProblem(value)
       if (problem) ctx.addIssue({ code: "custom", message: problem })
     }),
-})
+  })
+  .superRefine((value, ctx) => {
+    // Switching the fee on with nothing to charge would silently put a
+    // ₱0.00 line on every bill — refused rather than allowed.
+    if (value.systemFeeEnabled && !(value.systemFeeAmount > 0)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["systemFeeAmount"],
+        message: "Enter the system fee amount, or switch the fee off.",
+      })
+    }
+  })
 
 export type BranchSettingsInput = z.infer<typeof branchSettingsSchema>

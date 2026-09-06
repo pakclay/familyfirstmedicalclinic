@@ -2,6 +2,7 @@
 
 import { useState, useSyncExternalStore } from "react"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -35,6 +36,8 @@ export function BranchSettingsForm({ branch }: { branch: BranchDTO }) {
   const [facebookPageUrl, setFacebookPageUrl] = useState(branch.facebookPageUrl ?? "")
   const [hours, setHours] = useState<Record<Weekday, DayForm>>(() => toDayForms(branch.operatingHours))
   const [announcementTemplate, setAnnouncementTemplate] = useState(branch.announcementTemplate ?? "")
+  const [systemFeeEnabled, setSystemFeeEnabled] = useState(branch.systemFeeEnabled)
+  const [systemFeePesos, setSystemFeePesos] = useState((branch.systemFeeAmount / 100).toFixed(2))
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
@@ -77,6 +80,8 @@ export function BranchSettingsForm({ branch }: { branch: BranchDTO }) {
       facebookPageUrl,
       operatingHours: toOperatingHours(hours),
       announcementTemplate,
+      systemFeeEnabled,
+      systemFeeAmount: Math.round(Number(systemFeePesos) * 100),
     })
     setPending(false)
     if (!res.ok) {
@@ -142,6 +147,33 @@ export function BranchSettingsForm({ branch }: { branch: BranchDTO }) {
             )}
           </div>
         )}
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label>System fee</Label>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={systemFeeEnabled} onCheckedChange={(c) => setSystemFeeEnabled(c === true)} />
+          Add a system fee to every consultation
+        </label>
+        <Label htmlFor="systemFeePesos" className="mt-1 text-xs text-muted-foreground">
+          Amount (₱)
+        </Label>
+        <Input
+          id="systemFeePesos"
+          type="number"
+          step="0.01"
+          min={0}
+          inputMode="decimal"
+          value={systemFeePesos}
+          onChange={(e) => setSystemFeePesos(e.target.value)}
+          disabled={!systemFeeEnabled}
+          className="h-10"
+        />
+        <p className="text-xs text-muted-foreground">
+          Charged to the patient on top of the consultation fee and medicines, for the use of the queue and booking
+          system. It appears as its own line on the doctor&rsquo;s payment screen. The amount is kept while the fee
+          is switched off.
+        </p>
       </div>
 
       {error && <p className="text-sm text-destructive">{error}</p>}

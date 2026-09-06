@@ -5,6 +5,7 @@ import { toPatientDTO, type PatientDTO } from "@/lib/dto/patient"
 import type { ConsultationSummaryDTO } from "@/lib/dto/consultation"
 import { toMedicineOptionDTO, type MedicineOptionDTO } from "@/lib/dto/medicine"
 import { consultationSchema } from "@/lib/validation/consultation"
+import { computeBill } from "@/lib/utils/billing"
 
 /** Everything the consultation screen needs in one fetch: the patient, their prior history, and live stock. */
 export type ConsultationScreenData = {
@@ -16,6 +17,8 @@ export type ConsultationScreenData = {
   history: ConsultationSummaryDTO[]
   medicines: MedicineOptionDTO[]
   consultationFee: number
+  /** The branch's system fee in centavos, 0 when it doesn't collect one — a line on the bill (lib/utils/billing.ts). */
+  systemFee: number
   /** Vitals triage already recorded on this visit, so the doctor sees them rather than re-taking them. */
   triageVitals: { values: Record<string, string>; recordedAt: Date | null; recordedByName: string | null }
 }
@@ -56,6 +59,11 @@ export async function getConsultationScreenData(
       orderBy: { name: "asc" },
     })
 
+    const branch = await tx.branch.findUniqueOrThrow({
+      where: { id: branchId },
+      select: { systemFeeEnabled: true, systemFeeAmount: true },
+    })
+
     return {
       queueEntryId: entry.id,
       queueNumber: entry.queueNumber,
@@ -81,6 +89,7 @@ export async function getConsultationScreenData(
       })),
       medicines: medicines.map(toMedicineOptionDTO),
       consultationFee: doctor.consultationFee,
+      systemFee: branch.systemFeeEnabled ? branch.systemFeeAmount : 0,
       triageVitals: {
         // Free-form JSON column — a row written before the vitals schema
         // existed could be any shape, so anything that is not an object of
@@ -272,12 +281,36 @@ export async function saveConsultation(
       })
     }
 
+    // The bill is recomputed here from the server's own numbers — the
+    // doctor's fee, the catalog prices, the branch's system fee — never
+    // from anything the form sent. The form says only whether to add VAT;
+    // the amount it sends is what was collected, which may legitimately
+    // differ from the total (discount, partial payment). Same function
+    // the form uses to show the lines, so the two agree to the centavo.
+    const branch = await tx.branch.findUniqueOrThrow({
+      where: { id: branchId },
+      select: { systemFeeEnabled: true, systemFeeAmount: true },
+    })
+    const bill = computeBill({
+      consultationFee: doctor.consultationFee,
+      medicines: parsed.medicines.flatMap((row) => {
+        const catalogMedicine = row.dispensedFromStock && row.medicineId ? medicineById.get(row.medicineId) : undefined
+        return catalogMedicine ? [{ unitPrice: catalogMedicine.sellingPrice, quantity: row.quantity }] : []
+      }),
+      systemFee: branch.systemFeeEnabled ? branch.systemFeeAmount : 0,
+      vat: parsed.payment.vat,
+    })
+
     const payment = await tx.payment.create({
       data: {
         branchId,
         consultationId: consultation.id,
         patientId: entry.patientId,
         amount: parsed.payment.amount,
+        consultationFeeAmount: bill.consultationFee,
+        medicinesAmount: bill.medicines,
+        systemFeeAmount: bill.systemFee,
+        vatAmount: bill.vat,
         paymentMethod: parsed.payment.method,
         collectedByUserId: user.id,
         orNumber: parsed.payment.orNumber || null,
@@ -296,7 +329,14 @@ export async function saveConsultation(
       data: { branchId, userId: user.id, action: "consultation.create", entityType: "Consultation", entityId: consultation.id },
     })
     await tx.auditLog.create({
-      data: { branchId, userId: user.id, action: "payment.create", entityType: "Payment", entityId: payment.id, changes: { amount: payment.amount } },
+      data: {
+        branchId,
+        userId: user.id,
+        action: "payment.create",
+        entityType: "Payment",
+        entityId: payment.id,
+        changes: { amount: payment.amount, billed: bill.total, systemFee: bill.systemFee, vat: bill.vat },
+      },
     })
     if (overrodeShortfall) {
       // §7.5 DECISION: the override "writes an audit log entry naming the

@@ -43,8 +43,13 @@ export const consultationSchema = z.object({
   // lib/queries/consultations.ts for what it actually does to the ledger.
   overrideInsufficientStock: z.boolean().default(false),
   payment: z.object({
+    // What was collected — may differ from the bill (discount, partial
+    // payment). The bill itself is never sent: saveConsultation recomputes
+    // every line from its own data (lib/utils/billing.ts).
     amount: z.coerce.number().int().min(0, "Amount can't be negative"),
     method: z.enum(["CASH", "GCASH", "CARD", "HMO", "OTHER"]),
+    // "Add 12% VAT" — the one billing decision the doctor makes here.
+    vat: z.boolean().default(false),
     orNumber: z.string().trim().optional(),
     notes: z.string().trim().optional(),
   }),

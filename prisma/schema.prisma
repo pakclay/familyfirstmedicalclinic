@@ -161,6 +161,12 @@ model Branch {
   // clearing the field returns the built-in wording (same reasoning as
   // HoldingCompany.brandName).
   announcementTemplate String? @map("announcement_template")
+  // An optional fee the branch adds to every consultation's bill, for the
+  // use of the queue and booking system (lib/utils/billing.ts). Off by
+  // default. The amount (centavos) is kept when the fee is switched off,
+  // so switching it back on restores it rather than asking again.
+  systemFeeEnabled Boolean @default(false) @map("system_fee_enabled")
+  systemFeeAmount  Int     @default(0) @map("system_fee_amount")
   isActive        Boolean  @default(true) @map("is_active")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
@@ -448,8 +454,19 @@ model Payment {
   consultation      Consultation? @relation(fields: [consultationId], references: [id])
   patientId         String        @map("patient_id")
   patient           Patient       @relation(fields: [patientId], references: [id])
-  // centavos
+  // centavos — what was actually collected
   amount            Int
+  // The bill behind `amount`, itemized at the time (lib/utils/billing.ts):
+  // the doctor's fee that day, dispensed medicines at their catalog price,
+  // the branch's system fee if it collects one, and 12% VAT when the
+  // doctor ticked it. Denormalized for the same reason medicines_dispensed
+  // carries unit_price — fees change, and the record must not. `amount`
+  // may differ from the total (discount, partial payment). Rows from
+  // before these columns existed carry zeros.
+  consultationFeeAmount Int @default(0) @map("consultation_fee_amount")
+  medicinesAmount       Int @default(0) @map("medicines_amount")
+  systemFeeAmount       Int @default(0) @map("system_fee_amount")
+  vatAmount             Int @default(0) @map("vat_amount")
   paymentMethod     PaymentMethod @default(CASH) @map("payment_method")
   collectedByUserId String        @map("collected_by_user_id")
   collectedByUser   User          @relation("PaymentCollectedBy", fields: [collectedByUserId], references: [id])

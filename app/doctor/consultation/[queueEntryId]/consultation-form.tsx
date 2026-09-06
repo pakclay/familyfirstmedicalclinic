@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import type { ConsultationScreenData } from "@/lib/queries/consultations"
+import { computeBill, formatPesos, VAT_RATE_PERCENT } from "@/lib/utils/billing"
 import { MedicineRow, type MedicineRowState } from "./medicine-row"
 import { saveConsultationAction } from "./actions"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -45,8 +46,9 @@ export function ConsultationForm({ data }: { data: ConsultationScreenData }) {
   const [treatmentPlan, setTreatmentPlan] = useState("")
   const [followUpDate, setFollowUpDate] = useState("")
   const [rows, setRows] = useState<MedicineRowState[]>([])
+  const [addVat, setAddVat] = useState(false)
   const [amountTouched, setAmountTouched] = useState(false)
-  const [amountPesos, setAmountPesos] = useState((data.consultationFee / 100).toFixed(2))
+  const [amountPesos, setAmountPesos] = useState("")
   const [method, setMethod] = useState("CASH")
   const [orNumber, setOrNumber] = useState("")
   const [paymentNotes, setPaymentNotes] = useState("")
@@ -55,20 +57,33 @@ export function ConsultationForm({ data }: { data: ConsultationScreenData }) {
   const [offerOverride, setOfferOverride] = useState(false)
   const [override, setOverride] = useState(false)
 
-  // §13's decision: itemized separately — consultation fee + Σ(dispensed
-  // sellingPrice × quantity). Auto-computed as a *default*, not locked —
-  // the doctor can still override for discounts, partial payment, etc.
-  const suggestedTotalCentavos = useMemo(() => {
-    const medicinesTotal = rows.reduce((sum, r) => {
-      if (!r.dispensedFromStock || !r.medicineId) return sum
-      const medicine = data.medicines.find((m) => m.id === r.medicineId)
-      const qty = Number(r.quantity) || 0
-      return sum + (medicine?.sellingPrice ?? 0) * qty
-    }, 0)
-    return data.consultationFee + medicinesTotal
-  }, [rows, data.medicines, data.consultationFee])
+  // §13's decision: itemized — consultation fee + Σ(dispensed sellingPrice
+  // × quantity), now plus the branch's system fee and VAT if asked. The
+  // server recomputes every line from its own numbers when the
+  // consultation is saved (lib/utils/billing.ts, the same function), so
+  // this is a mirror for the doctor's eyes: only "add VAT" and the amount
+  // collected are ever sent. The total is a *default* for that amount, not
+  // a lock — the doctor can still override for a discount or a partial
+  // payment, and the bill is recorded in full either way.
+  const bill = useMemo(
+    () =>
+      computeBill({
+        consultationFee: data.consultationFee,
+        medicines: rows.flatMap((r) => {
+          if (!r.dispensedFromStock || !r.medicineId) return []
+          const medicine = data.medicines.find((m) => m.id === r.medicineId)
+          return medicine ? [{ unitPrice: medicine.sellingPrice, quantity: Number(r.quantity) || 0 }] : []
+        }),
+        systemFee: data.systemFee,
+        vat: addVat,
+      }),
+    [rows, data.medicines, data.consultationFee, data.systemFee, addVat]
+  )
+  const dispensedCount = rows.filter((r) => r.dispensedFromStock && r.medicineId).length
 
-  const displayedAmount = amountTouched ? amountPesos : (suggestedTotalCentavos / 100).toFixed(2)
+  const displayedAmount = amountTouched ? amountPesos : (bill.total / 100).toFixed(2)
+  const collectedCentavos = Math.round(Number(displayedAmount) * 100)
+  const collectedDiffers = amountTouched && Number.isFinite(collectedCentavos) && collectedCentavos !== bill.total
 
   function updateRow(key: string, patch: Partial<MedicineRowState>) {
     setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)))
@@ -98,8 +113,9 @@ export function ConsultationForm({ data }: { data: ConsultationScreenData }) {
         })),
       overrideInsufficientStock: override,
       payment: {
-        amount: Math.round(Number(displayedAmount) * 100),
+        amount: collectedCentavos,
         method,
+        vat: addVat,
         orNumber,
         notes: paymentNotes,
       },
@@ -219,8 +235,30 @@ export function ConsultationForm({ data }: { data: ConsultationScreenData }) {
         <Card>
           <CardContent className="flex flex-col gap-3 py-4">
             <Label>Payment</Label>
+
+            <div className="flex flex-col gap-1.5 text-sm">
+              <BillLine label="Consultation fee" amount={bill.consultationFee} />
+              <BillLine
+                label={dispensedCount > 0 ? `Medicines (${dispensedCount} dispensed)` : "Medicines"}
+                amount={bill.medicines}
+                muted={bill.medicines === 0}
+              />
+              {data.systemFee > 0 && <BillLine label="System fee" amount={bill.systemFee} />}
+              <div className={`flex items-center justify-between gap-3 ${addVat ? "" : "text-muted-foreground"}`}>
+                <label className="flex items-center gap-2">
+                  <Checkbox checked={addVat} onCheckedChange={(c) => setAddVat(c === true)} />
+                  Add {VAT_RATE_PERCENT}% VAT
+                </label>
+                <span className="font-numeric">{formatPesos(bill.vat)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3 border-t border-border pt-2 font-semibold">
+                <span>Total</span>
+                <span className="font-numeric text-lg">{formatPesos(bill.total)}</span>
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Amount (₱)">
+              <Field label="Amount collected (₱)">
                 <Input
                   type="number"
                   step="0.01"
@@ -248,6 +286,12 @@ export function ConsultationForm({ data }: { data: ConsultationScreenData }) {
                 </select>
               </div>
             </div>
+            {collectedDiffers && (
+              <p className="text-xs text-muted-foreground">
+                Differs from the total by {formatPesos(Math.abs(collectedCentavos - bill.total))}. The bill above is
+                recorded as itemized; this is what was actually collected.
+              </p>
+            )}
             <Field label="OR number (optional)">
               <Input value={orNumber} onChange={(e) => setOrNumber(e.target.value)} className="h-10" />
             </Field>
@@ -274,6 +318,15 @@ export function ConsultationForm({ data }: { data: ConsultationScreenData }) {
           {pending ? "Saving…" : override ? "Complete consultation anyway" : "Complete consultation"}
         </Button>
       </form>
+    </div>
+  )
+}
+
+function BillLine({ label, amount, muted }: { label: string; amount: number; muted?: boolean }) {
+  return (
+    <div className={`flex items-center justify-between gap-3 ${muted ? "text-muted-foreground" : ""}`}>
+      <span>{label}</span>
+      <span className="font-numeric">{formatPesos(amount)}</span>
     </div>
   )
 }

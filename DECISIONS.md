@@ -71,6 +71,55 @@ URL); the full suite; tsc; eslint. Not verifiable from here: the production
 change itself, which the owner makes in Vercel — the startup log line will
 say whether it took.
 
+## 2026-09-07 — Itemized billing: system fee, VAT, medicine prices
+
+The consultation's payment card showed one number. It now shows the bill
+line by line — consultation fee, dispensed medicines at their catalog
+price, an optional per-branch system fee, VAT if the doctor ticks it —
+then the total, and separately the amount collected.
+
+- **One function, run in two places.** `computeBill` (lib/utils/billing.ts)
+  is called by the form to draw the lines as the doctor works and by
+  `saveConsultation` to record them. The form never sends a line amount:
+  it sends which medicines were dispensed, whether to add VAT, and the
+  amount collected. The server recomputes every line from the doctor's
+  fee, the catalog's selling prices and the branch's fee setting. A bill
+  computed in the browser is a bill the browser can edit; this one isn't.
+- **The breakdown is persisted on `payments`** — four columns:
+  consultation fee, medicines, system fee, VAT. Denormalized for the same
+  reason `medicines_dispensed` carries `unit_price`: the doctor's fee
+  changes, the record must not. `amount` keeps its meaning — what was
+  actually collected — and may differ from the total (a discount, a
+  partial payment); the form says so when it does. Rows from before this
+  carry zeros; their breakdown was never recorded and cannot be rebuilt.
+  Reports still sum `amount` and are unchanged.
+- **The system fee is the branch admin's setting**: a toggle and an
+  amount, under Settings. The amount is kept while the fee is off, so
+  switching it back on doesn't mean typing it again; switching it on with
+  nothing to charge is refused rather than putting a ₱0.00 line on every
+  bill. The audit row for a settings change carries both values (§10
+  audits every financial figure). Off by default, so no branch starts
+  charging anything it didn't choose.
+- **VAT is 12% on top of the subtotal, per consultation, rounded half-up
+  to the centavo.** A tick on the payment card, not a branch setting: the
+  request asked for a checkbox, and whether a given visit is VATable is
+  the kind of thing the person writing the receipt decides. Stated
+  assumption: fees are quoted net of VAT, so the tick *adds* it. A clinic
+  whose prices are already VAT-inclusive leaves it off, and the record
+  then carries no VAT line — it does not back-compute one.
+- **The price sits under the toggle that decides it.** "Dispensed from
+  clinic stock" is what puts a line on the bill, so each row shows the
+  selling price × quantity right beneath that checkbox, the picker shows
+  the price next to the stock count, and a prescribed-only row says
+  plainly that nothing is charged here.
+
+Verified: unit tests for the arithmetic and rounding; schema refusals
+(fee on with ₱0, negative, fractional centavos); a query test that the
+branch setting round-trips, survives being switched off and is
+audit-logged; consultation tests that the persisted breakdown matches
+the server's numbers with a discount and with a prescribed-only row, and
+that a switched-off fee never leaks onto a bill. tsc; eslint.
+
 ## 2026-09-07 — Calling-board announcement wording, per branch
 
 The calling board (`/now-serving`) used to speak a fixed "Number 7. Maria

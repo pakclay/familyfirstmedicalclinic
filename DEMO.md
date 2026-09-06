@@ -128,9 +128,13 @@ immediately, and in today's revenue attributed to the correct collector.
    seeded medicine name (e.g. "Para" for Paracetamol) — the live-stock
    picker shows matches with current stock. Pick one, set a quantity, and
    watch the row's preview read `X left → Y after`.
-3. The payment amount has already auto-filled to consultation fee + the
-   medicine's selling price × quantity — itemized, per the §13 billing
-   decision. Submit **Complete consultation**.
+3. The **Payment** card itemizes the bill, per the §13 billing decision:
+   consultation fee, dispensed medicines at their catalog price (each
+   dispensed row shows its price × quantity), the branch's system fee if
+   its admin switched one on under **Settings → System fee**, and **Add
+   12% VAT** if ticked — then the total, with **Amount collected**
+   pre-filled to it (editable for a discount or a partial payment; the
+   bill is recorded in full either way). Submit **Complete consultation**.
 4. Two places confirm it landed: **My collections today** (doctor's own
    screen) now includes this payment attributed to you, and the
    patient's profile (`/staff/patients/<id>`) immediately shows the new
