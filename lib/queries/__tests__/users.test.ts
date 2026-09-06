@@ -553,11 +553,17 @@ describe("user management", () => {
     const byName = (await listUsers(holdingAdmin, { search: "front desk" })).map((u) => u.id)
     expect(byName).toEqual(expect.arrayContaining([frontDeskInA.id, frontDeskInB.id]))
 
-    // The load-bearing half: a match outside the actor's scope is still
-    // invisible. Branch A's admin searching for Branch B's front desk by its
-    // own email gets nothing — the search narrows the scoped list, it never
-    // replaces the scope (see the AND in listUsers).
+    // A match outside the actor's scope stays invisible. The branch-admin
+    // line is the ordinary case — its scope is a flat { branchId, role }, so
+    // any composition of scope and search keeps it correct.
     expect(await listUsers(branchAdminA, { search: "fd-b-" })).toEqual([])
+    // THIS is the line that catches the scope-clobber: clinicScope() is a
+    // top-level OR, so spreading the search OR into it would overwrite the
+    // clinic bound outright. Verified by mutation — swap listUsers' AND for
+    // `{ ...scope, OR: [...] }` and this assertion is the one that fails
+    // (the branch-admin line above still passes). The holding-admin arm has
+    // the same shape and the same exposure, but needs two companies to
+    // observe: that assertion lives in tenant-isolation.test.ts.
     expect(await listUsers(clinicAdmin, { search: "Branch B" })).toEqual([])
 
     // Whitespace is no filter at all.
