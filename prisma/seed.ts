@@ -1,10 +1,15 @@
-import { PrismaClient, Role, Sex, MedicineForm, MedicineUnit } from "@prisma/client"
+import { Role, Sex, MedicineForm, MedicineUnit } from "@prisma/client"
 import bcrypt from "bcryptjs"
+import { createPrismaClient } from "../lib/db/client-factory"
+import { loadEnvFiles, requireDatabaseUrl } from "../lib/db/env-files"
 
 // Seeds against DATABASE_URL (the migration/superuser role) — RLS applies
 // only to the app's runtime connection (APP_DATABASE_URL / webinar_app),
-// so seeding needs no RLS session GUCs. See lib/db/prisma.ts.
-const prisma = new PrismaClient()
+// so seeding needs no RLS session GUCs. See lib/db/prisma.ts. Prisma 7
+// neither loads .env nor opens a connection by itself, so the script does
+// both (lib/db/client-factory.ts).
+loadEnvFiles()
+const prisma = createPrismaClient(requireDatabaseUrl())
 
 const DEV_PASSWORD = "FamilyFirst2026!"
 

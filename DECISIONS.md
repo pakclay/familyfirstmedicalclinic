@@ -71,6 +71,62 @@ URL); the full suite; tsc; eslint. Not verifiable from here: the production
 change itself, which the owner makes in Vercel — the startup log line will
 say whether it took.
 
+## 2026-09-07 — Prisma 7 (from 6.19): a config file, a driver, the same generator
+
+Dependabot's two PRs (#32, #33) could not pass CI: Prisma 7 refuses a `url`
+in the schema's datasource block. Done by hand instead, as one change.
+
+- **What moved where.** The migrate connection (`DATABASE_URL`) now lives
+  in `prisma.config.ts`, with the seed command that used to be
+  `package.json#prisma`. The schema's datasource block is provider-only.
+  Prisma 7 also stopped loading `.env` files itself, so `prisma.config.ts`
+  inlines the same two-file loop the scripts use, and `lib/db/env-files.ts`
+  gives the scripts and the test setup one copy of it.
+- **The client needs a driver now.** Prisma 7 opens no connection of its
+  own: every `PrismaClient` takes an adapter, here `@prisma/adapter-pg` over
+  node-postgres. `lib/db/client-factory.ts` is the one place that builds one
+  — the app, the tests' superuser client and the three scripts under
+  `prisma/` all call it — because three things the old Rust engine read off
+  the connection string are now this code's job. `connection_limit`
+  becomes the pool's `max`. `pgbouncer=true` is obsolete: the adapter never
+  names its prepared statements unless asked, so nothing assumes one
+  outlives its transaction. And TLS, which the engine did by default
+  (`sslmode=prefer`: encrypt, don't verify) and `pg` does not do at all —
+  a remote host now gets the same encrypt-without-verifying, a local one
+  none, and a URL that states its own `sslmode` is left alone. Without that
+  rule the upgrade would have quietly put Vercel↔Supabase traffic on the
+  wire in the clear.
+- **`prisma-client-js` stays.** Prisma 7 deprecates it in favour of the
+  `prisma-client` generator, which changes every import path — 49 files
+  import from `@prisma/client`, for enums as much as for the client. The
+  deprecated generator still works in 7.x; switching is its own change,
+  to be made with the next major.
+- **Transaction mode is still right, for the same reasons.** RLS GUCs are
+  `set_config(…, true)` inside interactive transactions, which the adapter
+  pins to one pooled connection; the queue's locks are `_xact_`; nothing
+  assumes a session. The startup check in `lib/db/prisma.ts` keeps flagging
+  port 5432 and no longer demands `pgbouncer=true`, which would now be
+  asking for a flag that does nothing.
+- **A deprecation warning from `pg` during tests** — "Calling
+  client.query() when the client is already executing a query" — comes
+  from the adapter issuing a query on a client mid-query, which `pg` 8
+  queues and `pg` 9 will refuse. Nothing fails on it; noted so it is not
+  mistaken for a regression when it shows up in a log.
+- **Not upgraded alongside.** ESLint 10 (#34): `eslint-plugin-react`,
+  pinned inside `eslint-config-next`, still calls `context.getFilename`,
+  which ESLint 10 removed, and no published version supports 10.
+  TypeScript 7 (#14): `typescript-eslint` refuses TS 7.0 outright. Both
+  wait on upstream; neither is a risk decision.
+
+Verified: `prisma generate` and `migrate status` through the config file;
+the full suite through the adapter against the local database — RLS
+scoping, queue dates, the retention job, all of it; tsc; eslint;
+`next build`; and the production bundle started locally serving the public
+display page through the adapter. Not verifiable here: the production
+runtime over the Supabase pooler, which only a deploy exercises — the
+public display page on the deployed site is the check, and
+`vercel rollback` the way back.
+
 ## 2026-09-07 — Doctors manage the medicine catalog
 
 M4b (2026-08-22) made catalog management — add, edit, price, deactivate —

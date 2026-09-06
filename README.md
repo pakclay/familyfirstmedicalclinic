@@ -38,7 +38,10 @@ these grants with it.
 In production (Supabase, Vercel) the two URLs point at two different
 things on purpose: `DATABASE_URL` at the direct or session-mode connection,
 because Prisma Migrate needs one, and `APP_DATABASE_URL` at the pooler in
-**transaction mode** — port 6543, with `?pgbouncer=true&connection_limit=5`.
+**transaction mode** — port 6543, with `?connection_limit=5` (since Prisma 7
+the app talks to Postgres through node-postgres — `lib/db/client-factory.ts`
+turns `connection_limit` into the pool size, and the old `pgbouncer=true`
+flag no longer does anything).
 Session mode (port 5432) caps clients at the pooler's `pool_size`, and a
 few warm serverless instances exhaust that; the app then fails mid-request
 with `EMAXCONNSESSION`. `lib/db/prisma.ts` logs an error at startup if it
