@@ -2,6 +2,31 @@ import type { Role } from "@prisma/client"
 
 export type NavItem = { label: string; href: string }
 
+/**
+ * The two branch-floor navs live here rather than in their layouts because
+ * the staff shell has to pick between them: a doctor reaching
+ * /staff/inventory (proxy.ts lets them in there, and nowhere else under
+ * /staff) must keep the doctor's own nav, or every other link in the header
+ * would bounce them straight back to /doctor/queue.
+ */
+export const STAFF_NAV: NavItem[] = [
+  { label: "Queue", href: "/staff/queue" },
+  { label: "Register walk-in", href: "/staff/register" },
+  { label: "Patients", href: "/staff/patients" },
+  { label: "Inventory", href: "/staff/inventory" },
+  { label: "Follow-ups", href: "/staff/follow-ups" },
+  { label: "Notifications", href: "/staff/notifications" },
+  { label: "Remittance", href: "/staff/remittance" },
+]
+
+export const DOCTOR_NAV: NavItem[] = [
+  { label: "My queue", href: "/doctor/queue" },
+  { label: "My collections", href: "/doctor/collections" },
+  { label: "Remittance", href: "/doctor/remittance" },
+  // Same pages the branch admin uses, under /staff — see proxy.ts.
+  { label: "Medicines", href: "/staff/inventory" },
+]
+
 const BRANCH_ADMIN_NAV: NavItem[] = [
   { label: "Dashboard", href: "/console/dashboard" },
   // lives under /staff — shared with front desk rather than reimplemented
@@ -37,5 +62,7 @@ export function navForRole(role: Role): NavItem[] {
   if (role === "HOLDING_ADMIN") return HOLDING_ADMIN_NAV
   if (role === "CLINIC_ADMIN") return CLINIC_ADMIN_NAV
   if (role === "BRANCH_ADMIN") return BRANCH_ADMIN_NAV
+  if (role === "DOCTOR") return DOCTOR_NAV
+  if (role === "FRONT_DESK") return STAFF_NAV
   return []
 }

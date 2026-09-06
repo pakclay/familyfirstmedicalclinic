@@ -14,8 +14,10 @@ patient data.
   (`FamilyFirst2026!`) to the console, not into a committed file.
 - **Every route is gated server-side twice.** `proxy.ts` redirects a
   signed-out request to `/login` and bounces a signed-in role away from a
-  section it can't enter (`/staff`, `/doctor`, `/console`); this is a
-  coarse first gate, not the real boundary. The actual authorization is
+  section it can't enter (`/staff`, `/doctor`, `/console` — with one
+  deliberate exception: a doctor may enter `/staff/inventory`, the
+  medicine pages shared with the branch admin); this is a coarse first
+  gate, not the real boundary. The actual authorization is
   in the query layer — every function takes an `AbilitySubject` derived
   from the server session (never a client-supplied id) and is scoped by
   `clinicId`. Postgres Row-Level Security is a second, independent

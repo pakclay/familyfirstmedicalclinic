@@ -561,7 +561,47 @@ describe("inventory", () => {
     expect(overMovement.quantityChange).toBe(5)
   })
 
-  it("only a branch admin can create or edit a catalog medicine", async () => {
+  it("a doctor manages the catalog alongside the branch admin — creates, prices, receives stock — where front desk cannot", async () => {
+    const created = await createMedicine(doctorUser, {
+      name: "Doctor's Catalog Med",
+      form: "TABLET",
+      unit: "PIECE",
+      reorderLevel: 5,
+      unitCost: 100,
+      sellingPrice: 250,
+      isActive: true,
+    })
+    expect(created.sellingPrice).toBe(250)
+    expect(created.currentStock).toBe(0)
+
+    const repriced = await updateMedicine(doctorUser, created.id, {
+      name: "Doctor's Catalog Med",
+      form: "TABLET",
+      unit: "PIECE",
+      reorderLevel: 5,
+      unitCost: 100,
+      sellingPrice: 300,
+      isActive: true,
+    })
+    expect(repriced.sellingPrice).toBe(300)
+
+    const received = await receiveStock(doctorUser, { medicineId: created.id, quantity: 12, unitCost: 100 })
+    expect(received.currentStock).toBe(12)
+
+    await expect(
+      createMedicine(frontDesk, {
+        name: "x",
+        form: "TABLET",
+        unit: "PIECE",
+        reorderLevel: 10,
+        unitCost: 100,
+        sellingPrice: 200,
+        isActive: true,
+      })
+    ).rejects.toBeInstanceOf(ForbiddenError)
+  })
+
+  it("a branch admin can create or edit a catalog medicine; front desk cannot", async () => {
     await expect(
       createMedicine(frontDesk, {
         name: "x",

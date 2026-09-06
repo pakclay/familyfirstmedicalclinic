@@ -34,6 +34,11 @@ const PUBLIC_PREFIXES = ["/book/", "/q/", "/display/", "/login", "/api/auth"]
 // Which roles may enter each authenticated shell. Checked in order — the
 // first matching prefix wins, so a more specific prefix must come first.
 const SECTION_ACCESS: { prefix: string; roles: Role[] }[] = [
+  // The one corner of /staff a doctor may enter: the medicine catalog and
+  // stock, which they manage alongside the branch admin (2026-09-07). Listed
+  // before /staff so it wins; the rest of /staff — queue, patients,
+  // register, remittance — still bounces a doctor to /doctor/queue.
+  { prefix: "/staff/inventory", roles: ["FRONT_DESK", "BRANCH_ADMIN", "HOLDING_ADMIN", "DOCTOR"] },
   { prefix: "/staff", roles: ["FRONT_DESK", "BRANCH_ADMIN", "HOLDING_ADMIN"] },
   { prefix: "/doctor", roles: ["DOCTOR"] },
   { prefix: "/console", roles: ["BRANCH_ADMIN", "CLINIC_ADMIN", "HOLDING_ADMIN"] },

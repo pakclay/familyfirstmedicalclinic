@@ -54,7 +54,9 @@ const PROFILE_BY_ROLE: Record<Role, RoleProfile> = {
     ],
     cannot: [
       { label: "Open or save a consultation", enforcedIn: "lib/queries/consultations.ts" },
-      { label: "Edit the medicine catalog or receive stock", enforcedIn: "lib/queries/inventory.ts" },
+      // Receiving and counting stock is front desk work; shaping the
+      // catalog (what's on the shelf, what it sells for) is not.
+      { label: "Add or edit catalog medicines, or set their prices", enforcedIn: "lib/queries/inventory.ts" },
       { label: "Confirm anyone's remittance", enforcedIn: "lib/queries/remittance.ts" },
       { label: "Manage accounts", enforcedIn: "lib/permissions/ability.ts" },
     ],
@@ -62,16 +64,20 @@ const PROFILE_BY_ROLE: Record<Role, RoleProfile> = {
   DOCTOR: {
     role: "DOCTOR",
     label: "Doctor",
-    summary: "Sees patients at one branch. The only role that can record a consultation.",
+    summary: "Sees patients at one branch. The only role that can record a consultation; also manages the medicine catalog.",
     scope: "branch",
-    sections: ["/doctor"],
+    // /staff/inventory is the one page under /staff a doctor may enter —
+    // the medicine pages are shared with the branch admin rather than
+    // duplicated under /doctor (proxy.ts, 2026-09-07).
+    sections: ["/doctor", "/staff/inventory"],
     can: [
       { label: "Open the consultation screen", enforcedIn: "lib/queries/consultations.ts" },
       { label: "Save consultations, dispense and prescribe", enforcedIn: "lib/queries/consultations.ts" },
       { label: "Record triage vitals", enforcedIn: "lib/queries/vitals.ts" },
+      { label: "Add and edit catalog medicines and their prices, receive stock, run physical counts", enforcedIn: "lib/queries/inventory.ts" },
     ],
     cannot: [
-      { label: "Reach the staff queue board or the console", enforcedIn: "proxy.ts" },
+      { label: "Reach the staff queue board, patients, or the console — only the medicine pages", enforcedIn: "proxy.ts" },
       { label: "Take payments or submit remittance", enforcedIn: "lib/queries/remittance.ts" },
       { label: "Manage accounts", enforcedIn: "lib/permissions/ability.ts" },
     ],

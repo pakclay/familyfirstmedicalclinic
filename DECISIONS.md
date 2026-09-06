@@ -71,6 +71,48 @@ URL); the full suite; tsc; eslint. Not verifiable from here: the production
 change itself, which the owner makes in Vercel — the startup log line will
 say whether it took.
 
+## 2026-09-07 — Doctors manage the medicine catalog
+
+M4b (2026-08-22) made catalog management — add, edit, price, deactivate —
+branch-admin only, with front desk receiving and counting stock. Doctors
+could not reach the inventory pages at all: proxy.ts kept them out of
+`/staff` entirely. Both change today, on request.
+
+- **Doctors get the branch admin's catalog rights, and receive and count
+  too.** The doctor is the person who knows what the shelf should hold and
+  what it sells for; at a small branch they *are* the pharmacy. Front desk
+  still cannot shape the catalog — `requireCatalogManager` admits
+  BRANCH_ADMIN and DOCTOR; `requireStockHandler` admits those plus
+  FRONT_DESK.
+- **The pages are shared, not duplicated.** Rather than a second copy of
+  five screens under `/doctor`, proxy.ts gains one more specific prefix,
+  `/staff/inventory`, that admits DOCTOR — listed before `/staff` so it
+  wins. Every other `/staff` page (queue, patients, register, remittance)
+  still bounces a doctor home. The page-level redirects on new/receive/
+  count agree; the query layer is the enforcement.
+- **The header follows the role, not the floor — for exactly this case.**
+  The staff shell used to pass one fixed nav; a doctor on
+  `/staff/inventory` would have seen seven links that each sent them back
+  to `/doctor/queue`. `ShellHeader` now also accepts a function of the
+  role, and the staff layout hands a doctor their own nav (which gains
+  **Medicines**). Everyone else on `/staff` keeps the staff nav, admins
+  included — for them the header still reflects the section they are in.
+- **RLS needed no change.** The `medicines` and `stock_movements` policies
+  are branch-scoped, not role-scoped; a doctor's writes were already
+  admissible at the database. Only the app refused them.
+- **Deleting a dispensed row stays branch-admin only.** That corrects a
+  clinical and financial record after the fact (M4b) — a different kind
+  of power from pricing a medicine, and not what was asked for.
+- **role-capabilities.ts updated, and a stale line fixed while there:** it
+  said front desk cannot receive stock, but `receiveStock` has admitted
+  FRONT_DESK since M4b. The file's own rule is that the query layer wins
+  when they drift; now they don't.
+
+Verified: a query test in which a doctor creates, reprices and receives
+into a medicine while front desk is still refused; the branch-admin path
+unchanged; tsc; eslint. Not verified in the browser (needs a doctor
+login).
+
 ## 2026-09-07 — Itemized billing: system fee, VAT, medicine prices
 
 The consultation's payment card showed one number. It now shows the bill

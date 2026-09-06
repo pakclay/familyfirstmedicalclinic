@@ -4,9 +4,33 @@ import { ForbiddenError } from "@/lib/permissions/errors"
 import { toMedicineDetailDTO, type MedicineDetailDTO, type StockMovementDTO } from "@/lib/dto/medicine"
 import { medicineCatalogSchema, receiveStockSchema, physicalCountSchema } from "@/lib/validation/medicine"
 
+/**
+ * Who may add, price, and deactivate catalog medicines: the branch admin,
+ * and — since 2026-09-07 — the branch's doctors, who are the ones who
+ * actually know what the shelf should hold and what it sells for. Front
+ * desk receives and counts stock (below) but doesn't shape the catalog.
+ */
+function requireCatalogManager(user: AbilitySubject) {
+  if (user.role !== "BRANCH_ADMIN" && user.role !== "DOCTOR") {
+    throw new ForbiddenError("Only a branch admin or a doctor can manage the medicine catalog")
+  }
+}
+
+/**
+ * Deleting a dispensed row corrects a clinical and financial record after
+ * the fact (M4b) — a different kind of power from pricing a medicine, and
+ * deliberately not widened to doctors with the catalog.
+ */
 function requireBranchAdmin(user: AbilitySubject) {
   if (user.role !== "BRANCH_ADMIN") {
-    throw new ForbiddenError("Only a branch admin can manage the medicine catalog")
+    throw new ForbiddenError("Only a branch admin can delete a dispensed row")
+  }
+}
+
+/** Receiving and counting stock: anyone who works the branch's shelves. */
+function requireStockHandler(user: AbilitySubject, verb: string) {
+  if (user.role !== "BRANCH_ADMIN" && user.role !== "FRONT_DESK" && user.role !== "DOCTOR") {
+    throw new ForbiddenError(`Only branch staff can ${verb}`)
   }
 }
 
@@ -75,7 +99,7 @@ export async function getMedicineWithLedger(user: AbilitySubject, medicineId: st
 
 /** §9 Branch Admin: "manage medicine catalog (add, edit, set reorder level and prices, deactivate)." */
 export async function createMedicine(user: AbilitySubject, input: unknown): Promise<MedicineDetailDTO> {
-  requireBranchAdmin(user)
+  requireCatalogManager(user)
   const branchId = requireBranchId(user)
   const parsed = medicineCatalogSchema.parse(input)
 
@@ -104,7 +128,7 @@ export async function createMedicine(user: AbilitySubject, input: unknown): Prom
 
 /** Catalog fields only — never `currentStock`, which changes exclusively through a StockMovement (§6). */
 export async function updateMedicine(user: AbilitySubject, medicineId: string, input: unknown): Promise<MedicineDetailDTO> {
-  requireBranchAdmin(user)
+  requireCatalogManager(user)
   const branchId = requireBranchId(user)
   const parsed = medicineCatalogSchema.parse(input)
 
@@ -135,9 +159,7 @@ export async function updateMedicine(user: AbilitySubject, medicineId: string, i
 
 /** §7.5 "Stock in": writes a receipt movement and raises current_stock. */
 export async function receiveStock(user: AbilitySubject, input: unknown): Promise<MedicineDetailDTO> {
-  if (user.role !== "BRANCH_ADMIN" && user.role !== "FRONT_DESK") {
-    throw new ForbiddenError("Only clinic staff can receive stock")
-  }
+  requireStockHandler(user, "receive stock")
   const branchId = requireBranchId(user)
   const parsed = receiveStockSchema.parse(input)
 
@@ -189,9 +211,7 @@ export type PhysicalCountResult = { totalVarianceCentavos: number; discrepancies
 
 /** §7.5 "Physical count": one adjustment movement per discrepancy, with a required reason, and the total variance in pesos. */
 export async function submitPhysicalCount(user: AbilitySubject, input: unknown): Promise<PhysicalCountResult> {
-  if (user.role !== "BRANCH_ADMIN" && user.role !== "FRONT_DESK") {
-    throw new ForbiddenError("Only clinic staff can submit a physical count")
-  }
+  requireStockHandler(user, "submit a physical count")
   const branchId = requireBranchId(user)
   const parsed = physicalCountSchema.parse(input)
 
