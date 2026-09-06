@@ -25,6 +25,7 @@ export const authConfig: NextAuthConfig = {
       session.user.id = token.id
       session.user.role = token.role
       session.user.branchId = token.branchId
+      session.user.clinicId = token.clinicId
       session.user.holdingCompanyId = token.holdingCompanyId
       session.user.mustChangePassword = token.mustChangePassword
       return session

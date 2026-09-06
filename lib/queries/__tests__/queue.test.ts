@@ -97,7 +97,7 @@ describe("queue", () => {
     const fdUser = await superuserPrisma.user.create({
       data: { branchId: branch.id, name: "Front Desk", email: `fd-${Date.now()}@test.local`, passwordHash: "x", role: Role.FRONT_DESK },
     })
-    frontDesk = { id: fdUser.id, role: Role.FRONT_DESK, branchId: branch.id, holdingCompanyId: null }
+    frontDesk = { id: fdUser.id, role: Role.FRONT_DESK, branchId: branch.id, clinicId: null, holdingCompanyId: null }
 
     const docUserA = await superuserPrisma.user.create({
       data: { branchId: branch.id, name: "Dr. A", email: `doc-a-${Date.now()}@test.local`, passwordHash: "x", role: Role.DOCTOR },
@@ -106,7 +106,7 @@ describe("queue", () => {
       data: { userId: docUserA.id, branchId: branch.id, licenseNumber: "A", consultationFee: 50000 },
     })
     doctorAId = docA.id
-    doctorA = { id: docUserA.id, role: Role.DOCTOR, branchId: branch.id, holdingCompanyId: null }
+    doctorA = { id: docUserA.id, role: Role.DOCTOR, branchId: branch.id, clinicId: null, holdingCompanyId: null }
 
     const docUserB = await superuserPrisma.user.create({
       data: { branchId: branch.id, name: "Dr. B", email: `doc-b-${Date.now()}@test.local`, passwordHash: "x", role: Role.DOCTOR },
@@ -468,7 +468,7 @@ describe("branch scoping — queue", () => {
         role: Role.FRONT_DESK,
       },
     })
-    frontDeskA = { id: fdUser.id, role: Role.FRONT_DESK, branchId: branchQA.id, holdingCompanyId: null }
+    frontDeskA = { id: fdUser.id, role: Role.FRONT_DESK, branchId: branchQA.id, clinicId: null, holdingCompanyId: null }
 
     const docUserA = await superuserPrisma.user.create({
       data: {
@@ -483,7 +483,7 @@ describe("branch scoping — queue", () => {
       data: { userId: docUserA.id, branchId: branchQA.id, licenseNumber: `${PREFIX}-A`, consultationFee: 50000 },
     })
     doctorAId = docA.id
-    doctorAUser = { id: docUserA.id, role: Role.DOCTOR, branchId: branchQA.id, holdingCompanyId: null }
+    doctorAUser = { id: docUserA.id, role: Role.DOCTOR, branchId: branchQA.id, clinicId: null, holdingCompanyId: null }
 
     const docUserSib = await superuserPrisma.user.create({
       data: {
@@ -509,7 +509,7 @@ describe("branch scoping — queue", () => {
       },
     })
     holdingAdminId = haUser.id
-    holdingAdmin = { id: haUser.id, role: Role.HOLDING_ADMIN, branchId: null, holdingCompanyId: holding.id }
+    holdingAdmin = { id: haUser.id, role: Role.HOLDING_ADMIN, branchId: null, clinicId: null, holdingCompanyId: holding.id }
 
     const makePatient = (branchId: string, firstName: string, lastName: string, phone: string) =>
       superuserPrisma.patient.create({

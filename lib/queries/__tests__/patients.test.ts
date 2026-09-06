@@ -87,8 +87,8 @@ describe("branch scoping — patients", () => {
       },
     })
 
-    frontDeskA = { id: userA.id, role: Role.FRONT_DESK, branchId: branchA.id, holdingCompanyId: null }
-    holdingAdmin = { id: userHolding.id, role: Role.HOLDING_ADMIN, branchId: null, holdingCompanyId: holding.id }
+    frontDeskA = { id: userA.id, role: Role.FRONT_DESK, branchId: branchA.id, clinicId: null, holdingCompanyId: null }
+    holdingAdmin = { id: userHolding.id, role: Role.HOLDING_ADMIN, branchId: null, clinicId: null, holdingCompanyId: holding.id }
 
     patientA = await superuserPrisma.patient.create({
       data: {
@@ -226,5 +226,81 @@ describe("branch scoping — patients", () => {
       return tx.patient.findMany({ where: { id: patientB.id } })
     })
     expect(rows).toHaveLength(0)
+  })
+})
+
+/**
+ * The clinic-level admin is administration-only. These functions used to
+ * gate on `isHoldingAdmin` as a stand-in for "is branchless" and then reach
+ * for `user.branchId!` — an equivalence the new role is the first to break.
+ * They failed closed by accident (a Prisma validation error on a null
+ * branchId, surfacing as a 500); each now refuses explicitly, and this pins
+ * that it is a ForbiddenError rather than a crash.
+ */
+describe("branch scoping — clinic admin is refused", () => {
+  let branchId: string
+  let clinicId: string
+  let holdingId: string
+  let patientId: string
+  let clinicAdmin: AbilitySubject
+
+  beforeAll(async () => {
+    const holding = await superuserPrisma.holdingCompany.create({ data: { name: "Test Holding — clinic admin refusals" } })
+    holdingId = holding.id
+    const clinic = await superuserPrisma.clinic.create({ data: { holdingCompanyId: holding.id, name: "Refusal Clinic" } })
+    clinicId = clinic.id
+    const branch = await superuserPrisma.branch.create({
+      data: {
+        clinicId: clinic.id,
+        name: "Refusal Branch",
+        slug: `refusal-branch-${Date.now()}`,
+        address: "1 Test St",
+        city: "Test City",
+        phone: "0000",
+        operatingHours: {},
+      },
+    })
+    branchId = branch.id
+    const admin = await superuserPrisma.user.create({
+      data: {
+        clinicId: clinic.id,
+        name: "Refused Clinic Admin",
+        email: `refused-ca-${Date.now()}@test.local`,
+        passwordHash: "unused",
+        role: Role.CLINIC_ADMIN,
+      },
+    })
+    clinicAdmin = { id: admin.id, role: Role.CLINIC_ADMIN, branchId: null, clinicId: clinic.id, holdingCompanyId: null }
+    const patient = await superuserPrisma.patient.create({
+      data: {
+        branchId: branch.id,
+        firstName: "Under",
+        lastName: "TheClinic",
+        birthdate: new Date("1990-01-01"),
+        sex: Sex.FEMALE,
+        phone: "555",
+        address: "addr",
+        emergencyContactName: "ec",
+        emergencyContactPhone: "666",
+      },
+    })
+    patientId = patient.id
+  })
+
+  afterAll(async () => {
+    await superuserPrisma.auditLog.deleteMany({ where: { branchId } })
+    await superuserPrisma.patient.deleteMany({ where: { branchId } })
+    await superuserPrisma.user.deleteMany({ where: { clinicId } })
+    await superuserPrisma.branch.deleteMany({ where: { id: branchId } })
+    await superuserPrisma.clinic.deleteMany({ where: { id: clinicId } })
+    await superuserPrisma.holdingCompany.deleteMany({ where: { id: holdingId } })
+  })
+
+  it("cannot list patients — even at a branch under its own clinic", async () => {
+    await expect(listPatients(clinicAdmin)).rejects.toBeInstanceOf(ForbiddenError)
+  })
+
+  it("cannot open a patient record by id — a 403, not a crash", async () => {
+    await expect(getPatientById(clinicAdmin, patientId)).rejects.toBeInstanceOf(ForbiddenError)
   })
 })

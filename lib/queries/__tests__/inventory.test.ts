@@ -155,12 +155,12 @@ describe("inventory", () => {
     const adminUser = await superuserPrisma.user.create({
       data: { branchId: branch.id, name: "Admin", email: `admin-inv-${Date.now()}@test.local`, passwordHash: "x", role: Role.BRANCH_ADMIN },
     })
-    branchAdmin = { id: adminUser.id, role: Role.BRANCH_ADMIN, branchId: branch.id, holdingCompanyId: null }
+    branchAdmin = { id: adminUser.id, role: Role.BRANCH_ADMIN, branchId: branch.id, clinicId: null, holdingCompanyId: null }
 
     const fdUser = await superuserPrisma.user.create({
       data: { branchId: branch.id, name: "Front Desk", email: `fd-inv-${Date.now()}@test.local`, passwordHash: "x", role: Role.FRONT_DESK },
     })
-    frontDesk = { id: fdUser.id, role: Role.FRONT_DESK, branchId: branch.id, holdingCompanyId: null }
+    frontDesk = { id: fdUser.id, role: Role.FRONT_DESK, branchId: branch.id, clinicId: null, holdingCompanyId: null }
 
     const docUser = await superuserPrisma.user.create({
       data: { branchId: branch.id, name: "Dr. Inventory", email: `dr-inv-${Date.now()}@test.local`, passwordHash: "x", role: Role.DOCTOR },
@@ -169,7 +169,7 @@ describe("inventory", () => {
       data: { userId: docUser.id, branchId: branch.id, licenseNumber: "I1", consultationFee: 50000 },
     })
     doctorId = doctor.id
-    doctorUser = { id: docUser.id, role: Role.DOCTOR, branchId: branch.id, holdingCompanyId: null }
+    doctorUser = { id: docUser.id, role: Role.DOCTOR, branchId: branch.id, clinicId: null, holdingCompanyId: null }
 
     patient = await superuserPrisma.patient.create({
       data: {
@@ -232,7 +232,7 @@ describe("inventory", () => {
         role: Role.BRANCH_ADMIN,
       },
     })
-    siblingAdmin = { id: sibAdminUser.id, role: Role.BRANCH_ADMIN, branchId: siblingBranch.id, holdingCompanyId: null }
+    siblingAdmin = { id: sibAdminUser.id, role: Role.BRANCH_ADMIN, branchId: siblingBranch.id, clinicId: null, holdingCompanyId: null }
 
     const bbAdminUser = await superuserPrisma.user.create({
       data: {
@@ -243,7 +243,7 @@ describe("inventory", () => {
         role: Role.BRANCH_ADMIN,
       },
     })
-    branchBAdmin = { id: bbAdminUser.id, role: Role.BRANCH_ADMIN, branchId: branchB.id, holdingCompanyId: null }
+    branchBAdmin = { id: bbAdminUser.id, role: Role.BRANCH_ADMIN, branchId: branchB.id, clinicId: null, holdingCompanyId: null }
 
     siblingMeds = {
       ledger: await createMedicineIn(siblingBranch.id, { name: "Sibling Ledger Med", currentStock: 40, reorderLevel: 5 }),

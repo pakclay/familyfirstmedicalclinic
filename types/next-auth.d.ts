@@ -7,6 +7,7 @@ declare module "next-auth" {
       id: string
       role: Role
       branchId: string | null
+      clinicId: string | null
       holdingCompanyId: string | null
       mustChangePassword: boolean
     } & DefaultSession["user"]
@@ -15,6 +16,7 @@ declare module "next-auth" {
   interface User {
     role: Role
     branchId: string | null
+    clinicId: string | null
     holdingCompanyId: string | null
     mustChangePassword: boolean
   }
@@ -29,6 +31,7 @@ declare module "next-auth/jwt" {
     id: string
     role: Role
     branchId: string | null
+    clinicId: string | null
     holdingCompanyId: string | null
     mustChangePassword: boolean
   }
@@ -39,6 +42,7 @@ declare module "@auth/core/jwt" {
     id: string
     role: Role
     branchId: string | null
+    clinicId: string | null
     holdingCompanyId: string | null
     mustChangePassword: boolean
   }

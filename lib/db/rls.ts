@@ -18,12 +18,42 @@ function setScope(
   tx: Prisma.TransactionClient,
   role: string,
   userId: string,
-  branchId: string
+  branchId: string,
+  clinicId: string
 ): Promise<number> {
+  // app.clinic_id is read by exactly one policy: audit_logs' INSERT, so a
+  // branchless clinic admin can write the audit row for an account or
+  // branch it just created under its own clinic (see the
+  // audit_logs_clinic_admin_insert migration). It widens nothing else —
+  // every SELECT policy still keys on app.branch_id, and this role has none.
   return tx.$executeRaw`SELECT
     set_config('app.role', ${role}, true),
     set_config('app.user_id', ${userId}, true),
-    set_config('app.branch_id', ${branchId}, true)`
+    set_config('app.branch_id', ${branchId}, true),
+    set_config('app.clinic_id', ${clinicId}, true)`
+}
+
+/**
+ * Appends an audit_logs row WITHOUT `RETURNING`.
+ *
+ * Postgres requires a row returned by `INSERT ... RETURNING` to also pass
+ * the table's SELECT policy — and audit_logs' SELECT policy deliberately has
+ * no arm for a branchless CLINIC_ADMIN (its rows carry patient.read
+ * entityIds this role must never see). Prisma's `create` always emits
+ * RETURNING, so `tx.auditLog.create(...)` by a clinic admin fails with 42501
+ * even though the INSERT policy admits the row — the write is allowed, the
+ * read-back is not. `createMany` emits a bare INSERT and returns a count.
+ *
+ * Takes the same `{ data }` shape as `create` so a call site changes one
+ * token and nothing else. Nothing in this codebase reads an audit row back
+ * from its own write, so nothing is lost. Reproduced against a live
+ * database: identical INSERT, OK without RETURNING, 42501 with it.
+ */
+export function appendAuditLog(
+  tx: Prisma.TransactionClient,
+  args: { data: Prisma.AuditLogUncheckedCreateInput }
+): Promise<Prisma.BatchPayload> {
+  return tx.auditLog.createMany({ data: [args.data] })
 }
 
 /**
@@ -43,7 +73,7 @@ export async function runWithRls<T>(
   fn: (tx: Prisma.TransactionClient) => Promise<T>
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
-    await setScope(tx, user.role, user.id, user.branchId ?? "")
+    await setScope(tx, user.role, user.id, user.branchId ?? "", user.clinicId ?? "")
     return fn(tx)
   })
 }
@@ -63,7 +93,7 @@ export async function runWithBranchScope<T>(
   fn: (tx: Prisma.TransactionClient) => Promise<T>
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
-    await setScope(tx, "PUBLIC", "", branchId)
+    await setScope(tx, "PUBLIC", "", branchId, "")
     return fn(tx)
   })
 }
@@ -80,7 +110,7 @@ export async function runWithBranchScope<T>(
  */
 export async function runWithFullVisibility<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
   return prisma.$transaction(async (tx) => {
-    await setScope(tx, "HOLDING_ADMIN", "", "")
+    await setScope(tx, "HOLDING_ADMIN", "", "", "")
     return fn(tx)
   })
 }

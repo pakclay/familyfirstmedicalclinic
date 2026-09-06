@@ -1,14 +1,17 @@
 import type { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/db/prisma"
-import { runWithRls } from "@/lib/db/rls"
+import { runWithRls, appendAuditLog } from "@/lib/db/rls"
 import {
   isHoldingAdmin,
   requireBranchId,
   requireHoldingCompanyId,
+  isClinicAdmin,
+  requireClinicId,
   type AbilitySubject,
 } from "@/lib/permissions/ability"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import { toBranchDTO, type BranchDTO } from "@/lib/dto/branch"
+import { toClinicDTO, type ClinicDTO } from "@/lib/dto/clinic"
 import type { BranchSettingsInput, CreateBranchInput, EditBranchInput } from "@/lib/validation/branch"
 import type { OperatingHours } from "@/lib/validation/operating-hours"
 
@@ -38,18 +41,25 @@ export async function listBranches(actor: AbilitySubject, filter?: { clinicId?: 
   // Throws rather than returning [] — see lib/queries/clinics.ts's
   // listClinics for the full reasoning (§4.2, and the false-precedent trap
   // that bit the first draft of this pattern).
-  if (!isHoldingAdmin(actor)) throw new ForbiddenError(NOT_A_HOLDING_ADMIN)
+  if (!isHoldingAdmin(actor) && !isClinicAdmin(actor)) throw new ForbiddenError(NOT_A_HOLDING_ADMIN)
   // Inactive branches included on purpose — the list badges them rather
   // than hiding them, since a deactivated branch is exactly the one an
   // admin needs to find in order to reactivate it.
-  // The company bound goes through the parent clinic — `branches` has no
-  // RLS, so without it this lists every tenant's branches. An explicit
-  // clinicId narrows further but never widens past the company.
+  //
+  // A clinic admin's bound IS the clinicId, so a caller-supplied filter for
+  // any other clinic is answered with an empty list rather than spread into
+  // the where-clause — spreading would let the filter overwrite the bound,
+  // which is the one trap this function has. For a holding admin the bound
+  // lives on the `clinic` key and an explicit clinicId only ever narrows.
+  // `branches` has no RLS, so these where-clauses are the entire boundary.
+  if (isClinicAdmin(actor) && filter?.clinicId && filter.clinicId !== requireClinicId(actor)) return []
   const rows = await prisma.branch.findMany({
-    where: {
-      clinic: { holdingCompanyId: requireHoldingCompanyId(actor) },
-      ...(filter?.clinicId ? { clinicId: filter.clinicId } : {}),
-    },
+    where: isClinicAdmin(actor)
+      ? { clinicId: requireClinicId(actor) }
+      : {
+          clinic: { holdingCompanyId: requireHoldingCompanyId(actor) },
+          ...(filter?.clinicId ? { clinicId: filter.clinicId } : {}),
+        },
     include: branchInclude,
     orderBy: { name: "asc" },
   })
@@ -65,11 +75,14 @@ export async function listBranches(actor: AbilitySubject, filter?: { clinicId?: 
  * denial, not a missing row, and §4.2 wants it loud.
  */
 export async function getBranchById(actor: AbilitySubject, id: string): Promise<BranchDTO | null> {
-  if (!isHoldingAdmin(actor)) throw new ForbiddenError(NOT_A_HOLDING_ADMIN)
-  // findFirst so the company bound is part of the match — another tenant's
-  // branch reads as "no such branch", same shape as getClinicById.
+  if (!isHoldingAdmin(actor) && !isClinicAdmin(actor)) throw new ForbiddenError(NOT_A_HOLDING_ADMIN)
+  // findFirst so the actor's bound is part of the match — another tenant's
+  // (or, for a clinic admin, another clinic's) branch reads as "no such
+  // branch", same shape as getClinicById.
   const row = await prisma.branch.findFirst({
-    where: { id, clinic: { holdingCompanyId: requireHoldingCompanyId(actor) } },
+    where: isClinicAdmin(actor)
+      ? { id, clinicId: requireClinicId(actor) }
+      : { id, clinic: { holdingCompanyId: requireHoldingCompanyId(actor) } },
     include: branchInclude,
   })
   return row ? toBranchDTO(row) : null
@@ -87,9 +100,21 @@ export async function createBranch(
   clinicId: string,
   input: CreateBranchInput
 ): Promise<CreateBranchResult> {
-  if (!isHoldingAdmin(actor)) return { ok: false, error: NOT_A_HOLDING_ADMIN }
+  // `clinicId` is caller-supplied. A clinic admin may only ever create under
+  // its own clinic, so a mismatch is refused as a role error before anything
+  // is looked up — the same answer a non-admin gets, so a probe learns
+  // nothing about whether the other clinic exists.
+  if (isClinicAdmin(actor)) {
+    if (clinicId !== requireClinicId(actor)) return { ok: false, error: NOT_A_HOLDING_ADMIN }
+  } else if (!isHoldingAdmin(actor)) {
+    return { ok: false, error: NOT_A_HOLDING_ADMIN }
+  }
 
-  const clinic = await prisma.clinic.findUnique({ where: { id: clinicId } })
+  // Bounded to the actor's company: `clinics` has no RLS, so a bare
+  // findUnique would let a holding admin create under another tenant's clinic.
+  const clinic = await prisma.clinic.findFirst({
+    where: isClinicAdmin(actor) ? { id: clinicId } : { id: clinicId, holdingCompanyId: requireHoldingCompanyId(actor) },
+  })
   if (!clinic) return { ok: false, error: "Clinic not found." }
 
   const slug = input.slug.trim().toLowerCase()
@@ -114,7 +139,7 @@ export async function createBranch(
       },
       include: branchInclude,
     })
-    await tx.auditLog.create({
+    await appendAuditLog(tx, {
       data: {
         branchId: branch.id,
         userId: actor.id,
@@ -137,9 +162,15 @@ export async function updateBranch(
   id: string,
   input: EditBranchInput
 ): Promise<ManageBranchResult> {
+  // Holding admin only, deliberately: the clinic-level role gets create and
+  // deactivate, not reconfiguration of an existing branch's address or hours.
   if (!isHoldingAdmin(actor)) return { ok: false, error: NOT_A_HOLDING_ADMIN }
 
-  const target = await prisma.branch.findUnique({ where: { id } })
+  // findFirst with the company bound, not findUnique by id: `branches` has no
+  // RLS, so the bare lookup this used to be was a latent cross-tenant write.
+  const target = await prisma.branch.findFirst({
+    where: { id, clinic: { holdingCompanyId: requireHoldingCompanyId(actor) } },
+  })
   if (!target) return { ok: false, error: "Branch not found." }
 
   await runWithRls(actor, async (tx) => {
@@ -156,7 +187,7 @@ export async function updateBranch(
         operatingHours: toJsonHours(input.operatingHours),
       },
     })
-    await tx.auditLog.create({
+    await appendAuditLog(tx, {
       data: {
         branchId: id,
         userId: actor.id,
@@ -176,14 +207,26 @@ export async function setBranchActive(
   id: string,
   isActive: boolean
 ): Promise<ManageBranchResult> {
-  if (!isHoldingAdmin(actor)) return { ok: false, error: NOT_A_HOLDING_ADMIN }
+  if (!isHoldingAdmin(actor) && !isClinicAdmin(actor)) return { ok: false, error: NOT_A_HOLDING_ADMIN }
 
-  const target = await prisma.branch.findUnique({ where: { id } })
+  // The lookup carries the actor's bound — clinic for a clinic admin, company
+  // for a holding admin — so a branch outside it reads as "not found" rather
+  // than being switched off. This used to be a bare findUnique by id, which
+  // `branches` having no RLS made a latent cross-tenant write; with the gate
+  // widened to a second tier it would have been a cross-clinic kill switch.
+  const target = await prisma.branch.findFirst({
+    where: {
+      id,
+      ...(isClinicAdmin(actor)
+        ? { clinicId: requireClinicId(actor) }
+        : { clinic: { holdingCompanyId: requireHoldingCompanyId(actor) } }),
+    },
+  })
   if (!target) return { ok: false, error: "Branch not found." }
 
   await runWithRls(actor, async (tx) => {
     await tx.branch.update({ where: { id }, data: { isActive } })
-    await tx.auditLog.create({
+    await appendAuditLog(tx, {
       data: {
         branchId: id,
         userId: actor.id,
@@ -232,9 +275,31 @@ export async function getOwnBranch(actor: AbilitySubject): Promise<BranchDTO> {
   if (isHoldingAdmin(actor)) {
     throw new ForbiddenError("A holding admin has no single branch — use the clinics list instead.")
   }
+  // Same reasoning, one tier down: a clinic admin is branchless, and letting
+  // it fall through to requireBranchId would surface as a 500 — the exact
+  // thing the comment above exists to prevent.
+  if (isClinicAdmin(actor)) {
+    throw new ForbiddenError("A clinic admin has no single branch — use the clinic's branch list instead.")
+  }
   const branchId = requireBranchId(actor)
   const row = await prisma.branch.findUniqueOrThrow({ where: { id: branchId }, include: branchInclude })
   return toBranchDTO(row)
+}
+
+/**
+ * A clinic admin's own clinic, for the /console/clinic surface. No id
+ * parameter, for the same reason getOwnBranch has none: §5's rule is that
+ * scoping comes from the authenticated user's assignment and "never from a
+ * client-supplied parameter", and with no id in the signature there is
+ * nothing for a caller to pass. Only the clinic-level role has an own
+ * clinic; everyone else is refused as a role error, not a missing row.
+ */
+export async function getOwnClinic(actor: AbilitySubject): Promise<ClinicDTO> {
+  if (!isClinicAdmin(actor)) {
+    throw new ForbiddenError("Only a clinic admin has a single clinic of their own.")
+  }
+  const row = await prisma.clinic.findUniqueOrThrow({ where: { id: requireClinicId(actor) } })
+  return toClinicDTO(row)
 }
 
 export async function updateOwnBranchSettings(
@@ -258,7 +323,7 @@ export async function updateOwnBranchSettings(
         operatingHours: toJsonHours(input.operatingHours),
       },
     })
-    await tx.auditLog.create({
+    await appendAuditLog(tx, {
       data: {
         branchId,
         userId: actor.id,

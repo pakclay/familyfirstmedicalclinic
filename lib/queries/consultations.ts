@@ -1,5 +1,5 @@
 import { runWithRls } from "@/lib/db/rls"
-import { requireBranchId, type AbilitySubject } from "@/lib/permissions/ability"
+import { isClinicAdmin, requireBranchId, type AbilitySubject } from "@/lib/permissions/ability"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import { toPatientDTO, type PatientDTO } from "@/lib/dto/patient"
 import type { ConsultationSummaryDTO } from "@/lib/dto/consultation"
@@ -105,6 +105,9 @@ export async function listPatientConsultationHistory(
   user: AbilitySubject,
   patientId: string
 ): Promise<ConsultationSummaryDTO[]> {
+  if (isClinicAdmin(user)) {
+    throw new ForbiddenError("A clinic admin administers accounts and branches, not patient records.")
+  }
   return runWithRls(user, async (tx) => {
     const consultations = await tx.consultation.findMany({
       where: {

@@ -11,12 +11,23 @@ export type AbilitySubject = {
   id: string
   role: Role
   branchId: string | null
+  // Required-and-nullable, never optional: a `?` here would let a call site
+  // that forgot to copy the session field compile with a silent `undefined`,
+  // and the query layer would then scope a clinic admin to nothing.
+  clinicId: string | null
   holdingCompanyId: string | null
 }
 
-/** HOLDING_ADMIN is the only role not scoped to a single branch. */
+/**
+ * HOLDING_ADMIN is company-scoped and CLINIC_ADMIN clinic-scoped; both are
+ * branchless. Everyone else runs exactly one branch.
+ */
 export function isHoldingAdmin(user: AbilitySubject): boolean {
   return user.role === "HOLDING_ADMIN"
+}
+
+export function isClinicAdmin(user: AbilitySubject): boolean {
+  return user.role === "CLINIC_ADMIN"
 }
 
 /**
@@ -58,15 +69,42 @@ export function requireHoldingCompanyId(user: AbilitySubject): string {
 }
 
 /**
+ * The clinic every read/write by a clinic admin must be bounded by.
+ *
+ * `users`, `branches` and `clinics` carry no RLS policy at all, so this
+ * value in a where-clause IS the tenant boundary — same reasoning as
+ * requireHoldingCompanyId above. Falsy-checked rather than `=== null`:
+ * auth.ts's jwt callback fails open on a transient query error and returns
+ * the previous token unchanged, so an absent claim can arrive as undefined.
+ */
+export function requireClinicId(user: AbilitySubject): string {
+  if (!user.clinicId) {
+    throw new Error(
+      `requireClinicId called for a user with no clinicId (role=${user.role}) — branch on isClinicAdmin first`
+    )
+  }
+  return user.clinicId
+}
+
+/**
  * Which roles `actor` is allowed to create or edit — §4's role table:
  * holding admin manages all users, branch admin manages "doctors and
- * staff" in their own clinic only (not other admins). Deliberately a
+ * staff" in their own branch only (not other admins). Deliberately a
  * fixed list per role rather than a general permission check, since
  * user-management is the one place a wrong answer here lets someone
  * mint an account with more access than they have themselves.
+ *
+ * A clinic admin may also create BRANCH_ADMINs — it staffs its own sites,
+ * which is the practical point of the role — but never another
+ * CLINIC_ADMIN or a HOLDING_ADMIN. Recorded plainly in
+ * role-capabilities.ts: because createUser hands the creator the new
+ * account's temporary password, "administration only" is a convenience
+ * boundary for this role, not an enforced one. That is a product decision
+ * (2026-09-06), made knowing the trade.
  */
 export function assignableRoles(actor: AbilitySubject): Role[] {
-  if (actor.role === "HOLDING_ADMIN") return ["FRONT_DESK", "DOCTOR", "BRANCH_ADMIN", "HOLDING_ADMIN"]
+  if (actor.role === "HOLDING_ADMIN") return ["FRONT_DESK", "DOCTOR", "BRANCH_ADMIN", "CLINIC_ADMIN", "HOLDING_ADMIN"]
+  if (actor.role === "CLINIC_ADMIN") return ["FRONT_DESK", "DOCTOR", "BRANCH_ADMIN"]
   if (actor.role === "BRANCH_ADMIN") return ["FRONT_DESK", "DOCTOR"]
   return []
 }

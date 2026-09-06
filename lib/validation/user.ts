@@ -10,6 +10,8 @@ const baseUserFields = {
   // query layer fills that in; a holding admin must pick one explicitly
   // unless the role is HOLDING_ADMIN, which has no branch at all.
   branchId: z.string().optional(),
+  // Set only when creating a CLINIC_ADMIN; the query layer ignores it otherwise.
+  clinicId: z.string().optional(),
 }
 
 /**
@@ -77,6 +79,8 @@ export type EditUserInput = z.infer<typeof editUserSchema>
 export const changeRoleSchema = z.object({
   role: z.nativeEnum(Role),
   branchId: z.string().optional(),
+  // Set only when creating a CLINIC_ADMIN; the query layer ignores it otherwise.
+  clinicId: z.string().optional(),
   licenseNumber: z.string().trim().optional(),
   specialization: z.string().trim().optional(),
   consultationFeePesos: z.string().trim().optional(),

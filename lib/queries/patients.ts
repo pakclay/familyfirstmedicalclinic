@@ -1,5 +1,5 @@
 import { runWithRls } from "@/lib/db/rls"
-import { isHoldingAdmin, requireBranchId, type AbilitySubject } from "@/lib/permissions/ability"
+import { isHoldingAdmin, isClinicAdmin, requireBranchId, type AbilitySubject } from "@/lib/permissions/ability"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import { toPatientDTO, type PatientDTO } from "@/lib/dto/patient"
 import { toQueueEntryDTO, type QueueEntryDTO } from "@/lib/dto/queue-entry"
@@ -27,6 +27,9 @@ export async function getPatientById(
   user: AbilitySubject,
   patientId: string
 ): Promise<PatientDTO | null> {
+  if (isClinicAdmin(user)) {
+    throw new ForbiddenError("A clinic admin administers accounts and branches, not patient records.")
+  }
   // A thrown error inside prisma.$transaction rolls back every write made
   // in that transaction, audit log included — so the "denied" branch can't
   // both throw ForbiddenError and have its audit row survive in one
@@ -94,6 +97,9 @@ export async function listPatients(
   user: AbilitySubject,
   opts: { branchId?: string; search?: string } = {}
 ): Promise<PatientDTO[]> {
+  if (isClinicAdmin(user)) {
+    throw new ForbiddenError("A clinic admin administers accounts and branches, not patient records.")
+  }
   const branchId = isHoldingAdmin(user) ? opts.branchId : user.branchId!
   if (isHoldingAdmin(user) && !branchId) {
     throw new Error("listPatients requires an explicit branchId for a holding admin")
@@ -139,6 +145,9 @@ export async function listPatients(
 export async function searchPatientsByPhone(user: AbilitySubject, phone: string): Promise<PatientDTO[]> {
   if (isHoldingAdmin(user)) {
     throw new Error("searchPatientsByPhone requires a branch-scoped user")
+  }
+  if (isClinicAdmin(user)) {
+    throw new ForbiddenError("A clinic admin administers accounts and branches, not patient records.")
   }
   const digits = phone.replace(/\D/g, "").slice(-10)
   if (digits.length < 7) return []
@@ -218,6 +227,9 @@ function nameTokens(firstName: string, lastName: string): string[] {
 export async function searchPatientsForIntake(user: AbilitySubject, term: string): Promise<PatientDTO[]> {
   if (isHoldingAdmin(user)) {
     throw new Error("searchPatientsForIntake requires a branch-scoped user")
+  }
+  if (isClinicAdmin(user)) {
+    throw new ForbiddenError("A clinic admin administers accounts and branches, not patient records.")
   }
   // Commas and repeated spaces are dropped so the form the app itself shows
   // everywhere — "Dela Cruz, Juan" — can be typed back in and still match.
@@ -409,6 +421,9 @@ export async function checkInExistingPatient(
 
 /** A patient's visit history for their profile screen — queue entries, newest first. */
 export async function listPatientVisits(user: AbilitySubject, patientId: string): Promise<QueueEntryDTO[]> {
+  if (isClinicAdmin(user)) {
+    throw new ForbiddenError("A clinic admin administers accounts and branches, not patient records.")
+  }
   return runWithRls(user, async (tx) => {
     const entries = await tx.queueEntry.findMany({
       where: isHoldingAdmin(user) ? { patientId } : { patientId, branchId: user.branchId! },
