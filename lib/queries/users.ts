@@ -217,15 +217,44 @@ function clinicScope(clinicId: string): Prisma.UserWhereInput {
   return { OR: [{ branch: { clinicId } }, { branchId: null, clinicId }] }
 }
 
-export async function listUsers(actor: AbilitySubject): Promise<UserDTO[]> {
+/**
+ * `search` is a case-insensitive substring match on name, email or branch
+ * name — the same `contains` shape listPatients and the inventory list use,
+ * so one search box behaves like every other one in the app. Role is not
+ * searchable: the list shows ROLE_LABEL, which lives in the app, not the
+ * column, and matching the enum text ("FRONT_DESK") would surprise anyone
+ * typing what they see on screen.
+ *
+ * The search is ANDed onto the scope predicate, never spread into it. Both
+ * holdingCompanyScope and clinicScope are themselves a top-level `OR`, so a
+ * spread `OR` from the search would silently *replace* the tenant bound with
+ * the search terms — and `users` has no RLS, so that is every matching
+ * account in the database, any company.
+ */
+export async function listUsers(actor: AbilitySubject, opts: { search?: string } = {}): Promise<UserDTO[]> {
   // Each non-holding arm filters by the roles that actor may manage —
   // byte-identical to assignableRoles(actor), so the list never shows a
   // row the row actions would then refuse.
-  const where: Prisma.UserWhereInput = isHoldingAdmin(actor)
+  const scope: Prisma.UserWhereInput = isHoldingAdmin(actor)
     ? holdingCompanyScope(requireHoldingCompanyId(actor))
     : isClinicAdmin(actor)
       ? { ...clinicScope(requireClinicId(actor)), role: { in: assignableRoles(actor) } }
       : { branchId: requireBranchId(actor), role: { in: assignableRoles(actor) } }
+  const search = opts.search?.trim()
+  const where: Prisma.UserWhereInput = search
+    ? {
+        AND: [
+          scope,
+          {
+            OR: [
+              { name: { contains: search, mode: "insensitive" } },
+              { email: { contains: search, mode: "insensitive" } },
+              { branch: { name: { contains: search, mode: "insensitive" } } },
+            ],
+          },
+        ],
+      }
+    : scope
   const rows = await prisma.user.findMany({ where, include: userInclude, orderBy: [{ role: "asc" }, { name: "asc" }] })
   return rows.map(toUserDTO)
 }
