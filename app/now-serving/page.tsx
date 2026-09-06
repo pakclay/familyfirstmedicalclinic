@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import { listTodayQueue } from "@/lib/queries/queue"
+import { getOwnBranch } from "@/lib/queries/branches"
 import type { AbilitySubject } from "@/lib/permissions/ability"
 import { NowServingScreen } from "./now-serving-screen"
 
@@ -48,7 +49,12 @@ export default async function NowServingPage() {
     holdingCompanyId: session.user.holdingCompanyId,
   }
 
-  const entries = await listTodayQueue(user)
+  // The branch carries the wording the board speaks (announcementTemplate,
+  // set by its admin under Settings). Read alongside the queue rather than
+  // after it — the two don't depend on each other, and this page refreshes
+  // every few seconds. getOwnBranch admits any branch-scoped role, which is
+  // exactly who can reach this far: the branchless roles returned above.
+  const [entries, branch] = await Promise.all([listTodayQueue(user), getOwnBranch(user)])
 
   // Same rule the staff board uses: the most recently called entry that is
   // still with a doctor or waiting to be seen.
@@ -66,6 +72,7 @@ export default async function NowServingPage() {
     <NowServingScreen
       nowServing={serving ? { queueNumber: serving.queueNumber, name: serving.patientName } : null}
       upNext={upNext}
+      announcementTemplate={branch.announcementTemplate}
     />
   )
 }

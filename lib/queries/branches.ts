@@ -321,6 +321,8 @@ export async function updateOwnBranchSettings(
         phone: input.phone.trim(),
         facebookPageUrl: input.facebookPageUrl?.trim() || null,
         operatingHours: toJsonHours(input.operatingHours),
+        // Blank means "use the default", stored as NULL — see the DTO.
+        announcementTemplate: input.announcementTemplate.trim() || null,
       },
     })
     await appendAuditLog(tx, {

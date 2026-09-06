@@ -18,6 +18,8 @@ export type BranchDTO = {
   facebookPageUrl: string | null
   timezone: string
   operatingHours: OperatingHours
+  /** Calling-board wording; null means the default (lib/utils/announcement.ts). */
+  announcementTemplate: string | null
   isActive: boolean
   createdAt: Date
 }
@@ -61,6 +63,7 @@ export function toBranchDTO(branch: Branch & { clinic: { name: string } }): Bran
     facebookPageUrl: branch.facebookPageUrl,
     timezone: branch.timezone,
     operatingHours: normalizeOperatingHours(branch.operatingHours),
+    announcementTemplate: branch.announcementTemplate,
     isActive: branch.isActive,
     createdAt: branch.createdAt,
   }

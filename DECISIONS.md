@@ -71,6 +71,50 @@ URL); the full suite; tsc; eslint. Not verifiable from here: the production
 change itself, which the owner makes in Vercel — the startup log line will
 say whether it took.
 
+## 2026-09-07 — Calling-board announcement wording, per branch
+
+The calling board (`/now-serving`) used to speak a fixed "Number 7. Maria
+Santos." Each branch can now set the sentence itself, under Settings.
+
+- **On `Branch`, edited by the branch admin, nothing else.** The wording is
+  operational — the same kind of thing as opening hours — and the role that
+  stands in the room is the one that knows whether "please come to the
+  front desk" or "please proceed to room 2" is true there. The holding
+  admin's branch edit form is deliberately left without it: that form
+  carries identity (name, slug, timezone); this is not identity.
+- **Two placeholders, `{number}` and `{name}`, at least one required.**
+  `lib/utils/announcement.ts` owns the vocabulary. A template with neither
+  would announce the same sentence on every call, which is almost
+  certainly a mistake rather than a wish, so it is refused. Anything else
+  in braces is refused too, naming the offender — a `{nmae}` would
+  otherwise be read aloud, verbatim, on every call until someone noticed.
+- **One checker, run in two places.** The settings form calls
+  `announcementTemplateProblem` as the admin types and shows the problem
+  and a rendered preview; the zod schema calls the same function inside
+  `superRefine`. They cannot disagree about what is acceptable. The
+  renderer, separately, never throws and leaves an unknown placeholder in
+  place — the board must say *something* even if a bad row somehow
+  reached the database.
+- **Blank is NULL is the default.** Same shape as `HoldingCompany.brandName`:
+  no backfill of today's wording into every row, so clearing the field
+  returns the built-in sentence rather than freezing whatever the default
+  was the day the column was added. The default itself changed to "Now
+  serving number {number}, {name}. Please come to the front desk." — the
+  wording that was asked for, and a better sentence for a wall than two
+  fragments.
+- **"Hear it."** The form speaks the preview with a sample number and
+  name, at the board's own pace. Browsers refuse to speak without a user
+  gesture regardless, so a button is the only honest way to offer a
+  preview — and hearing the sentence before saving it is the check that
+  actually matters.
+- **Speech only.** The board's visual layout is unchanged, and the public
+  `/display/{slug}` screen is untouched — it never speaks and never
+  carries a name (§10).
+
+Verified: unit tests for the renderer and the checker, a schema test for
+the refusals, a query test that the value round-trips and blank stores
+NULL; tsc; eslint.
+
 ## 2026-09-06 — Per-IP rate limiting on login and public booking
 
 Issue #7 asked for two things: throttle sign-in and booking attempts by

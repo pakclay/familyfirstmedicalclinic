@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { operatingHoursSchema } from "@/lib/validation/operating-hours"
+import { announcementTemplateProblem } from "@/lib/utils/announcement"
 
 /**
  * Lowercase, hyphen-separated, no leading/trailing/doubled hyphens. The
@@ -64,6 +65,21 @@ export const branchSettingsSchema = z.object({
   phone: editableBranchFields.phone,
   facebookPageUrl: editableBranchFields.facebookPageUrl,
   operatingHours: editableBranchFields.operatingHours,
+  // What the calling board says when a patient is called. Blank means
+  // "use the default" and is stored as NULL by the query layer, the same
+  // shape as facebookPageUrl; anything else must pass the placeholder
+  // check in lib/utils/announcement.ts, which the settings form also runs
+  // so the two never disagree about what's acceptable. Required, like
+  // every other field here: the form is the only caller, and a caller
+  // that forgets it should fail to compile rather than silently clear it.
+  announcementTemplate: z
+    .string()
+    .trim()
+    .superRefine((value, ctx) => {
+      if (value === "") return
+      const problem = announcementTemplateProblem(value)
+      if (problem) ctx.addIssue({ code: "custom", message: problem })
+    }),
 })
 
 export type BranchSettingsInput = z.infer<typeof branchSettingsSchema>
