@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { DateRangeForm } from "./date-range-form"
 import { RevenueChart } from "./revenue-chart"
+import { firstParam, type SearchParam } from "@/lib/utils/search-params"
 
 function pesos(centavos: number): string {
   return `₱${(centavos / 100).toFixed(2)}`
@@ -17,13 +18,14 @@ function pesos(centavos: number): string {
 export default async function ReportsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ start?: string; end?: string }>
+  searchParams: Promise<{ start?: SearchParam; end?: SearchParam }>
 }) {
   const session = await auth()
   if (!session?.user) redirect("/login")
   if (session.user.role !== "BRANCH_ADMIN" && session.user.role !== "HOLDING_ADMIN") redirect("/")
 
-  const params = await searchParams
+  const raw = await searchParams
+  const params = { start: firstParam(raw.start), end: firstParam(raw.end) }
   const user: AbilitySubject = {
     id: session.user.id,
     role: session.user.role,

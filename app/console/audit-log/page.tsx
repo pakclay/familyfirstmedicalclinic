@@ -5,24 +5,26 @@ import {
   listAuditLog,
   AUDIT_LOG_PAGE_SIZE_DEFAULT,
   type AppliedAuditLogFilters,
+  type AuditLogFilters,
 } from "@/lib/queries/audit-log"
 import type { AbilitySubject } from "@/lib/permissions/ability"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { firstParam, type SearchParam } from "@/lib/utils/search-params"
 
 const ROUTE = "/console/audit-log"
 const SELECT_CLASS = "h-9 min-w-0 rounded-md border border-input bg-transparent px-2 text-sm"
 
 type AuditLogSearchParams = {
-  start?: string
-  end?: string
-  action?: string
-  entityType?: string
-  userId?: string
-  branchId?: string
-  q?: string
-  page?: string
-  pageSize?: string
+  start?: SearchParam
+  end?: SearchParam
+  action?: SearchParam
+  entityType?: SearchParam
+  userId?: SearchParam
+  branchId?: SearchParam
+  q?: SearchParam
+  page?: SearchParam
+  pageSize?: SearchParam
 }
 
 /** Rebuilds the current URL with a different page, preserving every active filter. */
@@ -68,7 +70,20 @@ export default async function AuditLogPage({ searchParams }: { searchParams: Pro
     )
   }
 
-  const params = await searchParams
+  // Nine filters, and listAuditLog trims seven of them — every one has to be
+  // a string by the time it gets there. See lib/utils/search-params.ts.
+  const raw = await searchParams
+  const params: AuditLogFilters = {
+    start: firstParam(raw.start),
+    end: firstParam(raw.end),
+    action: firstParam(raw.action),
+    entityType: firstParam(raw.entityType),
+    userId: firstParam(raw.userId),
+    branchId: firstParam(raw.branchId),
+    q: firstParam(raw.q),
+    page: firstParam(raw.page),
+    pageSize: firstParam(raw.pageSize),
+  }
   const user: AbilitySubject = {
     id: session.user.id,
     role: session.user.role,
