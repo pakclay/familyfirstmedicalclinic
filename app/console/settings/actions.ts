@@ -8,7 +8,7 @@ import { branchSettingsSchema } from "@/lib/validation/branch"
 import { updateOwnBranchSettings, type ManageBranchResult } from "@/lib/queries/branches"
 
 /**
- * Clinic admin only — the mirror image of app/console/clinics/actions.ts,
+ * Branch admin only — the mirror image of app/console/clinics/actions.ts,
  * which is holding-admin only. A holding admin has no "own branch" to
  * configure (their branchId is null), so they're refused here rather than
  * silently falling through to a null-branch lookup.
@@ -16,8 +16,8 @@ import { updateOwnBranchSettings, type ManageBranchResult } from "@/lib/queries/
 async function actingUser(): Promise<AbilitySubject> {
   const session = await auth()
   if (!session?.user) throw new ForbiddenError("Not signed in")
-  if (session.user.role !== "CLINIC_ADMIN") {
-    throw new ForbiddenError("Only a clinic admin manages branch settings")
+  if (session.user.role !== "BRANCH_ADMIN") {
+    throw new ForbiddenError("Only a branch admin manages branch settings")
   }
   return {
     id: session.user.id,

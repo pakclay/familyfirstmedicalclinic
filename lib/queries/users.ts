@@ -115,7 +115,7 @@ export async function changeOwnPassword(
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// User management (holding admin: any account · clinic admin: their own
+// User management (holding admin: any account · branch admin: their own
 // branch's front desk/doctor accounts only — §4's role table)
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -193,7 +193,7 @@ export async function listUsers(actor: AbilitySubject): Promise<UserDTO[]> {
  * one of them.
  *
  * Same authorization shape as listUsers above, plus the clinic filter — a
- * clinic admin asking about a clinic that isn't theirs matches nothing
+ * branch admin asking about a clinic that isn't theirs matches nothing
  * rather than being told it exists. `users` has no RLS policy (see
  * changeOwnPassword's comment), so this where-clause is the only thing
  * enforcing that; it must never be relaxed to lean on a database backstop
@@ -216,7 +216,7 @@ export async function listUsersForClinic(actor: AbilitySubject, clinicId: string
  * unlike listUsersForClinic this needs no union and the branch column is a
  * direct match.
  *
- * A clinic admin gets their own branch only: asking about a sibling branch
+ * A branch admin gets their own branch only: asking about a sibling branch
  * under the same clinic returns nothing rather than an error, so a probe
  * can't distinguish "empty branch" from "not yours". Same reasoning as
  * getManagedUserById returning null for both causes.
@@ -256,7 +256,7 @@ export async function createUser(actor: AbilitySubject, input: CreateUserInput):
     if (!input.branchId) return { ok: false, error: "Select a branch." }
     branchId = input.branchId
   } else {
-    // Clinic admin: ignore any branchId the form sent — they can only ever
+    // Branch admin: ignore any branchId the form sent — they can only ever
     // create within their own branch, and trusting a client-supplied value
     // here would be exactly the kind of hole §5's "never from a
     // client-supplied parameter" rule exists to close.
@@ -337,7 +337,7 @@ export async function updateUser(actor: AbilitySubject, id: string, input: EditU
 
   if (movingBranch) {
     // Deliberately holding-admin-only. canManageTarget already confines a
-    // clinic admin to targets in their own branch, so without this a clinic
+    // branch admin to targets in their own branch, so without this a clinic
     // admin could push one of their staff into a branch they have no rights
     // over — a one-way escalation out of their own scope.
     if (!isHoldingAdmin(actor)) {
@@ -417,8 +417,8 @@ export async function updateUser(actor: AbilitySubject, id: string, input: EditU
 }
 
 export async function setUserActive(actor: AbilitySubject, id: string, isActive: boolean): Promise<ManageUserResult> {
-  // Checked before canManageTarget — a clinic admin's own row is a
-  // CLINIC_ADMIN, which canManageTarget correctly refuses for anyone
+  // Checked before canManageTarget — a branch admin's own row is a
+  // BRANCH_ADMIN, which canManageTarget correctly refuses for anyone
   // *else's* clinic-admin account, but that check running first would
   // reject an admin's own id with the wrong, misleading "not found"
   // instead of the real reason.

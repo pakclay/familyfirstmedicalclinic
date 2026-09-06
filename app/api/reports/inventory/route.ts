@@ -6,7 +6,7 @@ import type { AbilitySubject } from "@/lib/permissions/ability"
 
 export async function GET(req: NextRequest) {
   const session = await auth()
-  if (!session?.user || (session.user.role !== "CLINIC_ADMIN" && session.user.role !== "FRONT_DESK")) {
+  if (!session?.user || (session.user.role !== "BRANCH_ADMIN" && session.user.role !== "FRONT_DESK")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
   const user: AbilitySubject = {

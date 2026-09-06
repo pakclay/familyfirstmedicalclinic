@@ -33,7 +33,7 @@ clinic):
 | Role | Email | Scope |
 |---|---|---|
 | Holding admin | `owner@familyfirst.example` | All three clinics |
-| Clinic admin | `admin.quezon-city@familyfirst.example` | Quezon City only |
+| Branch admin | `admin.quezon-city@familyfirst.example` | Quezon City only |
 | Front desk | `staff1.quezon-city@familyfirst.example` | Quezon City only |
 | Doctor | `doctor1.quezon-city@familyfirst.example` | Quezon City only |
 
@@ -141,7 +141,7 @@ matching `dispense` movement; deleting that row returns stock to 24 via a
 `return` movement (never an edit); a failed save leaves stock untouched;
 `current_stock` always equals the sum of the movement ledger.
 
-1. As clinic admin, go to `/staff/inventory` and open any medicine's
+1. As branch admin, go to `/staff/inventory` and open any medicine's
    detail page — the **movement ledger** lists every receipt/dispense/
    adjustment/return with a running balance.
 2. **Receive stock**: add 50 units to a medicine, confirm `current_stock`
@@ -168,7 +168,7 @@ matching `dispense` movement; deleting that row returns stock to 24 via a
 **Accept:** booking, almost-your-turn, and now-serving events each write
 a notification row with fully rendered message text.
 
-1. Book a new visit through `/book/quezon-city` again. As clinic admin,
+1. Book a new visit through `/book/quezon-city` again. As branch admin,
    open `/staff/notifications` — a `booking_confirmed` row appears with
    the real queue number and `/q/<token>` link rendered into the message
    text (not a template placeholder).
@@ -209,7 +209,7 @@ a remittance variance displays correctly.
 3. Log in as the doctor from M4 and go to **Remittance**. Enter an amount
    *different* from the expected total shown (e.g. ₱20 short) with a
    note explaining why, and submit.
-4. Log in as clinic admin, open `/staff/remittance` — the submission is
+4. Log in as branch admin, open `/staff/remittance` — the submission is
    listed under **Pending confirmation** with the variance shown in red
    (short) or highlighted (over), plus the doctor's note. Confirm it.
 5. Record an expense from `/console/expenses` and reload the clinic

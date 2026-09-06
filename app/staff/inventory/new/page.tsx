@@ -5,7 +5,7 @@ import { NewMedicineForm } from "./new-medicine-form"
 export default async function NewMedicinePage() {
   const session = await auth()
   if (!session?.user) redirect("/login")
-  if (session.user.role !== "CLINIC_ADMIN") redirect("/staff/inventory")
+  if (session.user.role !== "BRANCH_ADMIN") redirect("/staff/inventory")
 
   return (
     <div className="mx-auto max-w-md">

@@ -12,7 +12,7 @@ export default async function ChangeRolePage({ params }: { params: Promise<{ id:
   const session = await auth()
   if (!session?.user) redirect("/login")
   // Holding admin only, and refused in place rather than redirected — a
-  // clinic admin following a link here should be told why, not bounced.
+  // branch admin following a link here should be told why, not bounced.
   if (session.user.role !== "HOLDING_ADMIN") {
     return (
       <div>

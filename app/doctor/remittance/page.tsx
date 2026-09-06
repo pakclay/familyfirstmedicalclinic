@@ -8,7 +8,7 @@ import { RemittanceForm } from "@/app/staff/remittance/remittance-form"
 // "collector" under §7.7 as front desk is, so this reuses the exact same
 // form/query as /staff/remittance rather than reimplementing it. It lives
 // under /doctor because proxy.ts's /staff/* gate is otherwise reserved
-// for front desk/clinic admin/holding admin screens.
+// for front desk/branch admin/holding admin screens.
 export default async function DoctorRemittancePage() {
   const session = await auth()
   if (!session?.user) redirect("/login")
@@ -38,7 +38,7 @@ export default async function DoctorRemittancePage() {
                 ₱{(status.alreadySubmitted.variance / 100).toFixed(2)} variance
               </span>
             </p>
-            <p className="text-muted-foreground">{status.alreadySubmitted.confirmed ? "Confirmed by clinic admin." : "Awaiting confirmation."}</p>
+            <p className="text-muted-foreground">{status.alreadySubmitted.confirmed ? "Confirmed by branch admin." : "Awaiting confirmation."}</p>
           </div>
         ) : (
           <div className="mt-3">

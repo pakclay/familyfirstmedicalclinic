@@ -14,7 +14,7 @@ export type ExpenseEntry = {
 }
 
 /**
- * §9 Clinic Admin screen "expenses" — the minimal ledger §8's P&L
+ * §9 Branch Admin screen "expenses" — the minimal ledger §8's P&L
  * ("expenses, net") needs to mean anything. Resolves the range from the
  * branch's own timezone the same way the reports queries do (§8's other
  * screens) rather than accepting pre-resolved instants from the caller —
@@ -56,7 +56,7 @@ export async function listExpenses(
 }
 
 export async function createExpense(user: AbilitySubject, input: unknown): Promise<void> {
-  if (user.role !== "CLINIC_ADMIN") throw new ForbiddenError("Only a clinic admin can record expenses")
+  if (user.role !== "BRANCH_ADMIN") throw new ForbiddenError("Only a branch admin can record expenses")
   const branchId = requireBranchId(user)
   const parsed = expenseSchema.parse(input)
 

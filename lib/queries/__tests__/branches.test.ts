@@ -50,7 +50,7 @@ describe("branch management", () => {
   let otherClinic: { id: string }
   let existingBranch: { id: string }
   let holdingAdmin: AbilitySubject
-  let clinicAdmin: AbilitySubject
+  let branchAdmin: AbilitySubject
 
   beforeAll(async () => {
     holding = await superuserPrisma.holdingCompany.create({ data: { name: "Test Holding — branch mgmt" } })
@@ -82,13 +82,13 @@ describe("branch management", () => {
     const adminUser = await superuserPrisma.user.create({
       data: {
         branchId: existingBranch.id,
-        name: "Clinic Admin",
+        name: "Branch Admin",
         email: `admin-branches-${Date.now()}@test.local`,
         passwordHash: "x",
-        role: Role.CLINIC_ADMIN,
+        role: Role.BRANCH_ADMIN,
       },
     })
-    clinicAdmin = { id: adminUser.id, role: Role.CLINIC_ADMIN, branchId: existingBranch.id, holdingCompanyId: null }
+    branchAdmin = { id: adminUser.id, role: Role.BRANCH_ADMIN, branchId: existingBranch.id, holdingCompanyId: null }
   })
 
   afterAll(async () => {
@@ -152,10 +152,10 @@ describe("branch management", () => {
     expect(result).toEqual({ ok: false, error: "Clinic not found." })
   })
 
-  it("refuses every mutation for a clinic admin, without touching the database", async () => {
+  it("refuses every mutation for a branch admin, without touching the database", async () => {
     const denied = { ok: false, error: "Only a holding admin manages branches." }
 
-    const created = await createBranch(clinicAdmin, clinic.id, branchInput({ name: "Sneaky Branch" }))
+    const created = await createBranch(branchAdmin, clinic.id, branchInput({ name: "Sneaky Branch" }))
     expect(created).toEqual(denied)
 
     const edit: EditBranchInput = {
@@ -167,8 +167,8 @@ describe("branch management", () => {
       timezone: "Asia/Manila",
       operatingHours: STANDARD_HOURS,
     }
-    expect(await updateBranch(clinicAdmin, existingBranch.id, edit)).toEqual(denied)
-    expect(await setBranchActive(clinicAdmin, existingBranch.id, false)).toEqual(denied)
+    expect(await updateBranch(branchAdmin, existingBranch.id, edit)).toEqual(denied)
+    expect(await setBranchActive(branchAdmin, existingBranch.id, false)).toEqual(denied)
 
     const untouched = await superuserPrisma.branch.findUniqueOrThrow({ where: { id: existingBranch.id } })
     expect(untouched.name).toBe("AAA Existing Branch")
@@ -201,10 +201,10 @@ describe("branch management", () => {
     expect(names.indexOf("AAA Existing Branch")).toBeLessThan(names.indexOf("ZZZ Dormant Branch"))
   })
 
-  it("throws rather than returning an empty list to a clinic admin", async () => {
+  it("throws rather than returning an empty list to a branch admin", async () => {
     // §4.2: a forbidden read fails as a 403-equivalent. An empty list would
     // render as a plausible "No branches yet." and hide a broken gate.
-    await expect(listBranches(clinicAdmin)).rejects.toBeInstanceOf(ForbiddenError)
+    await expect(listBranches(branchAdmin)).rejects.toBeInstanceOf(ForbiddenError)
   })
 
   it("gets a branch by id for a holding admin, with its clinic name", async () => {
@@ -215,8 +215,8 @@ describe("branch management", () => {
     expect(branch?.operatingHours.mon).toEqual({ open: "09:00", close: "18:00" })
   })
 
-  it("throws for a clinic admin, and returns null only for an unknown id", async () => {
-    await expect(getBranchById(clinicAdmin, existingBranch.id)).rejects.toBeInstanceOf(ForbiddenError)
+  it("throws for a branch admin, and returns null only for an unknown id", async () => {
+    await expect(getBranchById(branchAdmin, existingBranch.id)).rejects.toBeInstanceOf(ForbiddenError)
     expect(await getBranchById(holdingAdmin, "00000000-0000-0000-0000-000000000000")).toBeNull()
   })
 
@@ -284,7 +284,7 @@ describe("branch management", () => {
     expect(logs.length).toBe(2)
   })
 
-  describe("own-branch settings (clinic admin self-service)", () => {
+  describe("own-branch settings (branch admin self-service)", () => {
     const settings: BranchSettingsInput = {
       address: "99 Moved Here St",
       city: "Relocated City",
@@ -294,7 +294,7 @@ describe("branch management", () => {
     }
 
     it("returns the actor's own branch, resolved from the session and not a parameter", async () => {
-      const branch = await getOwnBranch(clinicAdmin)
+      const branch = await getOwnBranch(branchAdmin)
       expect(branch.id).toBe(existingBranch.id)
     })
 
@@ -302,8 +302,8 @@ describe("branch management", () => {
       await expect(getOwnBranch(holdingAdmin)).rejects.toBeInstanceOf(ForbiddenError)
     })
 
-    it("updates the clinic admin's own branch and audit-logs it in the same transaction", async () => {
-      expect(await updateOwnBranchSettings(clinicAdmin, settings)).toEqual({ ok: true })
+    it("updates the branch admin's own branch and audit-logs it in the same transaction", async () => {
+      expect(await updateOwnBranchSettings(branchAdmin, settings)).toEqual({ ok: true })
 
       const row = await superuserPrisma.branch.findUniqueOrThrow({ where: { id: existingBranch.id } })
       expect(row.address).toBe("99 Moved Here St")
@@ -318,12 +318,12 @@ describe("branch management", () => {
         where: { entityType: "Branch", entityId: existingBranch.id, action: "branch.settings_updated" },
       })
       expect(log).toBeTruthy()
-      expect(log!.userId).toBe(clinicAdmin.id)
+      expect(log!.userId).toBe(branchAdmin.id)
     })
 
     it("cannot touch the privileged fields, even indirectly", async () => {
       const before = await superuserPrisma.branch.findUniqueOrThrow({ where: { id: existingBranch.id } })
-      expect(await updateOwnBranchSettings(clinicAdmin, settings)).toEqual({ ok: true })
+      expect(await updateOwnBranchSettings(branchAdmin, settings)).toEqual({ ok: true })
       const after = await superuserPrisma.branch.findUniqueOrThrow({ where: { id: existingBranch.id } })
 
       expect(after.name).toBe(before.name)
@@ -340,7 +340,7 @@ describe("branch management", () => {
       const before = await superuserPrisma.branch.findUniqueOrThrow({ where: { id: other.branch.id } })
 
       // There is no id parameter to point elsewhere — that's the point.
-      expect(await updateOwnBranchSettings(clinicAdmin, settings)).toEqual({ ok: true })
+      expect(await updateOwnBranchSettings(branchAdmin, settings)).toEqual({ ok: true })
 
       const after = await superuserPrisma.branch.findUniqueOrThrow({ where: { id: other.branch.id } })
       expect(after.address).toBe(before.address)
@@ -349,11 +349,11 @@ describe("branch management", () => {
     })
 
     it("refuses a holding admin, a front desk user, and a doctor", async () => {
-      const denied = { ok: false, error: "Only a clinic admin manages their branch's settings." }
+      const denied = { ok: false, error: "Only a branch admin manages their branch's settings." }
       expect(await updateOwnBranchSettings(holdingAdmin, settings)).toEqual(denied)
 
-      const frontDesk: AbilitySubject = { ...clinicAdmin, role: Role.FRONT_DESK }
-      const doctor: AbilitySubject = { ...clinicAdmin, role: Role.DOCTOR }
+      const frontDesk: AbilitySubject = { ...branchAdmin, role: Role.FRONT_DESK }
+      const doctor: AbilitySubject = { ...branchAdmin, role: Role.DOCTOR }
       expect(await updateOwnBranchSettings(frontDesk, settings)).toEqual(denied)
       expect(await updateOwnBranchSettings(doctor, settings)).toEqual(denied)
     })

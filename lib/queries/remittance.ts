@@ -73,9 +73,9 @@ export type PendingRemittance = {
   notes: string | null
 }
 
-/** For the clinic admin to confirm — §7.7: "the system records the variance for the clinic admin to confirm." */
+/** For the branch admin to confirm — §7.7: "the system records the variance for the branch admin to confirm." */
 export async function listPendingRemittances(user: AbilitySubject): Promise<PendingRemittance[]> {
-  if (user.role !== "CLINIC_ADMIN") throw new ForbiddenError("Only a clinic admin confirms remittances")
+  if (user.role !== "BRANCH_ADMIN") throw new ForbiddenError("Only a branch admin confirms remittances")
   const branchId = requireBranchId(user)
   return runWithRls(user, async (tx) => {
     const remittances = await tx.remittance.findMany({
@@ -97,7 +97,7 @@ export async function listPendingRemittances(user: AbilitySubject): Promise<Pend
 }
 
 export async function confirmRemittance(user: AbilitySubject, remittanceId: string): Promise<void> {
-  if (user.role !== "CLINIC_ADMIN") throw new ForbiddenError("Only a clinic admin confirms remittances")
+  if (user.role !== "BRANCH_ADMIN") throw new ForbiddenError("Only a branch admin confirms remittances")
   const branchId = requireBranchId(user)
   await runWithRls(user, async (tx) => {
     const remittance = await tx.remittance.findFirst({ where: { id: remittanceId, branchId } })

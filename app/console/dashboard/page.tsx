@@ -9,7 +9,7 @@ export default async function DashboardPage() {
   const session = await auth()
   if (!session?.user) redirect("/login")
 
-  if (session.user.role !== "CLINIC_ADMIN") {
+  if (session.user.role !== "BRANCH_ADMIN") {
     // The panels below are branch-scoped, so they have nothing to show a
     // holding admin. Point at the two pages that do rather than leaving the
     // old "lands in M6" note, which outlived the reporting it promised.

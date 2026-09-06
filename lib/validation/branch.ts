@@ -46,7 +46,7 @@ export const editBranchSchema = z.object(editableBranchFields)
 export type EditBranchInput = z.infer<typeof editBranchSchema>
 
 /**
- * What a clinic admin may change about their *own* branch — the day-to-day
+ * What a branch admin may change about their *own* branch — the day-to-day
  * operational details (§4: "clinic hours, services and prices"). Notably
  * absent: `name` (it's on the public booking page and in holding-level
  * reports), `timezone` (queue numbering, report ranges and follow-up dates
@@ -56,7 +56,7 @@ export type EditBranchInput = z.infer<typeof editBranchSchema>
  * Not built by subsetting editBranchSchema with `.omit()` — the omitted
  * keys are exactly the privilege boundary, so listing what's allowed makes
  * a later addition to editableBranchFields fail closed rather than
- * silently widening what a clinic admin can edit.
+ * silently widening what a branch admin can edit.
  */
 export const branchSettingsSchema = z.object({
   address: editableBranchFields.address,

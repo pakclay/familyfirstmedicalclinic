@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 export default async function ClinicsPage() {
   const session = await auth()
   if (!session?.user) redirect("/login")
-  // proxy.ts's /console gate allows CLINIC_ADMIN too, so the page narrows
+  // proxy.ts's /console gate allows BRANCH_ADMIN too, so the page narrows
   // it to holding admin itself — same shape as the expenses page's
   // clinic-admin-only gate.
   if (session.user.role !== "HOLDING_ADMIN") {

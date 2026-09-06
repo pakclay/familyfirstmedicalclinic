@@ -54,7 +54,7 @@ function buildTimestampFormatter(timezone: string): Intl.DateTimeFormat {
 export default async function AuditLogPage({ searchParams }: { searchParams: Promise<AuditLogSearchParams> }) {
   const session = await auth()
   if (!session?.user) redirect("/login")
-  // proxy.ts admits CLINIC_ADMIN to /console as well, but §4's role table
+  // proxy.ts admits BRANCH_ADMIN to /console as well, but §4's role table
   // gives "view audit log" to the Holding Admin alone. Refuse in place
   // rather than redirecting, the same way the expenses screen does — a
   // redirect would make a deliberate permission boundary look like a

@@ -14,7 +14,7 @@ export default async function AdminPage() {
   const session = await auth()
   if (!session?.user) redirect("/login")
   // Refused in place rather than redirected: this is a top-level nav
-  // destination, and bouncing a clinic admin to another page makes a
+  // destination, and bouncing a branch admin to another page makes a
   // deliberate permission boundary look like a broken link. Same shape as
   // the clinics page's own gate.
   if (session.user.role !== "HOLDING_ADMIN") {

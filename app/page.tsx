@@ -1,10 +1,11 @@
 import { redirect } from "next/navigation"
 import { auth } from "@/auth"
+import type { Role } from "@prisma/client"
 
-const ROLE_HOME: Record<string, string> = {
+const ROLE_HOME: Record<Role, string> = {
   FRONT_DESK: "/staff/queue",
   DOCTOR: "/doctor/queue",
-  CLINIC_ADMIN: "/console/dashboard",
+  BRANCH_ADMIN: "/console/dashboard",
   HOLDING_ADMIN: "/console/dashboard",
 }
 

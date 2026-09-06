@@ -50,7 +50,7 @@ export default async function InventoryListPage({
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const medicines = await listMedicines(user, { search: q, filter: activeFilter === "all" ? undefined : activeFilter })
-  const isClinicAdmin = session.user.role === "CLINIC_ADMIN"
+  const isBranchAdmin = session.user.role === "BRANCH_ADMIN"
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -63,7 +63,7 @@ export default async function InventoryListPage({
           <Button asChild variant="outline" size="sm">
             <Link href="/staff/inventory/count">Physical count</Link>
           </Button>
-          {isClinicAdmin && (
+          {isBranchAdmin && (
             <Button asChild size="sm">
               <Link href="/staff/inventory/new">Add medicine</Link>
             </Button>

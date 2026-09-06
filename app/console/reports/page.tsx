@@ -21,7 +21,7 @@ export default async function ReportsPage({
 }) {
   const session = await auth()
   if (!session?.user) redirect("/login")
-  if (session.user.role !== "CLINIC_ADMIN" && session.user.role !== "HOLDING_ADMIN") redirect("/")
+  if (session.user.role !== "BRANCH_ADMIN" && session.user.role !== "HOLDING_ADMIN") redirect("/")
 
   const params = await searchParams
   const user: AbilitySubject = {

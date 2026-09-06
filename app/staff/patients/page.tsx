@@ -19,7 +19,7 @@ export default async function StaffPatientsPage({
         <h1 className="text-2xl font-heading font-semibold">Patients</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           A holding admin isn&apos;t scoped to one clinic — patient search is per clinic. This screen is
-          for front desk and clinic admins.
+          for front desk and branch admins.
         </p>
       </div>
     )

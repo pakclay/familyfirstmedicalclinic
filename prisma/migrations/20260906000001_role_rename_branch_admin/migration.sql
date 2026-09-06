@@ -1,0 +1,17 @@
+-- CLINIC_ADMIN has always been a branch-scoped role: it has a branch_id and
+-- runs exactly one location (see DECISIONS.md, 2026-08-24 branch hierarchy,
+-- "CLINIC_ADMIN stays single-location"). The name predates branches existing
+-- as a tier and now describes the wrong thing. Rename it to what it is.
+--
+-- RENAME VALUE, not drop-and-recreate: it preserves the enum's OID and every
+-- row's physical value, so the existing accounts follow the rename with no
+-- UPDATE and no WHERE clause that could miss one. Prisma's own diff would
+-- emit a create-new-type/swap sequence that cannot survive rows still
+-- holding the old label — this file is hand-written and must stay so.
+--
+-- Deliberately a standalone migration: after it, the enum has no
+-- CLINIC_ADMIN member, so every `role === "CLINIC_ADMIN"` left in the code
+-- is a TypeScript error (TS2367). That compiler sweep is the point of
+-- shipping the rename on its own, before the name is reused for the new
+-- clinic-level role in the next migration.
+ALTER TYPE "Role" RENAME VALUE 'CLINIC_ADMIN' TO 'BRANCH_ADMIN';

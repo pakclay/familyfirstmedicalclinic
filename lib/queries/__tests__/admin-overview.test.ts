@@ -147,13 +147,13 @@ describe("getAdminOverview", () => {
   })
 
   it("refuses a non-holding-admin", async () => {
-    const clinicAdmin: AbilitySubject = {
+    const branchAdmin: AbilitySubject = {
       id: "someone",
-      role: Role.CLINIC_ADMIN,
+      role: Role.BRANCH_ADMIN,
       branchId: staffedBranch.id,
       holdingCompanyId: null,
     }
-    await expect(getAdminOverview(clinicAdmin)).rejects.toBeInstanceOf(ForbiddenError)
+    await expect(getAdminOverview(branchAdmin)).rejects.toBeInstanceOf(ForbiddenError)
   })
 
   it("names the caller's own company", async () => {

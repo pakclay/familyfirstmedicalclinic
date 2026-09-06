@@ -88,7 +88,7 @@ export default async function MedicineDetailPage({ params }: { params: Promise<{
         </div>
       </dl>
 
-      {session.user.role === "CLINIC_ADMIN" && (
+      {session.user.role === "BRANCH_ADMIN" && (
         <div className="mt-4">
           <EditMedicineForm medicine={medicine} />
         </div>

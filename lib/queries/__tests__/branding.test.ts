@@ -19,7 +19,7 @@ describe("app branding", () => {
   let clinic: { id: string }
   let branch: { id: string }
   let holdingAdmin: AbilitySubject
-  let clinicAdmin: AbilitySubject
+  let branchAdmin: AbilitySubject
 
   beforeAll(async () => {
     holding = await superuserPrisma.holdingCompany.create({ data: { name: "Test Holding — branding" } })
@@ -52,13 +52,13 @@ describe("app branding", () => {
     const adminUser = await superuserPrisma.user.create({
       data: {
         branchId: branch.id,
-        name: "Clinic Admin",
+        name: "Branch Admin",
         email: `admin-branding-${Date.now()}@test.local`,
         passwordHash: "x",
-        role: Role.CLINIC_ADMIN,
+        role: Role.BRANCH_ADMIN,
       },
     })
-    clinicAdmin = { id: adminUser.id, role: Role.CLINIC_ADMIN, branchId: branch.id, holdingCompanyId: null }
+    branchAdmin = { id: adminUser.id, role: Role.BRANCH_ADMIN, branchId: branch.id, holdingCompanyId: null }
   })
 
   afterAll(async () => {
@@ -106,10 +106,10 @@ describe("app branding", () => {
     expect(row.brandName).toBeNull()
   })
 
-  it("refuses a clinic admin, and leaves the stored name untouched", async () => {
+  it("refuses a branch admin, and leaves the stored name untouched", async () => {
     await updateBranding(holdingAdmin, { brandName: "Set By Holding Admin" })
 
-    const result = await updateBranding(clinicAdmin, { brandName: "Set By Clinic Admin" })
+    const result = await updateBranding(branchAdmin, { brandName: "Set By Branch Admin" })
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.error).toMatch(/holding admin/i)
@@ -118,9 +118,9 @@ describe("app branding", () => {
     expect(row.brandName).toBe("Set By Holding Admin")
   })
 
-  it("throws rather than returning null when a clinic admin reads the name", async () => {
+  it("throws rather than returning null when a branch admin reads the name", async () => {
     // Same shape as the other holding-admin-only reads (§4.2): a role denial
     // fails loudly instead of degrading into a plausible "not set".
-    await expect(getBrandName(clinicAdmin)).rejects.toBeInstanceOf(ForbiddenError)
+    await expect(getBrandName(branchAdmin)).rejects.toBeInstanceOf(ForbiddenError)
   })
 })

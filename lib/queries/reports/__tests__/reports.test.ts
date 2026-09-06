@@ -21,7 +21,7 @@ describe("reports and reconciliation", () => {
   let branches: { id: string; name: string; timezone: string }[]
   let clinicNames: string[]
   let holdingAdmin: AbilitySubject
-  let clinicAdmins: AbilitySubject[]
+  let branchAdmins: AbilitySubject[]
   let frontDeskUsers: AbilitySubject[]
   let doctors: { id: string; user: AbilitySubject }[]
   let patients: string[][]
@@ -123,7 +123,7 @@ describe("reports and reconciliation", () => {
     holdingAdmin = { id: holdingAdminUser.id, role: Role.HOLDING_ADMIN, branchId: null, holdingCompanyId: holding.id }
 
     branches = []
-    clinicAdmins = []
+    branchAdmins = []
     frontDeskUsers = []
     doctors = []
     patients = []
@@ -152,9 +152,9 @@ describe("reports and reconciliation", () => {
       branches.push({ id: branch.id, name: branch.name, timezone: branch.timezone })
 
       const adminUser = await superuserPrisma.user.create({
-        data: { branchId: branch.id, name: `Admin ${i}`, email: `admin-report-${i}-${Date.now()}@test.local`, passwordHash: "x", role: Role.CLINIC_ADMIN },
+        data: { branchId: branch.id, name: `Admin ${i}`, email: `admin-report-${i}-${Date.now()}@test.local`, passwordHash: "x", role: Role.BRANCH_ADMIN },
       })
-      clinicAdmins.push({ id: adminUser.id, role: Role.CLINIC_ADMIN, branchId: branch.id, holdingCompanyId: null })
+      branchAdmins.push({ id: adminUser.id, role: Role.BRANCH_ADMIN, branchId: branch.id, holdingCompanyId: null })
 
       const fdUser = await superuserPrisma.user.create({
         data: { branchId: branch.id, name: `FrontDesk ${i}`, email: `fd-report-${i}-${Date.now()}@test.local`, passwordHash: "x", role: Role.FRONT_DESK },
@@ -222,7 +222,7 @@ describe("reports and reconciliation", () => {
     const oldPayment = await payment(branch.id, patients[0][0], frontDeskUsers[0].id, 99999)
     await superuserPrisma.payment.update({ where: { id: oldPayment.id }, data: { receivedAt: new Date(Date.now() - 60 * 86_400_000) } })
 
-    const report = await getBranchReport(clinicAdmins[0], {})
+    const report = await getBranchReport(branchAdmins[0], {})
     expect(report.revenueTotal).toBe(80000)
   })
 
@@ -233,8 +233,8 @@ describe("reports and reconciliation", () => {
     await payment(branches[2].id, patients[2][0], frontDeskUsers[2].id, 10000)
     await payment(branches[2].id, patients[2][1], frontDeskUsers[2].id, 15000)
 
-    await createExpense(clinicAdmins[0], { category: "Rent", amount: 20000, expenseDate: new Date().toISOString() })
-    await createExpense(clinicAdmins[1], { category: "Utilities", amount: 5000, expenseDate: new Date().toISOString() })
+    await createExpense(branchAdmins[0], { category: "Rent", amount: 20000, expenseDate: new Date().toISOString() })
+    await createExpense(branchAdmins[1], { category: "Utilities", amount: 5000, expenseDate: new Date().toISOString() })
 
     const report = await getHoldingConsolidatedReport(holdingAdmin, {})
     expect(report.branches).toHaveLength(3)
@@ -285,7 +285,7 @@ describe("reports and reconciliation", () => {
   })
 
   it("a non-holding-admin can't reach the consolidated report", async () => {
-    await expect(getHoldingConsolidatedReport(clinicAdmins[0], {})).rejects.toBeInstanceOf(ForbiddenError)
+    await expect(getHoldingConsolidatedReport(branchAdmins[0], {})).rejects.toBeInstanceOf(ForbiddenError)
   })
 
   it("remittance variance displays correctly, both for a shortfall and an exact match", async () => {
@@ -310,11 +310,11 @@ describe("reports and reconciliation", () => {
     expect(statusAfter.alreadySubmitted?.variance).toBe(-5000)
     expect(statusAfter.alreadySubmitted?.confirmed).toBe(false)
 
-    const pending = await listPendingRemittances(clinicAdmins[0])
+    const pending = await listPendingRemittances(branchAdmins[0])
     expect(pending.find((r) => r.id === remittance.id)?.variance).toBe(-5000)
 
-    await confirmRemittance(clinicAdmins[0], remittance.id)
-    const pendingAfter = await listPendingRemittances(clinicAdmins[0])
+    await confirmRemittance(branchAdmins[0], remittance.id)
+    const pendingAfter = await listPendingRemittances(branchAdmins[0])
     expect(pendingAfter.find((r) => r.id === remittance.id)).toBeUndefined()
   })
 
@@ -330,7 +330,7 @@ describe("reports and reconciliation", () => {
     expect(remittance.variance).toBe(0)
   })
 
-  it("only a clinic admin can confirm a remittance", async () => {
+  it("only a branch admin can confirm a remittance", async () => {
     const fd = frontDeskUsers[2]
     await payment(branches[2].id, patients[2][0], fd.id, 1000)
     await submitRemittance(fd, 1000)
@@ -341,12 +341,12 @@ describe("reports and reconciliation", () => {
   it("expenses feed directly into the branch report's net figure", async () => {
     const branch = branches[0]
     await payment(branch.id, patients[0][0], frontDeskUsers[0].id, 100000)
-    await createExpense(clinicAdmins[0], { category: "Supplies", description: "Gloves", amount: 15000, expenseDate: new Date().toISOString() })
+    await createExpense(branchAdmins[0], { category: "Supplies", description: "Gloves", amount: 15000, expenseDate: new Date().toISOString() })
 
-    const { expenses } = await listExpenses(clinicAdmins[0], {})
+    const { expenses } = await listExpenses(branchAdmins[0], {})
     expect(expenses.some((e) => e.category === "Supplies" && e.amount === 15000)).toBe(true)
 
-    const report = await getBranchReport(clinicAdmins[0], {})
+    const report = await getBranchReport(branchAdmins[0], {})
     expect(report.revenueTotal).toBe(100000)
     expect(report.expensesTotal).toBe(15000)
     expect(report.net).toBe(85000)
@@ -379,7 +379,7 @@ describe("reports and reconciliation", () => {
       },
     })
 
-    const report = await getBranchReport(clinicAdmins[1], {})
+    const report = await getBranchReport(branchAdmins[1], {})
     expect(report.visitCount).toBe(2) // the two within-range checked-in entries
     expect(report.newPatientCount).toBe(1) // patients[1][0]
     expect(report.returningPatientCount).toBe(1) // patients[1][1], had an earlier visit
@@ -408,7 +408,7 @@ describe("reports and reconciliation", () => {
       // The sibling's money: same clinic, same range, same instant.
       await payment(branches[1].id, patients[1][0], frontDeskUsers[1].id, 777000, siblingVisit.consultationId)
 
-      const report = await getBranchReport(clinicAdmins[0], {})
+      const report = await getBranchReport(branchAdmins[0], {})
       expect(report.revenueTotal).toBe(80000)
       expect(report.dailyRevenue.reduce((sum, d) => sum + d.amount, 0)).toBe(80000)
 
@@ -429,14 +429,14 @@ describe("reports and reconciliation", () => {
     await payment(branches[1].id, patients[1][0], frontDeskUsers[1].id, 500000) // sibling, same clinic
     await payment(branches[2].id, patients[2][0], frontDeskUsers[2].id, 900000) // other clinic
 
-    const report = await getBranchReport(clinicAdmins[0], {})
+    const report = await getBranchReport(branchAdmins[0], {})
     expect(report.revenueTotal).toBe(20000)
     expect(report.dailyRevenue.reduce((sum, d) => sum + d.amount, 0)).toBe(20000)
 
     // positive control: the same call, from the sibling's own admin, sees the
     // sibling's money and nothing else — so the assertion above isn't being
     // satisfied by a report that simply reports nothing.
-    const siblingReport = await getBranchReport(clinicAdmins[1], {})
+    const siblingReport = await getBranchReport(branchAdmins[1], {})
     expect(siblingReport.revenueTotal).toBe(500000)
   })
 
@@ -475,24 +475,24 @@ describe("reports and reconciliation", () => {
       },
     })
 
-    const report = await getBranchReport(clinicAdmins[0], {})
+    const report = await getBranchReport(branchAdmins[0], {})
     expect(report.visitCount).toBe(2)
     expect(report.newPatientCount).toBe(1) // patients[0][0] — sibling history doesn't count
     expect(report.returningPatientCount).toBe(1) // patients[0][1] — own-branch history does
   })
 
   it("listExpenses returns only the caller's branch, not a sibling's under the same clinic", async () => {
-    await createExpense(clinicAdmins[0], { category: `${isoPrefix}-own`, amount: 11000, expenseDate: new Date().toISOString() })
-    await createExpense(clinicAdmins[1], { category: `${isoPrefix}-sibling`, amount: 22000, expenseDate: new Date().toISOString() })
+    await createExpense(branchAdmins[0], { category: `${isoPrefix}-own`, amount: 11000, expenseDate: new Date().toISOString() })
+    await createExpense(branchAdmins[1], { category: `${isoPrefix}-sibling`, amount: 22000, expenseDate: new Date().toISOString() })
 
-    const { expenses } = await listExpenses(clinicAdmins[0], {})
+    const { expenses } = await listExpenses(branchAdmins[0], {})
     const categories = expenses.map((e) => e.category)
     expect(categories).toContain(`${isoPrefix}-own`) // positive control
     expect(categories).not.toContain(`${isoPrefix}-sibling`)
     expect(expenses.every((e) => e.amount !== 22000)).toBe(true)
 
     // and the reverse direction, so neither side is simply empty
-    const siblingSide = await listExpenses(clinicAdmins[1], {})
+    const siblingSide = await listExpenses(branchAdmins[1], {})
     expect(siblingSide.expenses.map((e) => e.category)).toEqual([`${isoPrefix}-sibling`])
   })
 
@@ -547,41 +547,41 @@ describe("reports and reconciliation", () => {
     const own = await remittanceRow(branches[0].id, frontDeskUsers[0].id, 50000)
     const sibling = await remittanceRow(branches[1].id, frontDeskUsers[1].id, 60000)
 
-    const pending = await listPendingRemittances(clinicAdmins[0])
+    const pending = await listPendingRemittances(branchAdmins[0])
     const ids = pending.map((r) => r.id)
     expect(ids).toContain(own.id) // positive control
     expect(ids).not.toContain(sibling.id)
 
     // the sibling's own admin sees the mirror image
-    const siblingPending = await listPendingRemittances(clinicAdmins[1])
+    const siblingPending = await listPendingRemittances(branchAdmins[1])
     expect(siblingPending.map((r) => r.id)).toEqual([sibling.id])
   })
 
   it("confirmRemittance 403s on a sibling branch's remittance, and the row stays unconfirmed", async () => {
     const sibling = await remittanceRow(branches[1].id, frontDeskUsers[1].id, 60000)
 
-    await expect(confirmRemittance(clinicAdmins[0], sibling.id)).rejects.toBeInstanceOf(ForbiddenError)
+    await expect(confirmRemittance(branchAdmins[0], sibling.id)).rejects.toBeInstanceOf(ForbiddenError)
     const afterDenial = await superuserPrisma.remittance.findUniqueOrThrow({ where: { id: sibling.id } })
     expect(afterDenial.confirmedByUserId).toBeNull()
 
     // positive control: the very same row, the very same call, confirmed by
     // the admin who actually owns that branch — so the rejection above is
     // about the branch, not about the row being unconfirmable.
-    await confirmRemittance(clinicAdmins[1], sibling.id)
+    await confirmRemittance(branchAdmins[1], sibling.id)
     const afterConfirm = await superuserPrisma.remittance.findUniqueOrThrow({ where: { id: sibling.id } })
-    expect(afterConfirm.confirmedByUserId).toBe(clinicAdmins[1].id)
+    expect(afterConfirm.confirmedByUserId).toBe(branchAdmins[1].id)
   })
 
   it("confirmRemittance 403s on another clinic's remittance, and the row stays unconfirmed", async () => {
     const foreign = await remittanceRow(branches[2].id, frontDeskUsers[2].id, 70000)
 
-    await expect(confirmRemittance(clinicAdmins[0], foreign.id)).rejects.toBeInstanceOf(ForbiddenError)
+    await expect(confirmRemittance(branchAdmins[0], foreign.id)).rejects.toBeInstanceOf(ForbiddenError)
     const afterDenial = await superuserPrisma.remittance.findUniqueOrThrow({ where: { id: foreign.id } })
     expect(afterDenial.confirmedByUserId).toBeNull()
 
-    await confirmRemittance(clinicAdmins[2], foreign.id) // positive control
+    await confirmRemittance(branchAdmins[2], foreign.id) // positive control
     const afterConfirm = await superuserPrisma.remittance.findUniqueOrThrow({ where: { id: foreign.id } })
-    expect(afterConfirm.confirmedByUserId).toBe(clinicAdmins[2].id)
+    expect(afterConfirm.confirmedByUserId).toBe(branchAdmins[2].id)
   })
 
   it("getHoldingConsolidatedReport is bounded to the caller's own holding company", async () => {
@@ -648,30 +648,30 @@ describe("reports and reconciliation", () => {
 
     // Deliberately unfiltered by branch — proves Postgres itself hides the
     // row, independent of any where-clause the query layer adds.
-    const hidden = await asSession(clinicAdmins[0], branches[0].id, (tx) => tx.payment.findMany({ where: { id: siblingPayment.id } }))
+    const hidden = await asSession(branchAdmins[0], branches[0].id, (tx) => tx.payment.findMany({ where: { id: siblingPayment.id } }))
     expect(hidden).toHaveLength(0)
 
     // Positive control: identical query, identical code path, only
     // app.branch_id differs — so the emptiness above is keyed on the GUC and
     // not on a policy that hides everything.
-    const visible = await asSession(clinicAdmins[0], branches[1].id, (tx) => tx.payment.findMany({ where: { id: siblingPayment.id } }))
+    const visible = await asSession(branchAdmins[0], branches[1].id, (tx) => tx.payment.findMany({ where: { id: siblingPayment.id } }))
     expect(visible).toHaveLength(1)
 
-    const ownVisible = await asSession(clinicAdmins[0], branches[0].id, (tx) => tx.payment.findMany({ where: { id: ownPayment.id } }))
+    const ownVisible = await asSession(branchAdmins[0], branches[0].id, (tx) => tx.payment.findMany({ where: { id: ownPayment.id } }))
     expect(ownVisible).toHaveLength(1)
   })
 
   it("RLS backstop: a sibling branch's expense is invisible under branch 0's session context", async () => {
-    const ownExpense = await expenseRow(branches[0].id, clinicAdmins[0].id, `${isoPrefix}-rls-own`, 1000)
-    const siblingExpense = await expenseRow(branches[1].id, clinicAdmins[1].id, `${isoPrefix}-rls-sibling`, 2000)
+    const ownExpense = await expenseRow(branches[0].id, branchAdmins[0].id, `${isoPrefix}-rls-own`, 1000)
+    const siblingExpense = await expenseRow(branches[1].id, branchAdmins[1].id, `${isoPrefix}-rls-sibling`, 2000)
 
-    const hidden = await asSession(clinicAdmins[0], branches[0].id, (tx) => tx.expense.findMany({ where: { id: siblingExpense.id } }))
+    const hidden = await asSession(branchAdmins[0], branches[0].id, (tx) => tx.expense.findMany({ where: { id: siblingExpense.id } }))
     expect(hidden).toHaveLength(0)
 
-    const visible = await asSession(clinicAdmins[0], branches[1].id, (tx) => tx.expense.findMany({ where: { id: siblingExpense.id } }))
+    const visible = await asSession(branchAdmins[0], branches[1].id, (tx) => tx.expense.findMany({ where: { id: siblingExpense.id } }))
     expect(visible).toHaveLength(1)
 
-    const ownVisible = await asSession(clinicAdmins[0], branches[0].id, (tx) => tx.expense.findMany({ where: { id: ownExpense.id } }))
+    const ownVisible = await asSession(branchAdmins[0], branches[0].id, (tx) => tx.expense.findMany({ where: { id: ownExpense.id } }))
     expect(ownVisible).toHaveLength(1)
   })
 
@@ -679,13 +679,13 @@ describe("reports and reconciliation", () => {
     const ownRemittance = await remittanceRow(branches[0].id, frontDeskUsers[0].id, 3000)
     const siblingRemittance = await remittanceRow(branches[1].id, frontDeskUsers[1].id, 4000)
 
-    const hidden = await asSession(clinicAdmins[0], branches[0].id, (tx) => tx.remittance.findMany({ where: { id: siblingRemittance.id } }))
+    const hidden = await asSession(branchAdmins[0], branches[0].id, (tx) => tx.remittance.findMany({ where: { id: siblingRemittance.id } }))
     expect(hidden).toHaveLength(0)
 
-    const visible = await asSession(clinicAdmins[0], branches[1].id, (tx) => tx.remittance.findMany({ where: { id: siblingRemittance.id } }))
+    const visible = await asSession(branchAdmins[0], branches[1].id, (tx) => tx.remittance.findMany({ where: { id: siblingRemittance.id } }))
     expect(visible).toHaveLength(1)
 
-    const ownVisible = await asSession(clinicAdmins[0], branches[0].id, (tx) => tx.remittance.findMany({ where: { id: ownRemittance.id } }))
+    const ownVisible = await asSession(branchAdmins[0], branches[0].id, (tx) => tx.remittance.findMany({ where: { id: ownRemittance.id } }))
     expect(ownVisible).toHaveLength(1)
   })
 

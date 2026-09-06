@@ -99,18 +99,18 @@ describe("listAuditLog", () => {
   let siblingOfA: { id: string; name: string }
   let clinicAName: string
   let holdingAdmin: AbilitySubject
-  let clinicAdmin: AbilitySubject
+  let branchAdmin: AbilitySubject
   let frontDesk: AbilitySubject
   let doctor: AbilitySubject
   /** A branch-scoped admin whose branch shares clinicA with branchA. */
   let siblingAdmin: AbilitySubject
   let frontDeskName: string
-  let clinicAdminName: string
+  let branchAdminName: string
 
   // TYPE_ALPHA fixtures, oldest first.
   let a1: string // branch A · front desk · ACTION_ALPHA · Jan 10
   let a2: string // branch A · front desk · ACTION_BETA  · Mar 15
-  let a3: string // branch B · clinic admin · ACTION_ALPHA · Mar 16
+  let a3: string // branch B · branch admin · ACTION_ALPHA · Mar 16
   let a4: string // NO branch · NO user · ACTION_ALPHA · Mar 17
   let b1: string // TYPE_BETA · branch A · front desk · Mar 18
   let pagedIds: string[] = []
@@ -161,7 +161,7 @@ describe("listAuditLog", () => {
     })
 
     frontDeskName = `Audit Front Desk ${RUN}`
-    clinicAdminName = `Audit Clinic Admin ${RUN}`
+    branchAdminName = `Audit Branch Admin ${RUN}`
 
     const holdingUser = await superuserPrisma.user.create({
       data: {
@@ -175,10 +175,10 @@ describe("listAuditLog", () => {
     const adminUser = await superuserPrisma.user.create({
       data: {
         branchId: branchA.id,
-        name: clinicAdminName,
+        name: branchAdminName,
         email: `audit-admin-${RUN}@test.local`,
         passwordHash: "x",
-        role: Role.CLINIC_ADMIN,
+        role: Role.BRANCH_ADMIN,
       },
     })
     const frontDeskUser = await superuserPrisma.user.create({
@@ -201,7 +201,7 @@ describe("listAuditLog", () => {
     })
 
     holdingAdmin = { id: holdingUser.id, role: Role.HOLDING_ADMIN, branchId: null, holdingCompanyId: holding.id }
-    clinicAdmin = { id: adminUser.id, role: Role.CLINIC_ADMIN, branchId: branchA.id, holdingCompanyId: null }
+    branchAdmin = { id: adminUser.id, role: Role.BRANCH_ADMIN, branchId: branchA.id, holdingCompanyId: null }
     frontDesk = { id: frontDeskUser.id, role: Role.FRONT_DESK, branchId: branchA.id, holdingCompanyId: null }
     doctor = { id: doctorUser.id, role: Role.DOCTOR, branchId: branchA.id, holdingCompanyId: null }
 
@@ -298,12 +298,12 @@ describe("listAuditLog", () => {
         name: `Audit Sibling Admin ${RUN}`,
         email: `audit-sib-admin-${RUN}@test.local`,
         passwordHash: "x",
-        role: Role.CLINIC_ADMIN,
+        role: Role.BRANCH_ADMIN,
       },
     })
     siblingAdmin = {
       id: siblingAdminUser.id,
-      role: Role.CLINIC_ADMIN,
+      role: Role.BRANCH_ADMIN,
       branchId: siblingOfA.id,
       holdingCompanyId: null,
     }
@@ -485,8 +485,8 @@ describe("listAuditLog", () => {
   })
 
   describe("access control", () => {
-    it("throws ForbiddenError for a clinic admin", async () => {
-      await expect(listAuditLog(clinicAdmin, {})).rejects.toThrow(ForbiddenError)
+    it("throws ForbiddenError for a branch admin", async () => {
+      await expect(listAuditLog(branchAdmin, {})).rejects.toThrow(ForbiddenError)
     })
 
     it("throws ForbiddenError for front desk", async () => {
@@ -500,7 +500,7 @@ describe("listAuditLog", () => {
     it("does not degrade to an empty list for a forbidden reader", async () => {
       // The whole point of §4.2: a refusal must be distinguishable from
       // "there is nothing here", which is what a broken RLS setup looks like.
-      const attempt = listAuditLog(clinicAdmin, { entityType: TYPE_ALPHA })
+      const attempt = listAuditLog(branchAdmin, { entityType: TYPE_ALPHA })
       await expect(attempt).rejects.toBeInstanceOf(ForbiddenError)
     })
   })
@@ -652,7 +652,7 @@ describe("listAuditLog", () => {
       expect(result.options.entityTypes).not.toContain(TYPE_FOREIGN)
       expect(new Set(result.options.actions).size).toBe(result.options.actions.length)
       expect(result.options.branches.map((c) => c.id)).toEqual(expect.arrayContaining([branchA.id, branchB.id]))
-      expect(result.options.users.map((u) => u.name)).toContain(clinicAdminName)
+      expect(result.options.users.map((u) => u.name)).toContain(branchAdminName)
     })
   })
 
@@ -737,7 +737,7 @@ describe("listAuditLog", () => {
    * outright, so the negative half would pass for the wrong reason.
    */
   describe("sibling branches under one clinic", () => {
-    it("has no branch-scoped read path at all — a clinic admin of the sibling branch is refused, not filtered", async () => {
+    it("has no branch-scoped read path at all — a branch admin of the sibling branch is refused, not filtered", async () => {
       // `listAuditLog` gates on role before it ever looks at a branch, so the
       // sibling's own admin never reaches a query. Sharing clinicA with
       // branchA buys nothing, and neither does owning the rows themselves.
@@ -899,7 +899,7 @@ describe("listAuditLog", () => {
       expect(fromBranchA.count).toBe(0)
 
       const fromSibling = await prisma.$transaction(async (tx) => {
-        await setRlsGucs(tx, Role.CLINIC_ADMIN, siblingAdmin.id, siblingOfA.id)
+        await setRlsGucs(tx, Role.BRANCH_ADMIN, siblingAdmin.id, siblingOfA.id)
         // Positive control: the owning branch can read it, so the zero counts
         // are about writing, not about visibility.
         const readable = await tx.auditLog.findMany({ where: { id: s1 } })

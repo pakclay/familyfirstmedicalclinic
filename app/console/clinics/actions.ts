@@ -16,7 +16,7 @@ import {
 } from "@/lib/queries/branches"
 
 /**
- * Holding admin only — unlike user management, a clinic admin has no
+ * Holding admin only — unlike user management, a branch admin has no
  * access here at all. proxy.ts's /console gate lets both admin roles
  * through, so this is the first place the distinction is made (the page
  * components gate themselves the same way, and lib/queries/clinics.ts and
