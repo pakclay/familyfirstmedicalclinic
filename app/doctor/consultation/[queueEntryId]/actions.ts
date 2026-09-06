@@ -4,6 +4,7 @@ import { auth } from "@/auth"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import type { AbilitySubject } from "@/lib/permissions/ability"
 import { saveConsultation, InsufficientStockError } from "@/lib/queries/consultations"
+import { isDatabaseError, DATABASE_ERROR_MESSAGE } from "@/lib/db/errors"
 
 async function actingUser(): Promise<AbilitySubject> {
   const session = await auth()
@@ -36,6 +37,13 @@ export async function saveConsultationAction(
     if (err && typeof err === "object" && "issues" in err) {
       const zodErr = err as { issues: { message: string }[] }
       return { ok: false, error: zodErr.issues[0]?.message ?? "Check the form for errors." }
+    }
+    // Our own errors carry messages written for the doctor; a database
+    // error carries one written for us. Log the latter, never show it —
+    // see lib/db/errors.ts for the one that prompted this.
+    if (isDatabaseError(err)) {
+      console.error("[consultation] saveConsultation failed at the database", err)
+      return { ok: false, error: DATABASE_ERROR_MESSAGE }
     }
     if (err instanceof Error) {
       return { ok: false, error: err.message }

@@ -35,6 +35,16 @@ scoping at the database layer. Re-run it any time after
 `prisma migrate reset`, which recreates the schema from scratch and drops
 these grants with it.
 
+In production (Supabase, Vercel) the two URLs point at two different
+things on purpose: `DATABASE_URL` at the direct or session-mode connection,
+because Prisma Migrate needs one, and `APP_DATABASE_URL` at the pooler in
+**transaction mode** — port 6543, with `?pgbouncer=true&connection_limit=5`.
+Session mode (port 5432) caps clients at the pooler's `pool_size`, and a
+few warm serverless instances exhaust that; the app then fails mid-request
+with `EMAXCONNSESSION`. `lib/db/prisma.ts` logs an error at startup if it
+sees the wrong shape, and explains why transaction mode is safe for the RLS
+scoping here.
+
 ## Authentication & authorization
 
 Auth.js (Credentials provider) with JWT sessions — no separate session
