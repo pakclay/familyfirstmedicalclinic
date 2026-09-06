@@ -107,6 +107,10 @@ display both reflect it within 10 seconds (they poll every 7s).
 4. Click **Call Next**. Within ~7 seconds, both the patient's status tab
    ("You're being called now") and the display screen's "Now serving"
    number update on their own — no manual refresh.
+   The queue board also links to `/now-serving`, the signed-in calling
+   board that shows the name and speaks each call. A branch admin sets
+   its wording under **Settings → Calling-board announcement** (with
+   `{number}` and `{name}`) and can press **Hear it** to preview.
 5. Assign a doctor from the dropdown, then **Start consultation**.
 
 ---

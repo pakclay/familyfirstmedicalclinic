@@ -155,6 +155,12 @@ model Branch {
   timezone        String   @default("Asia/Manila")
   // JSON keyed by weekday ("mon".."sun") -> { open: "09:00", close: "18:00" } | null when closed
   operatingHours  Json     @map("operating_hours")
+  // What the calling board (app/now-serving) says aloud when a patient is
+  // called, with {number} and {name} placeholders — lib/utils/announcement.ts.
+  // Null means "not set" and falls back to DEFAULT_ANNOUNCEMENT_TEMPLATE, so
+  // clearing the field returns the built-in wording (same reasoning as
+  // HoldingCompany.brandName).
+  announcementTemplate String? @map("announcement_template")
   isActive        Boolean  @default(true) @map("is_active")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")

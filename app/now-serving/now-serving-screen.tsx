@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { useRouter } from "next/navigation"
 import { Volume2, VolumeX } from "lucide-react"
+import { renderAnnouncement } from "@/lib/utils/announcement"
 
 // §7.3 DECISION: poll every 5–10s, not WebSockets. Matches the public display.
 const POLL_MS = 7000
@@ -29,7 +30,16 @@ function spokenName(name: string): string {
   return first ? `${first.trim()} ${last.trim()}` : name.trim()
 }
 
-export function NowServingScreen({ nowServing, upNext }: { nowServing: NowServing; upNext: number[] }) {
+export function NowServingScreen({
+  nowServing,
+  upNext,
+  announcementTemplate,
+}: {
+  nowServing: NowServing
+  upNext: number[]
+  /** The branch's own wording, or null for the default — see lib/utils/announcement.ts. */
+  announcementTemplate: string | null
+}) {
   const router = useRouter()
   const canSpeak = useSyncExternalStore(noopSubscribe, speechOnClient, speechOnServer)
 
@@ -104,15 +114,22 @@ export function NowServingScreen({ nowServing, upNext }: { nowServing: NowServin
     return 620
   }, [])
 
-  const speak = useCallback((queueNumber: number, name: string) => {
-    if (!("speechSynthesis" in window)) return
-    // Cancel anything still queued: two calls in quick succession should
-    // announce the current patient, not read a backlog to an empty room.
-    window.speechSynthesis.cancel()
-    const utterance = new SpeechSynthesisUtterance(`Number ${queueNumber}. ${spokenName(name)}.`)
-    utterance.rate = 0.85
-    window.speechSynthesis.speak(utterance)
-  }, [])
+  const speak = useCallback(
+    (queueNumber: number, name: string) => {
+      if (!("speechSynthesis" in window)) return
+      // Cancel anything still queued: two calls in quick succession should
+      // announce the current patient, not read a backlog to an empty room.
+      window.speechSynthesis.cancel()
+      // The wording is the branch's own (Settings → calling-board
+      // announcement), with the name already turned first-name-first.
+      const utterance = new SpeechSynthesisUtterance(
+        renderAnnouncement(announcementTemplate, { number: queueNumber, name: spokenName(name) })
+      )
+      utterance.rate = 0.85
+      window.speechSynthesis.speak(utterance)
+    },
+    [announcementTemplate]
+  )
 
   /** Chime, then the name — the sound is what makes people look up in time to hear it. */
   const announceCall = useCallback(

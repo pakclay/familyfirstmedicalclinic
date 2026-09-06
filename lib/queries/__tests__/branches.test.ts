@@ -363,6 +363,7 @@ describe("branch management", () => {
       phone: "+63 900 111 2222",
       facebookPageUrl: "",
       operatingHours: { ...STANDARD_HOURS, sat: null },
+      announcementTemplate: "",
     }
 
     it("returns the actor's own branch, resolved from the session and not a parameter", async () => {
@@ -418,6 +419,17 @@ describe("branch management", () => {
       expect(after.address).toBe(before.address)
       expect(after.phone).toBe(before.phone)
       expect(after.operatingHours).toEqual(before.operatingHours)
+    })
+
+    it("stores the calling-board announcement, and a blank one as null so the default applies", async () => {
+      const wording = "Number {number}, {name}, please proceed to room 2."
+      expect(await updateOwnBranchSettings(branchAdmin, { ...settings, announcementTemplate: wording })).toEqual({ ok: true })
+      expect((await getOwnBranch(branchAdmin)).announcementTemplate).toBe(wording)
+
+      expect(await updateOwnBranchSettings(branchAdmin, { ...settings, announcementTemplate: "" })).toEqual({ ok: true })
+      const row = await superuserPrisma.branch.findUniqueOrThrow({ where: { id: existingBranch.id } })
+      expect(row.announcementTemplate).toBeNull()
+      expect((await getOwnBranch(branchAdmin)).announcementTemplate).toBeNull()
     })
 
     it("refuses a holding admin, a front desk user, and a doctor", async () => {
