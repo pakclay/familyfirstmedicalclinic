@@ -2,6 +2,7 @@ import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/db/prisma"
 import { assignableRoles, type AbilitySubject } from "@/lib/permissions/ability"
+import { listClinics } from "@/lib/queries/clinics"
 import { NewUserForm } from "./new-user-form"
 
 export default async function NewUserPage({
@@ -24,6 +25,10 @@ export default async function NewUserPage({
     holdingCompanyId: session.user.holdingCompanyId,
   }
   const roles = assignableRoles(user)
+  // Only a holding admin can assign CLINIC_ADMIN (assignableRoles), so only
+  // a holding admin needs the clinic list — and listClinics throws for anyone
+  // else by design, so it is not called for them.
+  const clinics = session.user.role === "HOLDING_ADMIN" ? await listClinics(user) : []
 
   // Only a holding admin ever sees the branch picker (a branch admin is
   // always creating within their own branch, decided server-side in
@@ -72,6 +77,7 @@ export default async function NewUserPage({
         <NewUserForm
           roles={roles}
           branches={branches}
+          clinics={clinics}
           showBranchPicker={session.user.role !== "BRANCH_ADMIN"}
           defaultBranchId={branchId && branches.some((b) => b.id === branchId) ? branchId : undefined}
         />

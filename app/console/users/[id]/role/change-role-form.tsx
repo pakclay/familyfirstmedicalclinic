@@ -19,6 +19,7 @@ export function ChangeRoleForm({
   currentBranchId,
   hasDoctorRecord,
   branches,
+  clinics,
 }: {
   userId: string
   userName: string
@@ -26,10 +27,13 @@ export function ChangeRoleForm({
   currentBranchId: string | null
   hasDoctorRecord: boolean
   branches: { id: string; name: string; clinic: { name: string } }[]
+  /** For the clinic-admin role, which holds a clinic rather than a branch. */
+  clinics: { id: string; name: string }[]
 }) {
   const router = useRouter()
   const [role, setRole] = useState<Role>(currentRole)
   const [branchId, setBranchId] = useState(currentBranchId ?? "")
+  const [clinicId, setClinicId] = useState("")
   const [licenseNumber, setLicenseNumber] = useState("")
   const [specialization, setSpecialization] = useState("")
   const [consultationFeePesos, setConsultationFeePesos] = useState("")
@@ -38,6 +42,10 @@ export function ChangeRoleForm({
 
   const changed = role !== currentRole
   const toHolding = role === "HOLDING_ADMIN"
+  // A clinic admin is branchless too, but attached to a clinic: the branch
+  // picker gives way to a clinic picker, and changeUserRole refuses the role
+  // without one ("Select a clinic for this role.").
+  const toClinic = role === "CLINIC_ADMIN"
   // Only a first-time promotion needs licence details — an account that was
   // a doctor before keeps its record, so re-promotion reuses it.
   const needsDoctorDetails = role === "DOCTOR" && !hasDoctorRecord
@@ -49,7 +57,8 @@ export function ChangeRoleForm({
     setError(null)
     const result = await changeUserRoleAction(userId, {
       role,
-      branchId: toHolding ? undefined : branchId,
+      branchId: toHolding || toClinic ? undefined : branchId,
+      clinicId: toClinic ? clinicId : undefined,
       licenseNumber,
       specialization,
       consultationFeePesos,
@@ -85,7 +94,7 @@ export function ChangeRoleForm({
         {target && <p className="text-xs text-muted-foreground">{target.summary}</p>}
       </div>
 
-      {changed && !toHolding && (
+      {changed && !toHolding && !toClinic && (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="branchId">Branch</Label>
           <select
@@ -102,6 +111,29 @@ export function ChangeRoleForm({
               </option>
             ))}
           </select>
+        </div>
+      )}
+
+      {changed && toClinic && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="clinicId">Clinic</Label>
+          <select
+            id="clinicId"
+            className={SELECT_CLASS}
+            required
+            value={clinicId}
+            onChange={(e) => setClinicId(e.target.value)}
+          >
+            <option value="">Select…</option>
+            {clinics.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-muted-foreground">
+            A clinic admin administers every branch under this clinic, and holds none of them.
+          </p>
         </div>
       )}
 
@@ -154,6 +186,13 @@ export function ChangeRoleForm({
           <ul className="mt-1 space-y-0.5 text-muted-foreground">
             {toHolding && <li>Loses their branch — a holding admin belongs to the whole company.</li>}
             {toHolding && <li>Gains every clinic, every branch and every account in the company.</li>}
+            {toClinic && <li>Loses their branch — a clinic admin belongs to the clinic, not to any one branch.</li>}
+            {toClinic && (
+              <li>
+                Gains account and branch management for every branch under the chosen clinic. No patient, queue, payment
+                or stock access anywhere.
+              </li>
+            )}
             {losingDoctorAccess && <li>Loses the consultation screen. Their past consultations are kept.</li>}
             {losingDoctorAccess && <li>Stops appearing in the &ldquo;Assign doctor&rdquo; picker.</li>}
             {role === "DOCTOR" && hasDoctorRecord && <li>Their existing doctor record is reused.</li>}

@@ -3,6 +3,7 @@ import Link from "next/link"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/db/prisma"
 import { getManagedUserById } from "@/lib/queries/users"
+import { listClinics } from "@/lib/queries/clinics"
 import { ROLE_PROFILES } from "@/lib/permissions/role-capabilities"
 import { ROLE_LABEL } from "@/lib/dto/user"
 import type { AbilitySubject } from "@/lib/permissions/ability"
@@ -38,6 +39,10 @@ export default async function ChangeRolePage({ params }: { params: Promise<{ id:
     select: { id: true, name: true, clinic: { select: { name: true } } },
     orderBy: [{ clinic: { name: "asc" } }, { name: "asc" }],
   })
+  // A clinic admin holds a clinic, not a branch — the form swaps the branch
+  // picker for this list when that role is chosen. Bounded to the company by
+  // listClinics; a holding admin is the only caller who reaches this page.
+  const clinics = await listClinics(actor)
 
   const isSelf = managedUser.id === actor.id
 
@@ -68,6 +73,7 @@ export default async function ChangeRolePage({ params }: { params: Promise<{ id:
             currentBranchId={managedUser.branchId}
             hasDoctorRecord={managedUser.doctor !== null}
             branches={branches}
+            clinics={clinics}
           />
         </div>
       )}

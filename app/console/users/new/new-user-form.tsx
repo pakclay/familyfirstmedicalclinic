@@ -16,6 +16,7 @@ type Form = {
   phone: string
   role: string
   branchId: string
+  clinicId: string
   licenseNumber: string
   specialization: string
   consultationFeePesos: string
@@ -27,6 +28,7 @@ const initial: Form = {
   phone: "",
   role: "",
   branchId: "",
+  clinicId: "",
   licenseNumber: "",
   specialization: "",
   consultationFeePesos: "",
@@ -35,12 +37,15 @@ const initial: Form = {
 export function NewUserForm({
   roles,
   branches,
+  clinics,
   showBranchPicker,
   defaultBranchId,
 }: {
   /** Straight from `assignableRoles`, so it is already narrowed to Role. */
   roles: Role[]
   branches: { id: string; name: string; clinic: { name: string } }[]
+  /** For the clinic-admin role, which holds a clinic rather than a branch. Only a holding admin ever has any. */
+  clinics: { id: string; name: string }[]
   showBranchPicker: boolean
   /** Preselected when arriving from a branch's staff section. */
   defaultBranchId?: string
@@ -111,7 +116,10 @@ export function NewUserForm({
   }
 
   const showDoctorFields = form.role === "DOCTOR"
-  const needsBranch = showBranchPicker && form.role !== "" && form.role !== "HOLDING_ADMIN"
+  // A clinic admin holds a clinic, not a branch: the branch picker gives way
+  // to a clinic picker, and createUser refuses the role without one.
+  const needsClinic = form.role === "CLINIC_ADMIN"
+  const needsBranch = showBranchPicker && form.role !== "" && form.role !== "HOLDING_ADMIN" && !needsClinic
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -145,6 +153,30 @@ export function NewUserForm({
           ))}
         </select>
       </div>
+
+      {needsClinic && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="clinicId">Clinic</Label>
+          <select
+            id="clinicId"
+            name="clinicId"
+            required
+            value={form.clinicId}
+            onChange={(e) => set("clinicId", e.target.value)}
+            className="h-10 rounded-md border border-input bg-transparent px-3 text-sm"
+          >
+            <option value="">Select…</option>
+            {clinics.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-muted-foreground">
+            A clinic admin administers every branch under this clinic, and holds none of them.
+          </p>
+        </div>
+      )}
 
       {needsBranch && (
         <div className="flex flex-col gap-1.5">

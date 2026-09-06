@@ -282,6 +282,82 @@ describe("user management", () => {
     await prisma.$disconnect()
   })
 
+  describe("holding admin assigning the clinic-admin role", () => {
+    // The role holds a clinic and no branch. Both write paths — promoting an
+    // existing account and creating a new one — must demand the clinic and
+    // write it, and a demotion must clear it again, or the row trips
+    // users_role_scope_check. Found in production: the role page offered no
+    // clinic picker, so every promotion was refused.
+    it("promotes an account to clinic admin only with a clinic, and writes the clinic link", async () => {
+      const fd = await superuserPrisma.user.create({
+        data: {
+          branchId: branchA.id,
+          name: "Promotable",
+          email: `promotable-${Date.now()}@test.local`,
+          passwordHash: "x",
+          role: Role.FRONT_DESK,
+        },
+      })
+
+      expect(await changeUserRole(holdingAdmin, fd.id, { role: "CLINIC_ADMIN" })).toEqual({
+        ok: false,
+        error: "Select a clinic for this role.",
+      })
+
+      expect(await changeUserRole(holdingAdmin, fd.id, { role: "CLINIC_ADMIN", clinicId: clinicA.id })).toEqual({ ok: true })
+      const promoted = await superuserPrisma.user.findUniqueOrThrow({ where: { id: fd.id } })
+      expect(promoted.role).toBe("CLINIC_ADMIN")
+      expect(promoted.clinicId).toBe(clinicA.id)
+      expect(promoted.branchId).toBeNull()
+      // Deliberately null — its company is reached through its clinic.
+      expect(promoted.holdingCompanyId).toBeNull()
+
+      // Demotion must clear the clinic link, or the row fails the CHECK.
+      expect(await changeUserRole(holdingAdmin, fd.id, { role: "FRONT_DESK", branchId: branchA.id })).toEqual({ ok: true })
+      const demoted = await superuserPrisma.user.findUniqueOrThrow({ where: { id: fd.id } })
+      expect(demoted.role).toBe("FRONT_DESK")
+      expect(demoted.clinicId).toBeNull()
+      expect(demoted.branchId).toBe(branchA.id)
+    })
+
+    it("refuses a clinic outside the actor's company", async () => {
+      const fd = await superuserPrisma.user.create({
+        data: {
+          branchId: branchA.id,
+          name: "Promotable Too",
+          email: `promotable2-${Date.now()}@test.local`,
+          passwordHash: "x",
+          role: Role.FRONT_DESK,
+        },
+      })
+      // `clinics` has no RLS: the where-clause in changeUserRole is the whole
+      // boundary. An unknown or foreign clinic id reads as "select a clinic".
+      expect(
+        await changeUserRole(holdingAdmin, fd.id, { role: "CLINIC_ADMIN", clinicId: "00000000-0000-0000-0000-000000000000" })
+      ).toEqual({ ok: false, error: "Select a clinic." })
+    })
+
+    it("creates a clinic admin only with a clinic, and writes the clinic link", async () => {
+      expect(
+        await createUser(holdingAdmin, { name: "No Clinic", email: `noclinic-${Date.now()}@test.local`, role: "CLINIC_ADMIN" })
+      ).toEqual({ ok: false, error: "Select a clinic." })
+
+      const made = await createUser(holdingAdmin, {
+        name: "Made Clinic Admin",
+        email: `made-ca-${Date.now()}@test.local`,
+        role: "CLINIC_ADMIN",
+        clinicId: clinicB.id,
+      })
+      expect(made.ok).toBe(true)
+      if (!made.ok) return
+      const row = await superuserPrisma.user.findUniqueOrThrow({ where: { id: made.user.id } })
+      expect(row.role).toBe("CLINIC_ADMIN")
+      expect(row.clinicId).toBe(clinicB.id)
+      expect(row.branchId).toBeNull()
+      expect(row.holdingCompanyId).toBeNull()
+    })
+  })
+
   describe("clinic admin", () => {
     it("creates a front desk account in its own clinic's branch, audit row and all", async () => {
       // Runs as webinar_app (APP_DATABASE_URL, non-superuser) so audit_logs'
