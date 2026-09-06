@@ -8,6 +8,7 @@ import {
   CONSULTATION_RETENTION_DAYS,
   PAYMENT_RETENTION_DAYS,
   PATIENT_RETENTION_DAYS,
+  RATE_LIMIT_RETENTION_DAYS,
 } from "@/lib/retention/policy"
 
 function daysAgo(days: number): Date {
@@ -29,6 +30,9 @@ describe("retention purge", () => {
   let paymentToKeep: { id: string }
   let notificationToPurge: { id: string }
   let notificationToKeep: { id: string }
+  let rateLimitToPurge: { key: string }
+  let rateLimitToKeep: { key: string }
+  let rateLimitBlockedNow: { key: string }
 
   beforeAll(async () => {
     const holding = await superuserPrisma.holdingCompany.create({ data: { name: "Retention Test Holding" } })
@@ -195,9 +199,29 @@ describe("retention purge", () => {
     notificationToPurge = { id: oldNotification.id }
     const recentNotification = await makeNotification(patientToKeepRecent.id, new Date())
     notificationToKeep = { id: recentNotification.id }
+
+    // Per-IP rate-limit counters (lib/rate-limit/). The app role has no
+    // DELETE grant, so this job is the only thing that can prune them.
+    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    async function makeRateLimit(label: string, updatedAt: Date, windowStart = updatedAt) {
+      const key = `retention-test-${label}:${suffix}`
+      await superuserPrisma.rateLimit.create({ data: { key, count: 3, windowStart, updatedAt } })
+      return { key }
+    }
+
+    rateLimitToPurge = await makeRateLimit("stale", daysAgo(RATE_LIMIT_RETENTION_DAYS + 1))
+    rateLimitToKeep = await makeRateLimit("fresh", new Date())
+    // A source that is being actively throttled *right now*: its window
+    // opened long ago but it is still being hit, so `updatedAt` is
+    // current. Selecting on `windowStart` instead would delete this row
+    // and hand an attacker a brand-new budget mid-block.
+    rateLimitBlockedNow = await makeRateLimit("blocked-now", new Date(), daysAgo(RATE_LIMIT_RETENTION_DAYS + 1))
   })
 
   afterAll(async () => {
+    await superuserPrisma.rateLimit.deleteMany({
+      where: { key: { in: [rateLimitToPurge.key, rateLimitToKeep.key, rateLimitBlockedNow.key] } },
+    })
     await superuserPrisma.auditLog.deleteMany({ where: { branchId: branch.id } })
     await superuserPrisma.notification.deleteMany({ where: { branchId: branch.id } })
     await superuserPrisma.payment.deleteMany({ where: { branchId: branch.id } })
@@ -222,10 +246,12 @@ describe("retention purge", () => {
     expect(before.queueEntries).toBeGreaterThanOrEqual(2) // the paired one + the standalone one
     expect(before.payments).toBeGreaterThanOrEqual(1)
     expect(before.notifications).toBeGreaterThanOrEqual(1)
+    expect(before.rateLimits).toBeGreaterThanOrEqual(1)
 
     // Nothing actually removed by a preview.
     const stillThere = await superuserPrisma.patient.findUnique({ where: { id: patientToPurge.id } })
     expect(stillThere).not.toBeNull()
+    expect(await superuserPrisma.rateLimit.findUnique({ where: { key: rateLimitToPurge.key } })).not.toBeNull()
   })
 
   it("purges exactly the expired rows, in FK-safe order, and keeps everything else", async () => {
@@ -236,6 +262,7 @@ describe("retention purge", () => {
     expect(counts.queueEntries).toBeGreaterThanOrEqual(2)
     expect(counts.payments).toBeGreaterThanOrEqual(1)
     expect(counts.notifications).toBeGreaterThanOrEqual(1)
+    expect(counts.rateLimits).toBeGreaterThanOrEqual(1)
 
     // Purged.
     expect(await superuserPrisma.patient.findUnique({ where: { id: patientToPurge.id } })).toBeNull()
@@ -259,6 +286,11 @@ describe("retention purge", () => {
     expect(await superuserPrisma.payment.findUnique({ where: { id: paymentToKeep.id } })).not.toBeNull()
     expect(await superuserPrisma.notification.findUnique({ where: { id: notificationToKeep.id } })).not.toBeNull()
 
+    // Rate-limit counters: only the stale one goes.
+    expect(await superuserPrisma.rateLimit.findUnique({ where: { key: rateLimitToPurge.key } })).toBeNull()
+    expect(await superuserPrisma.rateLimit.findUnique({ where: { key: rateLimitToKeep.key } })).not.toBeNull()
+    expect(await superuserPrisma.rateLimit.findUnique({ where: { key: rateLimitBlockedNow.key } })).not.toBeNull()
+
     const log = await superuserPrisma.auditLog.findFirst({
       where: { action: "retention.purge" },
       orderBy: { createdAt: "desc" },
@@ -273,5 +305,6 @@ describe("retention purge", () => {
     expect(
       await superuserPrisma.consultation.findUnique({ where: { id: queueEntryAndConsultationToPurge.consultationId } })
     ).toBeNull()
+    expect(await superuserPrisma.rateLimit.findUnique({ where: { key: rateLimitToKeep.key } })).not.toBeNull()
   })
 })

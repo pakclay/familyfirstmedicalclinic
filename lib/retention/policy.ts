@@ -26,6 +26,21 @@ export const CONSULTATION_RETENTION_DAYS = 2555
 export const PAYMENT_RETENTION_DAYS = 3650
 
 /**
+ * Stale per-IP rate-limit counters (lib/rate-limit/). Re-exported rather
+ * than redefined so the window it cleans up and the windows it has to
+ * outlast stay next to each other in lib/rate-limit/policy.ts — this file
+ * is where the purge job looks, that file is where the number is argued
+ * about.
+ *
+ * Unlike everything else here this is not a compliance retention period at
+ * all: `rate_limits` rows are operational state with no legal or clinical
+ * value, and the app role cannot delete them itself (no DELETE grant — see
+ * prisma/grant-app-role.sql), so pruning them belongs to this job rather
+ * than to a second cleanup path of its own.
+ */
+export { RATE_LIMIT_RETENTION_DAYS } from "@/lib/rate-limit/policy"
+
+/**
  * How old a patient's own row must be — once zero queue entries,
  * consultations, payments, or notifications reference it anymore — before
  * the bare identity/demographic record itself is purged. Same window as

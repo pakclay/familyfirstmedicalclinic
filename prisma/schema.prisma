@@ -542,3 +542,44 @@ model AuditLog {
   @@index([entityType, entityId])
   @@map("audit_logs")
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Rate limiting
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Per-source (client IP) request counter for the two unauthenticated
+/// entry points — the login action and the public booking action. See
+/// lib/rate-limit/limiter.ts.
+///
+/// ONE ROW PER KEY, updated in place — never one row per attempt. The
+/// runtime role (`webinar_app`) is granted SELECT/INSERT/UPDATE and
+/// deliberately no DELETE (prisma/grant-app-role.sql), so an
+/// append-per-attempt table would grow forever with no way for the app to
+/// prune it. Stale rows are removed by the retention job, which runs as
+/// the superuser (lib/retention/purge.ts).
+///
+/// DO NOT ENABLE ROW LEVEL SECURITY ON THIS TABLE. It is deliberately
+/// absent from the branch_rewrite_rls_policies migration. Every write happens
+/// *before* authentication, so there is no session and none of the
+/// app.role / app.user_id / app.branch_id / app.clinic_id GUCs that lib/db/rls.ts sets are
+/// in scope — the limiter therefore uses the bare `prisma` client. Adding
+/// an RLS policy here would make every unauthenticated write fail (or, for
+/// a SELECT-shaped policy, silently return nothing), which would silently
+/// disable rate limiting on exactly the two surfaces that need it. Compare
+/// audit_logs, where the runWithRls wrapper is mandatory for the opposite
+/// reason (lib/queries/audit-log.ts).
+model RateLimit {
+  /// "<surface>:<client ip>", e.g. "login:203.0.113.7" — built by
+  /// lib/rate-limit/key.ts. Primary key, which is also the unique index
+  /// the atomic `INSERT ... ON CONFLICT ("key") DO UPDATE` conflicts on.
+  key         String   @id
+  /// Attempts recorded so far in the window that started at windowStart.
+  count       Int      @default(0)
+  windowStart DateTime @map("window_start")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  /// The retention job scans by last-touched time; see RATE_LIMIT_RETENTION_DAYS.
+  @@index([updatedAt])
+  @@map("rate_limits")
+}
