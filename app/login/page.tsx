@@ -1,13 +1,16 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { getAppName } from "@/lib/branding"
 import { LoginForm } from "./login-form"
+import { firstParam, type SearchParam } from "@/lib/utils/search-params"
 
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string; passwordChanged?: string }>
+  searchParams: Promise<{ next?: SearchParam; passwordChanged?: SearchParam }>
 }) {
-  const { next, passwordChanged } = await searchParams
+  const params = await searchParams
+  const next = firstParam(params.next)
+  const passwordChanged = firstParam(params.passwordChanged)
   const appName = await getAppName()
 
   return (

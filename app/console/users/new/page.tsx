@@ -4,13 +4,16 @@ import { prisma } from "@/lib/db/prisma"
 import { assignableRoles, type AbilitySubject } from "@/lib/permissions/ability"
 import { listClinics } from "@/lib/queries/clinics"
 import { NewUserForm } from "./new-user-form"
+import { firstParam, type SearchParam } from "@/lib/utils/search-params"
 
 export default async function NewUserPage({
   searchParams,
 }: {
-  searchParams: Promise<{ clinicId?: string; branchId?: string }>
+  searchParams: Promise<{ clinicId?: SearchParam; branchId?: SearchParam }>
 }) {
-  const { clinicId, branchId } = await searchParams
+  const params = await searchParams
+  const clinicId = firstParam(params.clinicId)
+  const branchId = firstParam(params.branchId)
   const session = await auth()
   if (!session?.user) redirect("/login")
   if (session.user.role !== "HOLDING_ADMIN" && session.user.role !== "BRANCH_ADMIN" && session.user.role !== "CLINIC_ADMIN") {
