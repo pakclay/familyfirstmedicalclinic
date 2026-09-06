@@ -17,6 +17,8 @@ const base = {
   phone: "0000",
   facebookPageUrl: "",
   operatingHours: STANDARD_HOURS,
+  systemFeeEnabled: false,
+  systemFeeAmount: 0,
 }
 
 describe("branchSettingsSchema — calling-board announcement", () => {
@@ -40,5 +42,29 @@ describe("branchSettingsSchema — calling-board announcement", () => {
     const none = branchSettingsSchema.safeParse({ ...base, announcementTemplate: "Please come to the front desk." })
     expect(none.success).toBe(false)
     if (!none.success) expect(none.error.issues[0]?.message).toContain("Include {number} or {name}")
+  })
+})
+
+describe("branchSettingsSchema — system fee", () => {
+  const withAnnouncement = { ...base, announcementTemplate: "" }
+
+  it("accepts the fee off with any amount kept, and on with a positive amount", () => {
+    expect(branchSettingsSchema.safeParse({ ...withAnnouncement, systemFeeEnabled: false, systemFeeAmount: 0 }).success).toBe(true)
+    expect(branchSettingsSchema.safeParse({ ...withAnnouncement, systemFeeEnabled: false, systemFeeAmount: 2000 }).success).toBe(true)
+    expect(branchSettingsSchema.safeParse({ ...withAnnouncement, systemFeeEnabled: true, systemFeeAmount: 2000 }).success).toBe(true)
+  })
+
+  it("refuses switching the fee on with nothing to charge", () => {
+    const parsed = branchSettingsSchema.safeParse({ ...withAnnouncement, systemFeeEnabled: true, systemFeeAmount: 0 })
+    expect(parsed.success).toBe(false)
+    if (!parsed.success) {
+      expect(parsed.error.issues[0]?.message).toBe("Enter the system fee amount, or switch the fee off.")
+      expect(parsed.error.issues[0]?.path).toEqual(["systemFeeAmount"])
+    }
+  })
+
+  it("refuses a negative or fractional-centavo amount", () => {
+    expect(branchSettingsSchema.safeParse({ ...withAnnouncement, systemFeeEnabled: false, systemFeeAmount: -1 }).success).toBe(false)
+    expect(branchSettingsSchema.safeParse({ ...withAnnouncement, systemFeeEnabled: true, systemFeeAmount: 20.5 }).success).toBe(false)
   })
 })

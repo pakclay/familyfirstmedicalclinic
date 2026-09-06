@@ -323,6 +323,8 @@ export async function updateOwnBranchSettings(
         operatingHours: toJsonHours(input.operatingHours),
         // Blank means "use the default", stored as NULL — see the DTO.
         announcementTemplate: input.announcementTemplate.trim() || null,
+        systemFeeEnabled: input.systemFeeEnabled,
+        systemFeeAmount: input.systemFeeAmount,
       },
     })
     await appendAuditLog(tx, {
@@ -332,6 +334,10 @@ export async function updateOwnBranchSettings(
         action: "branch.settings_updated",
         entityType: "Branch",
         entityId: branchId,
+        // The one money setting here — §10 audits every change to a
+        // financial figure, and a fee that quietly changed is the kind of
+        // thing the log exists to answer.
+        changes: { systemFeeEnabled: input.systemFeeEnabled, systemFeeAmount: input.systemFeeAmount },
       },
     })
   })

@@ -219,6 +219,62 @@ describe("consultations", () => {
     expect(dispensed?.stockMovementId).toBeNull()
   })
 
+  it("records the itemized bill behind the payment from the server's own numbers — fee, dispensed medicines at catalog price, the branch's system fee, VAT", async () => {
+    await superuserPrisma.branch.update({ where: { id: branch.id }, data: { systemFeeEnabled: true, systemFeeAmount: 2000 } })
+    try {
+      const entry = await createQueueEntry()
+      // The screen tells the doctor about the fee before they bill it.
+      expect((await getConsultationScreenData(doctorUser, entry.id)).systemFee).toBe(2000)
+
+      const result = await saveConsultation(doctorUser, entry.id, {
+        chiefComplaint: "Bill check",
+        medicines: [
+          { medicineId: stockedMedicine.id, medicineName: stockedMedicine.name, quantity: 4, dispensedFromStock: true },
+          // Prescribed only: no clinic price, so no line on the bill.
+          { medicineId: stockedMedicine.id, medicineName: stockedMedicine.name, quantity: 9, dispensedFromStock: false },
+          { medicineId: null, medicineName: "Something from the pharmacy", quantity: 1, dispensedFromStock: false },
+        ],
+        // A discount: less is collected than billed, and the bill is still recorded in full.
+        payment: { amount: 50000, method: "CASH", vat: true },
+      })
+
+      const payment = await superuserPrisma.payment.findFirstOrThrow({ where: { consultationId: result.consultationId } })
+      expect(payment.consultationFeeAmount).toBe(50000)
+      expect(payment.medicinesAmount).toBe(1200) // 4 × ₱3.00, the dispensed row only
+      expect(payment.systemFeeAmount).toBe(2000)
+      expect(payment.vatAmount).toBe(Math.round((50000 + 1200 + 2000) * 0.12)) // 6384
+      expect(payment.amount).toBe(50000) // what was collected, not the total
+
+      const log = await superuserPrisma.auditLog.findFirst({ where: { entityType: "Payment", entityId: payment.id } })
+      expect(log?.changes).toEqual({ amount: 50000, billed: 59584, systemFee: 2000, vat: 6384 })
+    } finally {
+      await superuserPrisma.branch.update({ where: { id: branch.id }, data: { systemFeeEnabled: false, systemFeeAmount: 0 } })
+    }
+  })
+
+  it("a branch that doesn't collect a system fee bills none, and there's no VAT unless the doctor asked", async () => {
+    // The amount is kept on the branch while the fee is off — and must not leak onto the bill.
+    await superuserPrisma.branch.update({ where: { id: branch.id }, data: { systemFeeEnabled: false, systemFeeAmount: 2000 } })
+    try {
+      const entry = await createQueueEntry()
+      expect((await getConsultationScreenData(doctorUser, entry.id)).systemFee).toBe(0)
+
+      const result = await saveConsultation(doctorUser, entry.id, {
+        chiefComplaint: "No extras",
+        medicines: [],
+        payment: { amount: 50000, method: "CASH" },
+      })
+      const payment = await superuserPrisma.payment.findFirstOrThrow({ where: { consultationId: result.consultationId } })
+      expect(payment.consultationFeeAmount).toBe(50000)
+      expect(payment.medicinesAmount).toBe(0)
+      expect(payment.systemFeeAmount).toBe(0)
+      expect(payment.vatAmount).toBe(0)
+      expect(payment.amount).toBe(50000)
+    } finally {
+      await superuserPrisma.branch.update({ where: { id: branch.id }, data: { systemFeeAmount: 0 } })
+    }
+  })
+
   it("a free-text medicine not in the catalog saves with no stock effect", async () => {
     const entry = await createQueueEntry()
 

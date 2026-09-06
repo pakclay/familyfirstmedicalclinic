@@ -4,6 +4,7 @@ import { useState } from "react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import type { MedicineOptionDTO } from "@/lib/dto/medicine"
+import { formatPesos } from "@/lib/utils/billing"
 
 export type MedicineRowState = {
   key: string
@@ -72,14 +73,16 @@ export function MedicineRow({
               <li key={m.id}>
                 <button
                   type="button"
-                  className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-accent"
+                  className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-accent"
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => pick(m)}
                 >
                   <span>
                     {m.name} {m.strength} <span className="text-muted-foreground">{FORM_LABEL[m.form]}</span>
                   </span>
-                  <span className="font-numeric text-xs text-muted-foreground">{m.currentStock} left</span>
+                  <span className="shrink-0 font-numeric text-xs text-muted-foreground">
+                    {formatPesos(m.sellingPrice)} · {m.currentStock} left
+                  </span>
                 </button>
               </li>
             ))}
@@ -119,6 +122,28 @@ export function MedicineRow({
           Remove
         </Button>
       </div>
+
+      {/* Dispensing from stock is what puts a line on the bill, at the
+          catalog's selling price — so the price sits right under the
+          toggle that decides it, and a prescribed-only row says plainly
+          that nothing is charged here. */}
+      {selected && row.dispensedFromStock && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          <span className="font-numeric">{formatPesos(selected.sellingPrice)}</span> each
+          {quantity > 0 && (
+            <>
+              {" "}× {quantity} ={" "}
+              <span className="font-numeric font-medium text-foreground">
+                {formatPesos(selected.sellingPrice * quantity)}
+              </span>
+            </>
+          )}{" "}
+          — on the bill
+        </p>
+      )}
+      {selected && !row.dispensedFromStock && (
+        <p className="mt-1 text-xs text-muted-foreground">Prescribed only — nothing charged here, stock untouched.</p>
+      )}
 
       {selected && row.dispensedFromStock && quantity > 0 && (
         <p className={`mt-1 text-xs ${isNegative ? "text-destructive" : isLow ? "text-priority" : "text-muted-foreground"}`}>

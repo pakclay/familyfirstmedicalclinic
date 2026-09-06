@@ -20,6 +20,9 @@ export type BranchDTO = {
   operatingHours: OperatingHours
   /** Calling-board wording; null means the default (lib/utils/announcement.ts). */
   announcementTemplate: string | null
+  /** The per-consultation system fee (lib/utils/billing.ts): whether it's collected, and the amount in centavos. */
+  systemFeeEnabled: boolean
+  systemFeeAmount: number
   isActive: boolean
   createdAt: Date
 }
@@ -64,6 +67,8 @@ export function toBranchDTO(branch: Branch & { clinic: { name: string } }): Bran
     timezone: branch.timezone,
     operatingHours: normalizeOperatingHours(branch.operatingHours),
     announcementTemplate: branch.announcementTemplate,
+    systemFeeEnabled: branch.systemFeeEnabled,
+    systemFeeAmount: branch.systemFeeAmount,
     isActive: branch.isActive,
     createdAt: branch.createdAt,
   }

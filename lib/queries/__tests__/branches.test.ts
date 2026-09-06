@@ -364,6 +364,8 @@ describe("branch management", () => {
       facebookPageUrl: "",
       operatingHours: { ...STANDARD_HOURS, sat: null },
       announcementTemplate: "",
+      systemFeeEnabled: false,
+      systemFeeAmount: 0,
     }
 
     it("returns the actor's own branch, resolved from the session and not a parameter", async () => {
@@ -430,6 +432,28 @@ describe("branch management", () => {
       const row = await superuserPrisma.branch.findUniqueOrThrow({ where: { id: existingBranch.id } })
       expect(row.announcementTemplate).toBeNull()
       expect((await getOwnBranch(branchAdmin)).announcementTemplate).toBeNull()
+    })
+
+    it("stores the system fee, keeps the amount while the fee is off, and audit-logs the money setting", async () => {
+      expect(
+        await updateOwnBranchSettings(branchAdmin, { ...settings, systemFeeEnabled: true, systemFeeAmount: 2000 })
+      ).toEqual({ ok: true })
+      let branch = await getOwnBranch(branchAdmin)
+      expect(branch.systemFeeEnabled).toBe(true)
+      expect(branch.systemFeeAmount).toBe(2000)
+
+      expect(
+        await updateOwnBranchSettings(branchAdmin, { ...settings, systemFeeEnabled: false, systemFeeAmount: 2000 })
+      ).toEqual({ ok: true })
+      branch = await getOwnBranch(branchAdmin)
+      expect(branch.systemFeeEnabled).toBe(false)
+      expect(branch.systemFeeAmount).toBe(2000)
+
+      const log = await superuserPrisma.auditLog.findFirst({
+        where: { entityType: "Branch", entityId: existingBranch.id, action: "branch.settings_updated" },
+        orderBy: { createdAt: "desc" },
+      })
+      expect(log?.changes).toEqual({ systemFeeEnabled: false, systemFeeAmount: 2000 })
     })
 
     it("refuses a holding admin, a front desk user, and a doctor", async () => {
