@@ -538,6 +538,33 @@ describe("user management", () => {
     expect(rows.some((r) => r.id === frontDeskInB.id)).toBe(true)
   })
 
+  it("filters listUsers by name, email or branch, case-insensitively — and never past the actor's scope", async () => {
+    // Branch name, wrong case: every Branch A account, nothing from Branch B.
+    const byBranch = (await listUsers(holdingAdmin, { search: "branch a" })).map((u) => u.id)
+    expect(byBranch).toContain(frontDeskInA.id)
+    expect(byBranch).not.toContain(frontDeskInB.id)
+
+    // Email fragment, upper-cased against a lower-case column.
+    const byEmail = await listUsers(holdingAdmin, { search: "FD-B-" })
+    expect(byEmail.map((u) => u.id)).toContain(frontDeskInB.id)
+    expect(byEmail.every((u) => u.email.includes("fd-b-"))).toBe(true)
+
+    // Name fragment reaches across branches for the holding admin.
+    const byName = (await listUsers(holdingAdmin, { search: "front desk" })).map((u) => u.id)
+    expect(byName).toEqual(expect.arrayContaining([frontDeskInA.id, frontDeskInB.id]))
+
+    // The load-bearing half: a match outside the actor's scope is still
+    // invisible. Branch A's admin searching for Branch B's front desk by its
+    // own email gets nothing — the search narrows the scoped list, it never
+    // replaces the scope (see the AND in listUsers).
+    expect(await listUsers(branchAdminA, { search: "fd-b-" })).toEqual([])
+    expect(await listUsers(clinicAdmin, { search: "Branch B" })).toEqual([])
+
+    // Whitespace is no filter at all.
+    const unfiltered = await listUsers(holdingAdmin)
+    expect(await listUsers(holdingAdmin, { search: "   " })).toEqual(unfiltered)
+  })
+
   it("returns null for a user outside the branch admin's branch — not an error, not a leak", async () => {
     const result = await getManagedUserById(branchAdminA, frontDeskInB.id)
     expect(result).toBeNull()

@@ -4,10 +4,11 @@ import { auth } from "@/auth"
 import { listUsers } from "@/lib/queries/users"
 import type { AbilitySubject } from "@/lib/permissions/ability"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { UserRowActions } from "./user-row-actions"
 import { ROLE_LABEL } from "@/lib/dto/user"
 
-export default async function UsersPage() {
+export default async function UsersPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const session = await auth()
   if (!session?.user) redirect("/login")
   if (session.user.role !== "HOLDING_ADMIN" && session.user.role !== "BRANCH_ADMIN" && session.user.role !== "CLINIC_ADMIN") {
@@ -26,7 +27,8 @@ export default async function UsersPage() {
     clinicId: session.user.clinicId,
     holdingCompanyId: session.user.holdingCompanyId,
   }
-  const users = await listUsers(user)
+  const { q } = await searchParams
+  const users = await listUsers(user, { search: q })
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -36,6 +38,13 @@ export default async function UsersPage() {
           <Link href="/console/users/new">Add user</Link>
         </Button>
       </div>
+
+      <form className="mt-4 flex gap-2" action="/console/users">
+        <Input name="q" type="search" placeholder="Search by name, email or branch" defaultValue={q ?? ""} className="h-10" />
+        <Button type="submit" variant="secondary" className="h-10">
+          Search
+        </Button>
+      </form>
 
       <ul className="mt-4 divide-y divide-border rounded-md border border-border">
         {users.map((u) => (
@@ -55,7 +64,9 @@ export default async function UsersPage() {
           </li>
         ))}
         {users.length === 0 && (
-          <li className="px-4 py-6 text-center text-sm text-muted-foreground">No users yet.</li>
+          <li className="px-4 py-6 text-center text-sm text-muted-foreground">
+            {q ? "No users match that search." : "No users yet."}
+          </li>
         )}
       </ul>
     </div>
