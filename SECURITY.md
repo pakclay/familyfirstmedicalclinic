@@ -92,8 +92,31 @@ patient data.
   checked *before* the password compare, so a locked account can't be
   brute-forced by attempts made while already locked, and the login
   form shows the same generic "Incorrect email or password" either way
-  rather than confirming a lockout is in effect. Per-IP throttling is
-  still not built — see below.
+  rather than confirming a lockout is in effect. Per-source (IP)
+  throttling is a separate control — see the next entry.
+- **Per-IP rate limiting on login and public booking.** 30 sign-in
+  attempts or 10 booking requests per source per 15 minutes
+  (`lib/rate-limit/`), checked before the credential check or any write,
+  so a blocked caller never reaches `signIn`, bcrypt, or the `users` and
+  `patients` tables. Database-backed and atomic — one
+  `INSERT … ON CONFLICT DO UPDATE` per attempt — so it survives restarts and
+  holds across instances, which is what the earlier "leave it to the
+  deployment layer" note was really asking for. It limits the *source*,
+  which the per-account lockout cannot see: a spray of one or two guesses
+  across many accounts, or a flood of anonymous bookings. Unlike the
+  lockout it tells the requester plainly that it is a network throttle and
+  roughly how long, because that leaks nothing about whether any account
+  exists. Fails open if its own query fails, deliberately — the operations
+  it protects need the same database, so a broken limiter cannot let
+  anything through that would otherwise have succeeded. The first refusal
+  per source per window is audited; the ones after it are not, so an
+  attacker cannot flood `audit_logs` by continuing to hammer a surface they
+  are already blocked on. Two things this depends on that live outside the
+  code: the source address comes from the platform proxy's headers
+  (`x-vercel-forwarded-for`, then `x-real-ip`, then the rightmost
+  `x-forwarded-for` entry), so the origin must be reachable only through
+  that proxy or the limit becomes per-*claimed*-IP; and `rate_limits` must
+  never get an RLS policy — the writes happen before any session exists.
 - **Admin-managed user accounts, scoped by role.** A Holding Admin can
   create, edit, deactivate/reactivate, force a password reset on, or
   unlock any account in any clinic; a Branch Admin can do the same but
@@ -198,17 +221,23 @@ patient data.
   (see `lib/retention/policy.ts`) are defensible defaults, not a legal
   opinion — confirm them against actual PH medical-records and BIR
   requirements before this runs against real patient data.
-- **No per-IP rate limiting on login.** Per-account lockout exists (see
-  above), which stops a brute-force pass against any one known account —
-  but nothing throttles login attempts by source IP, so a single account
-  could still be probed slowly (below the lockout threshold) or many
-  accounts probed a few times each without ever tripping it. This is
-  deliberately left to the deployment layer (reverse proxy / platform
-  rate limiting) rather than approximated with an in-process, per-instance
-  counter that wouldn't survive a restart or work once there's more than
-  one instance — same reasoning as TLS above. Decide alongside TLS when a
-  real host is chosen; add a CAPTCHA too if that host doesn't already
-  cover it.
+- **CAPTCHA on login and booking is still an open decision.** Per-IP
+  rate limiting now exists in the app (see the controls list above and
+  `lib/rate-limit/`), so the earlier "leave it to the deployment layer"
+  gap is closed: the counter is database-backed, so it survives restarts
+  and holds across instances, which was the whole objection to doing it
+  in-process. What remains open is whether to put a CAPTCHA on top. A
+  limiter slows an attacker down; it does not tell a script from a person,
+  and a patient attacker with many addresses gets a fresh budget from each
+  one. The hosting platform's bot protection may cover this without any
+  code — decide when that is turned on rather than wiring in a CAPTCHA
+  vendor speculatively. Two deployment facts the limiter depends on, worth
+  re-checking whenever the hosting changes: the origin must be reachable
+  only through the platform proxy (otherwise the client-IP headers are
+  attacker-controlled and the limit becomes per-*claimed*-address), and
+  the `rate_limits` purge in `lib/retention/purge.ts` must actually be
+  scheduled — the app role has no DELETE on that table, so nothing else
+  will ever clear it.
 - **No session revocation beyond the next request.** The `isActive`
   re-check in the `jwt` callback deactivates a user on their *next*
   request, not mid-session on an already-open tab — there's no server-side

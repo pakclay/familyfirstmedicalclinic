@@ -9,6 +9,110 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-09-06 — Per-IP rate limiting on login and public booking
+
+Issue #7 asked for two things: throttle sign-in and booking attempts by
+source address, and decide about a CAPTCHA. This entry closes the first and
+leaves the second open (SECURITY.md, hardening list). The work was started
+on 2026-08-23 and stashed so the branch hierarchy (2026-08-24) and the
+clinic-level administrator (above) could land first — both touched the
+audit table this feature writes to — then resumed onto master today.
+
+- **A different control from the account lockout, not a replacement.**
+  `lib/queries/users.ts` locks one *account* after 5 consecutive failures.
+  That cannot see a spray of one or two guesses each across many accounts,
+  or a script filling a queue with fabricated bookings, because no single
+  account ever reaches 5. `lib/rate-limit/` limits the *source*: 30 sign-in
+  attempts or 10 booking requests per IP per 15 minutes. Both run, neither
+  knows about the other, and the windows match so a locked-out clinic gets
+  one number to quote on the phone. The numbers are sized for a front desk
+  behind one NAT, not one person — see policy.ts for the arithmetic.
+- **Enforced in the server actions, not in proxy.ts.** proxy.ts is
+  deliberately Prisma-free (its header comment), and this needs the
+  database. The check runs first thing in `app/login/actions.ts` and
+  `app/book/[slug]/actions.ts` — before `signIn`, before validation, before
+  any write — so a blocked caller costs no bcrypt round and creates no
+  patient, queue or notification row.
+- **One raw `INSERT … ON CONFLICT DO UPDATE … RETURNING`, not
+  `prisma.upsert`.** The increment must be atomic or parallel requests
+  each read the same count and the threshold is not a threshold.
+  `prisma.upsert` is a SELECT followed by an INSERT or UPDATE, which has
+  that gap plus a unique-violation race on first use, and its `update`
+  branch cannot express "increment, or reset to 1 if the window rolled".
+  Postgres takes a row lock on conflict, so concurrent callers serialise
+  and each sees a distinct count. `window_start` is left alone while
+  blocked, so a source cannot push out its own release time by continuing
+  to hammer.
+- **The key is `<surface>:<ip>` — no branch slug.** Keying booking on the
+  slug would let one source multiply its budget by the number of branches
+  by changing the URL.
+- **`rate_limits` has no RLS, on purpose, and must never get any.** This
+  runs before authentication: no session, no `AbilitySubject`, none of the
+  `app.*` GUCs. There is nothing to scope by. Enabling RLS later would fail
+  the writes loudly and — the dangerous half — make the reads return
+  nothing silently, so the limiter would allow everything while looking
+  healthy. The schema comment on the model says so; SECURITY.md lists it
+  with the other no-RLS tables.
+- **Header trust: `x-vercel-forwarded-for`, then `x-real-ip`, then the
+  rightmost `x-forwarded-for` entry.** The rightmost entry is the one the
+  last trusted proxy appended; anything to its left is client-supplied.
+  This is only meaningful if the origin is reachable *solely* through that
+  proxy — reach it directly and the headers are attacker-controlled and
+  the limit becomes per-claimed-address. A request with no trustworthy
+  address is neither skipped nor refused: it shares one `unknown` bucket,
+  and production logs an error each time, because in a correct deployment
+  that never happens.
+- **Fails open.** If the limiter's own statement throws, the request
+  proceeds and an error is logged. Safe here specifically because both
+  protected operations need the same database — sign-in reads `users`,
+  booking writes `patients` — so an attacker who breaks the database to
+  disable the counter has also broken what they were attacking. Fail-closed
+  would turn a lock wait on one hot row into a clinic that cannot open its
+  queue with patients already in the waiting room.
+- **The block message is explicit where the lockout's is deliberately
+  generic.** "Incorrect email or password" hides whether an account is
+  locked because saying so confirms the account exists. A per-IP block
+  states a fact about the requester's own network, true whether or not the
+  email matches anything, so it leaks nothing — and a real front desk needs
+  to know it is a throttle and roughly how long, or they spend the morning
+  retyping a correct password.
+- **Audited once per key per window — the request that crosses the
+  threshold, never the ones after.** Auditing every refusal would let an
+  attacker append unbounded rows to `audit_logs` by continuing to hit a
+  surface they are already blocked on: a denial of service against the
+  audit trail using the control as the weapon. The row has `branch_id`
+  NULL and `user_id` NULL, which the INSERT policy's first arm admits. It
+  is written with `appendAuditLog` (lib/db/rls.ts), not
+  `prisma.auditLog.create`: Prisma emits `INSERT … RETURNING`, Postgres
+  checks the returned row against the SELECT policy, and with no GUCs set
+  that fails with a misleading 42501. This feature hit that first; the
+  clinic-admin work hit it again from the other side, and the fix now
+  lives in one place. The audit write's own try/catch sits *inside* the
+  decision so a failing audit can never reach the fail-open handler and
+  convert a block into an allow.
+- **Retention: rows older than one day since their last hit are removed by
+  the existing purge job.** `RATE_LIMIT_RETENTION_DAYS = 1` lives in
+  policy.ts next to the window it cleans up after; `lib/retention/policy.ts`
+  re-exports it and `purgeExpiredRecords` deletes by `updated_at`. The
+  purge runs as the superuser (`npm run db:retention`); `webinar_app` has
+  INSERT, SELECT and UPDATE on `rate_limits` and no DELETE, so the
+  application cannot clear its own counters and nothing else will if that
+  job is not scheduled — SECURITY.md's retention item already says the
+  scheduling is deferred until hosting is chosen.
+- **Migration renumbered from `20260823151100` to `20260906000006`.** The
+  file kept its original timestamp in the stash. Left as-is it would have
+  sorted before eleven migrations that are already applied in production,
+  so the history would no longer read in the order it actually ran.
+  Renaming is safe because it had never been applied anywhere.
+
+Verified by the vitest suite against the real database as `webinar_app`
+(365 passing, including the limiter's window roll, the first-block audit
+row, header precedence and the purge), `tsc`, eslint, and a zero-drift
+check across all 17 migrations. Not done: a live walk-through hitting the
+threshold on a deployed instance — that needs the production proxy in
+front of it to be meaningful, and is the first thing to do after this
+deploys.
+
 ## 2026-09-06 — A clinic-level administrator (the new CLINIC_ADMIN)
 
 The owner asked for "a clinic admin role, or a user of the mother clinic",
