@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { warnIfSessionPooler } from "@/lib/db/prisma"
-import { poolMaxFromUrl, sslFromUrl } from "@/lib/db/client-factory"
+import { DEFAULT_POOL_MAX, poolMaxFor, poolMaxFromUrl, sslFromUrl } from "@/lib/db/client-factory"
 
 const SECRET = "s3cret-pw"
 const session = `postgresql://webinar_app.abc:${SECRET}@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres`
@@ -59,6 +59,36 @@ describe("poolMaxFromUrl", () => {
     expect(poolMaxFromUrl(`${local}?connection_limit=abc`)).toBeUndefined()
     expect(poolMaxFromUrl(`${local}?connection_limit=2.5`)).toBeUndefined()
     expect(poolMaxFromUrl("not a url")).toBeUndefined()
+  })
+})
+
+/**
+ * A URL that says nothing must still be capped. `pg` would default to 10,
+ * and /console/admin issues ten reads at once — one render of it alone
+ * asked for ten of the fifteen clients Supabase's session-mode pooler
+ * admits across every warm instance, which is what made that page fail
+ * while lighter ones beside it worked. See DEFAULT_POOL_MAX.
+ */
+describe("poolMaxFor", () => {
+  it("caps a URL that says nothing, rather than leaving pg's larger default", () => {
+    expect(poolMaxFor(session)).toBe(DEFAULT_POOL_MAX)
+    expect(poolMaxFor(local)).toBe(DEFAULT_POOL_MAX)
+    expect(poolMaxFor("not a url")).toBe(DEFAULT_POOL_MAX)
+  })
+
+  it("is small enough that one render cannot exhaust a 15-client pooler on its own", () => {
+    expect(DEFAULT_POOL_MAX).toBeLessThan(15 / 2)
+  })
+
+  it("still lets the URL ask for something else, in either direction", () => {
+    expect(poolMaxFor(transaction)).toBe(5)
+    expect(poolMaxFor(`${local}?connection_limit=1`)).toBe(1)
+    expect(poolMaxFor(`${local}?connection_limit=20`)).toBe(20)
+  })
+
+  it("falls back to the default for a connection_limit that is not a usable number", () => {
+    expect(poolMaxFor(`${local}?connection_limit=0`)).toBe(DEFAULT_POOL_MAX)
+    expect(poolMaxFor(`${local}?connection_limit=abc`)).toBe(DEFAULT_POOL_MAX)
   })
 })
 
