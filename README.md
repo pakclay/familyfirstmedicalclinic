@@ -104,8 +104,20 @@ db:seed` first.
   audit-logged, both at the app layer and independently via the Postgres RLS
   backstop
 - `npm run db:seed` — reseed the holding company, clinics, staff/doctor
-  accounts, and a couple of demo patients per clinic (idempotent — safe to
-  rerun)
+  accounts, the medicine catalog, and a couple of demo patients per clinic.
+  **Destructive**: it deletes every patient, payment, consultation, user and
+  branch first and rebuilds them, so it is for a development database only —
+  never point it at a clinic that is in use.
+- `npm run db:seed-medicines` — adds the starter medicine catalog
+  (`prisma/medicine-catalog.ts`, ~38 items) to any branch missing it. The
+  safe counterpart to the above: it only ever inserts, never deletes and
+  never edits an existing medicine, so it can be run against a live
+  deployment. Dry run by default, like `db:retention`:
+  - `npm run db:seed-medicines` — report what would be added
+  - `npm run db:seed-medicines -- --execute` — add the catalog at zero stock
+  - `... -- --execute --with-opening-stock` — also book opening quantities
+    (demo/staging only; a real clinic receives its own stock)
+  - `... -- --execute --branch=cebu-city` — one branch
 - `npm run db:retention` — reports what's past its retention window
   (`lib/retention/policy.ts`) without deleting anything; add `-- --execute`
   to actually purge. Connects via `DATABASE_URL` (the migration/superuser

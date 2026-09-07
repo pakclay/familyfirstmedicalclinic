@@ -1,7 +1,8 @@
-import { Role, Sex, MedicineForm, MedicineUnit } from "@prisma/client"
+import { Role, Sex } from "@prisma/client"
 import bcrypt from "bcryptjs"
 import { createPrismaClient } from "../lib/db/client-factory"
 import { loadEnvFiles, requireDatabaseUrl } from "../lib/db/env-files"
+import { MEDICINE_CATALOG } from "./medicine-catalog"
 
 // Seeds against DATABASE_URL (the migration/superuser role) — RLS applies
 // only to the app's runtime connection (APP_DATABASE_URL / webinar_app),
@@ -24,22 +25,19 @@ const STANDARD_HOURS = {
   sun: null,
 }
 
-// A starter catalog, not yet §13's full ~30-medicine list with 6 months of
-// movement history — that builds up incrementally as later milestones
-// (M4b's receiving/counting screens, M6's reports) give it somewhere real
-// to be exercised. Two intentionally below reorderLevel, one expiring
-// within 30 days, matching §13's seed guidance for what the dashboards
-// should have something to show on first run.
-const MEDICINE_SEEDS = [
-  { name: "Paracetamol", genericName: "Paracetamol", form: MedicineForm.TABLET, strength: "500mg", unit: MedicineUnit.PIECE, stock: 200, reorderLevel: 50, unitCost: 150, sellingPrice: 300 },
-  { name: "Amoxicillin", genericName: "Amoxicillin", form: MedicineForm.CAPSULE, strength: "500mg", unit: MedicineUnit.PIECE, stock: 120, reorderLevel: 40, unitCost: 350, sellingPrice: 700 },
-  { name: "Mefenamic Acid", genericName: "Mefenamic Acid", form: MedicineForm.TABLET, strength: "500mg", unit: MedicineUnit.PIECE, stock: 30, reorderLevel: 40, unitCost: 200, sellingPrice: 400 }, // below reorder
-  { name: "Cetirizine", genericName: "Cetirizine", form: MedicineForm.TABLET, strength: "10mg", unit: MedicineUnit.PIECE, stock: 90, reorderLevel: 30, unitCost: 180, sellingPrice: 350 },
-  { name: "Salbutamol Syrup", genericName: "Salbutamol", form: MedicineForm.SYRUP, strength: "2mg/5mL", unit: MedicineUnit.BOTTLE, stock: 15, reorderLevel: 20, unitCost: 8000, sellingPrice: 15000 }, // below reorder
-  { name: "Oral Rehydration Salts", genericName: "ORS", form: MedicineForm.OTHER, strength: "20.5g", unit: MedicineUnit.SACHET, stock: 100, reorderLevel: 30, unitCost: 1500, sellingPrice: 2500 },
-  { name: "Amlodipine", genericName: "Amlodipine", form: MedicineForm.TABLET, strength: "5mg", unit: MedicineUnit.PIECE, stock: 60, reorderLevel: 20, unitCost: 250, sellingPrice: 500 },
-  { name: "Povidone Iodine", genericName: "Povidone-Iodine", form: MedicineForm.OINTMENT, strength: "10%", unit: MedicineUnit.BOTTLE, stock: 25, reorderLevel: 10, unitCost: 4000, sellingPrice: 7500, expiresInDays: 25 }, // expiring soon
-] as const
+/**
+ * The catalog itself now lives in prisma/medicine-catalog.ts, shared with
+ * prisma/seed-medicines.ts — the additive script that is safe to run
+ * against a clinic already in use, which this file emphatically is not.
+ *
+ * Two of its entries are seeded below their reorder level so the low-stock
+ * panel has something to show on a fresh database. Expiry is the one thing
+ * the catalog will not carry (an expiry belongs to a delivery, not to a
+ * medicine), so the "expiring soon" case §13 asks for is applied here.
+ */
+const DEMO_EXPIRES_IN_DAYS: Record<string, number> = {
+  "Povidone Iodine": 25,
+}
 
 // Placeholder locations — no real branch list supplied yet (SPEC.md §13.5).
 // Swap for the real clinic/branch names/addresses/Facebook pages when
@@ -178,7 +176,8 @@ async function main() {
       // current_stock only ever changes through a stock_movements row (§6) —
       // seeding respects that too, rather than setting the field directly,
       // so the ledger-equals-cached-total invariant holds from row one.
-      for (const m of MEDICINE_SEEDS) {
+      for (const m of MEDICINE_CATALOG) {
+        const expiresInDays = DEMO_EXPIRES_IN_DAYS[m.name]
         const medicine = await prisma.medicine.create({
           data: {
             branchId: branch.id,
@@ -191,7 +190,7 @@ async function main() {
             reorderLevel: m.reorderLevel,
             unitCost: m.unitCost,
             sellingPrice: m.sellingPrice,
-            expiryDate: "expiresInDays" in m ? new Date(Date.now() + m.expiresInDays * 86_400_000) : null,
+            expiryDate: expiresInDays === undefined ? null : new Date(Date.now() + expiresInDays * 86_400_000),
           },
         })
         await prisma.stockMovement.create({
@@ -199,13 +198,13 @@ async function main() {
             branchId: branch.id,
             medicineId: medicine.id,
             movementType: "RECEIPT",
-            quantityChange: m.stock,
-            balanceAfter: m.stock,
+            quantityChange: m.openingStock,
+            balanceAfter: m.openingStock,
             reason: "Initial stock (seed)",
             performedByUserId: branchAdmin.id,
           },
         })
-        await prisma.medicine.update({ where: { id: medicine.id }, data: { currentStock: m.stock } })
+        await prisma.medicine.update({ where: { id: medicine.id }, data: { currentStock: m.openingStock } })
       }
 
       for (let i = 1; i <= 2; i++) {

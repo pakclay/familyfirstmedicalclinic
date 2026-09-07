@@ -149,6 +149,13 @@ matching `dispense` movement; deleting that row returns stock to 24 via a
 `return` movement (never an edit); a failed save leaves stock untouched;
 `current_stock` always equals the sum of the movement ledger.
 
+Each branch is seeded with the ~38-medicine starter catalog from
+`prisma/medicine-catalog.ts` — two of them deliberately below their reorder
+level and one expiring within 30 days, so the low-stock and expiring filters
+have something to show. To add that catalog to a deployment that already has
+patients (where `npm run db:seed` must never be run), use
+`npm run db:seed-medicines -- --execute` instead; it only inserts.
+
 1. As branch admin (or as a doctor — **Medicines** in their nav reaches
    the same pages), go to `/staff/inventory` and open any medicine's
    detail page — the **movement ledger** lists every receipt/dispense/
