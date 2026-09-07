@@ -71,6 +71,45 @@ URL); the full suite; tsc; eslint. Not verifiable from here: the production
 change itself, which the owner makes in Vercel — the startup log line will
 say whether it took.
 
+## 2026-09-07 — The medicine catalog, and a seeder that cannot wipe a clinic
+
+§13 asked for "~30 medicines"; the seed had eight, with a comment saying so.
+The catalog is now 38 entries in `prisma/medicine-catalog.ts`, shared by two
+scripts that differ in the only way that matters.
+
+- **`db:seed` is destructive and always was.** Its first act is to delete
+  every audit log, notification, payment, consultation, patient, user,
+  branch and clinic, then rebuild them — right for a laptop, catastrophic
+  for a clinic seeing patients. Nothing in the README said so. It does now,
+  in bold.
+- **`db:seed-medicines` is the one that may point at a live deployment.**
+  It only inserts: never deletes, never updates an existing medicine.
+  Idempotent on name within a branch, case- and whitespace-insensitive, so
+  a hand-typed "amoxicillin " does not become a second row. Running it
+  twice reports everything as already present — which also means it will
+  not "correct" a price someone edited, deliberately, because they edited
+  it. Dry run by default with `--execute` to write, matching
+  `db:retention`, because writing to a clinic's database deserves the same
+  pause as deleting from it.
+- **It does not invent stock.** Default is `current_stock = 0` and no
+  movement: quantities are operational records that money is reconciled
+  against, and inventing them would be writing fiction into an inventory
+  ledger. `--with-opening-stock` exists for demo and staging, and books a
+  RECEIPT movement rather than setting the column, so the §6
+  ledger-equals-cached-total invariant holds from the first row —
+  verified across all 38 seeded medicines, zero mismatches.
+- **No expiry dates in the catalog.** An expiry belongs to a delivery, not
+  to a medicine. The demo seed applies the one "expiring soon" case §13
+  wants via its own map; the additive seeder sets none at all.
+- **Prices are plausible, not authoritative**, and the eight pre-existing
+  medicines keep their exact previous values so nothing re-prices. A clinic
+  is expected to edit them — that is what the catalog screens are for.
+- **A test guards the hand-written list**: no duplicate names, every entry
+  passing the same zod schema the catalog form enforces, whole centavos,
+  and no medicine selling for less than it costs (a negative margin in a
+  forty-line table of near-identical objects is always a typo, and never
+  visible by eye).
+
 ## 2026-09-07 — /console/admin still fails, and the reason nobody can say why
 
 The Administration page was reported failing a second time, after the pool
