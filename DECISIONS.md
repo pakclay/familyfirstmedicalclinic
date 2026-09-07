@@ -71,6 +71,57 @@ URL); the full suite; tsc; eslint. Not verifiable from here: the production
 change itself, which the owner makes in Vercel — the startup log line will
 say whether it took.
 
+## 2026-09-07 — The connection pool needs a cap of its own
+
+Reported from production: a holding admin opening **Administration**
+(`/console/admin`) got the generic error card, while Users and Dashboard
+beside it kept working. A regression from the Prisma 7 upgrade earlier
+today, in a place the upgrade's own review did not look.
+
+- **What broke.** The old Rust engine capped its pool at
+  `num_physical_cpus * 2 + 1` — about 5 on a 2-vCPU Vercel function — when
+  the URL said nothing. `pg` defaults to 10 and `lib/db/client-factory.ts`
+  only set `max` when the URL carried `connection_limit`; production's
+  does not. So the per-instance ceiling silently doubled. `/console/admin`
+  issues ten independent reads in one `Promise.all`, which is far more than
+  any other page, so one render asked for ten of the fifteen clients
+  Supabase's session-mode pooler admits **across every warm instance**.
+  Measured directly against a local Postgres: 10 connections for a single
+  render before the fix, 5 after — and the render got *faster* (197ms →
+  77ms), because most of that time was handshakes, not queries.
+- **Why that page and not the others.** Nothing about it is special except
+  its fan-out. It is the only screen that reads ten things at once; every
+  other console page reads two or three. Which is exactly the shape of the
+  report — the heaviest page fails, its neighbours do not.
+- **`DEFAULT_POOL_MAX = 5`**, applied whenever the URL is silent. It
+  restores the engine's own order of magnitude, matches the
+  `connection_limit=5` `.env.example` already recommends, and leaves a
+  fan-out larger than the pool *queueing* in two quick waves rather than
+  failing. An explicit `connection_limit` still wins, in either direction.
+- **`connectionTimeoutMillis = 10s`**, likewise restoring prior behaviour:
+  the engine's `pool_timeout` was 10 seconds and `pg` waits forever. A
+  saturated pool inside a serverless function should fail with something a
+  log can explain, not burn the whole invocation on a queue.
+- **This reduces the blast radius; it is not the whole fix.** Session mode
+  is still the wrong mode, and `lib/db/prisma.ts` still says so at startup.
+  Five connections per instance against fifteen shared slots is three warm
+  instances before the ceiling is back. Transaction mode (port 6543)
+  multiplexes hundreds of clients over those same backends and is the
+  actual answer; it remains an environment change only the owner can make.
+- **Honest limit on the diagnosis.** The production error text itself was
+  gone by the time it was looked for — `vercel logs` tails a live window
+  and there was no traffic. So this is diagnosed from measurement plus the
+  known state of the database connection, not from the stack trace. The
+  page renders correctly end-to-end signed in as a holding admin locally,
+  before *and* after the change, which is consistent with a cause that is
+  environmental rather than logical. If it recurs after this deploys,
+  `npx vercel logs <url>` **while it is failing** will name it outright.
+- **Deliberately not done: reducing the fan-out.** Ten concurrent reads is
+  a lot for one page, and merging the three counts with the three lists
+  they cap is a real improvement — but it is a change to a working query
+  for performance, made while diagnosing an outage. The pool cap makes the
+  fan-out queue instead of fail, which is the correct behaviour for it.
+
 ## 2026-09-07 — Prisma 7 (from 6.19): a config file, a driver, the same generator
 
 Dependabot's two PRs (#32, #33) could not pass CI: Prisma 7 refuses a `url`
