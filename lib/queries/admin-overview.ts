@@ -109,14 +109,31 @@ export async function getAdminOverview(actor: AbilitySubject): Promise<AdminOver
     branch: { isActive: false, clinic: { holdingCompanyId } },
   }
 
-  // Independent reads, issued together. The clinic query nests branches with
-  // a _count of their users, so per-branch staff numbers cost nothing extra
-  // — the alternative (a listBranches call per clinic, or a user lookup per
-  // branch) is the N+1 this shape exists to avoid.
+  // Independent reads, batched onto ONE connection. The clinic query nests
+  // branches with a _count of their users, so per-branch staff numbers cost
+  // nothing extra — the alternative (a listBranches call per clinic, or a
+  // user lookup per branch) is the N+1 this shape exists to avoid.
+  //
+  // `$transaction([...])`, not `Promise.all`. Ten reads issued together on
+  // the bare client take ten pooled connections (measured: 10 before the
+  // pool was capped, 4 after). Every other console screen takes exactly one
+  // — they are either a single query or a single runWithRls transaction —
+  // which made this the only page in the console whose rendering depended on
+  // the connection pool having several slots free at once. Production talks
+  // to Supabase's pooler in SESSION mode, which admits fifteen clients
+  // across every warm instance, so "several free at once" is not a given and
+  // the failure is a blank error card rather than a slow page.
+  //
+  // The batch form runs them sequentially inside one transaction: one
+  // connection, measured peak of 1 active, and *faster* than the fan-out
+  // (36ms vs 70ms locally) because most of the wall clock was connection
+  // handshakes rather than queries. It also gives every count and list on
+  // this screen a single consistent snapshot, which a fan-out never had.
   const [
     company,
     clinics,
-    staffTotals,
+    activeCount,
+    inactiveCount,
     lockedOut,
     mustChangePassword,
     holdingAccounts,
@@ -124,7 +141,7 @@ export async function getAdminOverview(actor: AbilitySubject): Promise<AdminOver
     mustChangeTotal,
     stranded,
     strandedTotal,
-  ] = await Promise.all([
+  ] = await prisma.$transaction([
     prisma.holdingCompany.findUnique({
       where: { id: holdingCompanyId },
       select: { id: true, name: true },
@@ -148,11 +165,14 @@ export async function getAdminOverview(actor: AbilitySubject): Promise<AdminOver
       },
       orderBy: { name: "asc" },
     }),
-    prisma.user.groupBy({
-      by: ["isActive"],
-      where: companyUsers,
-      _count: { _all: true },
-    }),
+    // Two counts rather than one groupBy over `isActive`. Inside a
+    // `$transaction([...])` batch Prisma cannot narrow a groupBy's result
+    // type — `_count` widens to a union and the call demands an `orderBy`
+    // it does not need — and the old shape then had to be read back
+    // defensively anyway, because a company with no deactivated accounts
+    // produced no `false` group at all. Two counts always return a number.
+    prisma.user.count({ where: { ...companyUsers, isActive: true } }),
+    prisma.user.count({ where: { ...companyUsers, isActive: false } }),
     prisma.user.findMany({
       where: lockedWhere,
       select: { id: true, name: true, email: true, role: true, branch: { select: { name: true } } },
@@ -182,12 +202,6 @@ export async function getAdminOverview(actor: AbilitySubject): Promise<AdminOver
     }),
     prisma.user.count({ where: strandedWhere }),
   ])
-
-  // groupBy returns only the rows that exist, so an all-active company has
-  // no `false` group at all — read each side defensively rather than
-  // indexing into a shape the data may not produce.
-  const activeCount = staffTotals.find((g) => g.isActive)?._count._all ?? 0
-  const inactiveCount = staffTotals.find((g) => !g.isActive)?._count._all ?? 0
 
   const shaped: OverviewClinic[] = clinics.map((c) => ({
     id: c.id,

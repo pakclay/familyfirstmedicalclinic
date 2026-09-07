@@ -498,6 +498,18 @@ describe("listAuditLog", () => {
       await expect(listAuditLog(doctor, {})).rejects.toThrow(ForbiddenError)
     })
 
+    /**
+     * `holdingCompanyId` is nullable on both User and Clinic, so before this
+     * guard a null did not error — Prisma compiled it to `IS NULL` and the
+     * page rendered a plausible table of whatever rows had no company
+     * attached, belonging to whoever. Failing closed matters most on the one
+     * screen whose entire job is accountability.
+     */
+    it("refuses a holding admin with no holding company instead of matching rows on IS NULL", async () => {
+      const companyless: AbilitySubject = { ...holdingAdmin, holdingCompanyId: null }
+      await expect(listAuditLog(companyless, {})).rejects.toBeInstanceOf(ForbiddenError)
+    })
+
     it("does not degrade to an empty list for a forbidden reader", async () => {
       // The whole point of §4.2: a refusal must be distinguishable from
       // "there is nothing here", which is what a broken RLS setup looks like.

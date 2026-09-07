@@ -71,6 +71,79 @@ URL); the full suite; tsc; eslint. Not verifiable from here: the production
 change itself, which the owner makes in Vercel — the startup log line will
 say whether it took.
 
+## 2026-09-07 — /console/admin still fails, and the reason nobody can say why
+
+The Administration page was reported failing a second time, after the pool
+cap below. This entry is mostly about the second half of that sentence.
+
+- **What the failure looks like is settled.** `app/error.tsx` is the only
+  error boundary in the tree — no `global-error.tsx`, none under
+  `app/console`, no hand-rolled `componentDidCatch`, and no use of Next
+  16.3's newer programmatic `catchError` either — and its heading and
+  paragraph are verbatim the reported card. So the page throws during a
+  server render and unwinds to the root. That much is proven.
+- **The leading hypothesis was killed by the report's own control.** A
+  `HOLDING_ADMIN` row may carry no `holding_company_id` (the
+  users_role_scope_check constraint permits it, on purpose), and
+  `getAdminOverview` refuses that actor with a `ForbiddenError` — which
+  does produce exactly this card, reproduced end-to-end in a browser. But
+  `listUsers` reaches `requireHoldingCompanyId` too, and it throws for the
+  same actor before any query runs. A company-less holding admin therefore
+  cannot see /console/users either — and the operator's screenshot shows
+  /console/users rendering rows for that same signed-in account. The
+  hypothesis explains the symptom on the failing page and contradicts the
+  working one, so it is not the cause. (/console/dashboard has no
+  discriminating power at all: it early-returns static text for every role
+  but BRANCH_ADMIN, without touching the database.)
+- **We could not read the error, and that is the actual defect.** The
+  browser is told nothing by design — React replaces a Server Component's
+  message with a generic string plus a digest — and `vercel logs` had no
+  entry for the route. So two reports produced no stack trace, and the
+  diagnosis was reduced to reasoning from correlations. `instrumentation.ts`
+  now implements `onRequestError`, Next's supported hook for exactly this,
+  logging the route, the message, the stack and **the digest**. It
+  deliberately does not log `request.headers`, which carry the session
+  cookie. `app/error.tsx` now shows that same digest, so a screenshot can
+  be matched to a log line rather than guessed at.
+- **`app/error.tsx`'s "Try again" button never worked.** It called
+  `reset()`, which clears the boundary's client state and re-renders the
+  same already-failed payload; `retry()` is the one that re-fetches from
+  the server. The version's own docs say "In most cases, you should use
+  retry() instead". Anyone who clicked it saw the card reappear and
+  reasonably concluded the app was stuck.
+- **/console/admin is still the only console page that needed several
+  database connections at once**, and that stays the best remaining
+  explanation, so it is fixed rather than argued about. Its ten reads ran
+  in a `Promise.all` on the bare client — measured at 10 concurrent
+  connections before the cap below, 4 after — while every other console
+  screen takes exactly one, being either a single query or a single
+  `runWithRls` transaction. Production talks to Supabase's pooler in
+  **session mode**, which admits fifteen clients across every warm
+  instance, so a page needing several free at once is the first to fail and
+  fails deterministically while its neighbours do not. It is now one
+  `$transaction([...])` batch: **one** connection (measured), and *faster*
+  than the fan-out (36ms vs 70ms), because most of that wall clock was
+  connection handshakes. It also gives the screen's counts and lists a
+  single consistent snapshot, which a fan-out never had.
+- **A tenant leak found in passing.** `listAuditLog` had a role check but
+  no company guard, and `holdingCompanyId` is nullable on both `User` and
+  `Clinic` — so a null flowed into Prisma as `IS NULL` and the page
+  rendered a plausible-looking table of whatever rows had no company
+  attached, with no error at all. Every sibling read guards this; the one
+  screen whose whole job is accountability did not. It now fails closed.
+- **No backfill migration, deliberately.** Attaching every company-less
+  holding admin to "the first holding company" would be a one-line
+  migration and was the obvious repair — until the local database turned
+  out to hold sixteen holding companies (test residue). In any database
+  with more than one, that migration silently attaches an admin to the
+  wrong tenant, which is far worse than the error it fixes. Guarded and
+  surfaced instead; repairing a real one is a decision that needs to see
+  the data.
+- **Honest status: unresolved.** The cause is not established. What has
+  changed is that the next occurrence writes a stack trace with a digest
+  the operator can quote, the one screen that needed many connections now
+  needs one, and two real defects found on the way are fixed.
+
 ## 2026-09-07 — The connection pool needs a cap of its own
 
 Reported from production: a holding admin opening **Administration**
