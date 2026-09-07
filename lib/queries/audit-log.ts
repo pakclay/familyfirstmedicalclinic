@@ -142,6 +142,15 @@ export async function listAuditLog(user: AbilitySubject, params: AuditLogFilters
   // matters doubly on this table: an empty array is also what a broken RLS
   // setup produces, and the two must not look alike.
   if (user.role !== "HOLDING_ADMIN") throw new ForbiddenError("Only a holding admin can view the audit log")
+  // Every scope arm below keys on this id. Unlike the other holding-scoped
+  // reads it was never guarded, and `holdingCompanyId` is nullable on both
+  // User and Clinic — so a null flows into Prisma as `IS NULL` rather than
+  // erroring, and the page renders a plausible-looking table of whatever
+  // rows happen to have no company attached. Failing closed is the only
+  // acceptable behaviour on the one screen whose whole job is accountability.
+  if (!user.holdingCompanyId) {
+    throw new ForbiddenError("This account isn't attached to a holding company, so there is no audit trail to scope.")
+  }
 
   const pageSize = clampPageSize(params.pageSize)
   const requestedPage = parsePositiveInt(params.page) ?? 1

@@ -28,6 +28,26 @@ export default async function AdminPage() {
     )
   }
 
+  // The query has two gates, and this page only ever mirrored the first.
+  // getAdminOverview refuses a non-holding-admin (handled above) AND a
+  // holding admin with no company — a state the users_role_scope_check
+  // constraint deliberately permits, so it is reachable, not theoretical.
+  // Without this the second refusal escapes the Server Component and the
+  // person sees "Something went wrong" for a condition the server can name
+  // in one sentence. Same in-page shape as the role gate, which is this
+  // codebase's norm for a refused read.
+  if (!session.user.holdingCompanyId) {
+    return (
+      <div>
+        <h1 className="text-2xl font-heading font-semibold">Administration</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          This account isn&rsquo;t attached to a holding company, so there&rsquo;s no organization to show. Another
+          holding admin can fix it by re-issuing this account; until then the clinic and branch pages are the way in.
+        </p>
+      </div>
+    )
+  }
+
   const user: AbilitySubject = {
     id: session.user.id,
     role: session.user.role,
