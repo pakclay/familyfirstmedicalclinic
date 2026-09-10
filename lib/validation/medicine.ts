@@ -9,6 +9,11 @@ export const medicineCatalogSchema = z.object({
   reorderLevel: z.coerce.number().int().min(0),
   unitCost: z.coerce.number().int().min(0, "Unit cost can't be negative"),
   sellingPrice: z.coerce.number().int().min(0, "Selling price can't be negative"),
+  // The catalog screens can set or correct the single stored expiry (§7.5:
+  // no batch/lot tracking). Receiving a delivery is still the usual way it
+  // gets set; this is for the first load of pre-existing stock and for
+  // fixing a mistyped date without booking a fake receipt.
+  expiryDate: z.union([z.literal(""), z.coerce.date()]).optional(),
   isActive: z.boolean().default(true),
 })
 export type MedicineCatalogInput = z.infer<typeof medicineCatalogSchema>

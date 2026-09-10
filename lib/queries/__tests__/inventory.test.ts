@@ -650,6 +650,36 @@ describe("inventory", () => {
     expect(updated.isActive).toBe(false)
   })
 
+  it("the catalog can set, correct, and clear the expiry date without booking a receipt", async () => {
+    const base = {
+      name: "Catalog Expiry Med",
+      form: "TABLET" as const,
+      unit: "PIECE" as const,
+      reorderLevel: 10,
+      unitCost: 100,
+      sellingPrice: 200,
+      isActive: true,
+    }
+
+    // set on create, with no stock movement to carry it
+    const created = await createMedicine(branchAdmin, { ...base, expiryDate: "2027-05-31" })
+    expect(created.expiryDate?.getTime()).toBe(Date.UTC(2027, 4, 31))
+    expect(created.currentStock).toBe(0)
+
+    // corrected on edit — a mistyped date is fixable without a fake delivery
+    const fixed = await updateMedicine(branchAdmin, created.id, { ...base, expiryDate: "2028-01-15" })
+    expect(fixed.expiryDate?.getTime()).toBe(Date.UTC(2028, 0, 15))
+
+    // omitting the field leaves the stored expiry alone, so a caller written
+    // before this field existed can never silently wipe it
+    const untouched = await updateMedicine(branchAdmin, created.id, base)
+    expect(untouched.expiryDate?.getTime()).toBe(Date.UTC(2028, 0, 15))
+
+    // a blank field is the catalog form explicitly clearing it
+    const cleared = await updateMedicine(branchAdmin, created.id, { ...base, expiryDate: "" })
+    expect(cleared.expiryDate).toBeNull()
+  })
+
   it("lists low-stock, expiring, and expired medicines correctly", async () => {
     const low = await createMedicineDirect({ name: "Low Stock Med", currentStock: 2, reorderLevel: 10 })
     const fine = await createMedicineDirect({ name: "Fine Stock Med", currentStock: 50, reorderLevel: 10 })
