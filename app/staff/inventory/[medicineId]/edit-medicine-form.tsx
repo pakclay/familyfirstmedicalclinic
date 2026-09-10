@@ -27,6 +27,7 @@ export function EditMedicineForm({ medicine }: { medicine: MedicineDetailDTO }) 
       reorderLevel: String(formData.get("reorderLevel") ?? ""),
       unitCost: Math.round(Number(formData.get("unitCostPesos") ?? 0) * 100),
       sellingPrice: Math.round(Number(formData.get("sellingPricePesos") ?? 0) * 100),
+      expiryDate: String(formData.get("expiryDate") ?? ""),
       isActive: formData.get("isActive") === "on",
     }
     const res = await updateMedicineAction(medicine.id, input)
@@ -96,6 +97,14 @@ export function EditMedicineForm({ medicine }: { medicine: MedicineDetailDTO }) 
               <Input name="sellingPricePesos" type="number" step="0.01" min={0} defaultValue={(medicine.sellingPrice / 100).toFixed(2)} className="h-9" />
             </Field>
           </div>
+          <Field label="Expiry date (optional)">
+            <Input
+              name="expiryDate"
+              type="date"
+              defaultValue={medicine.expiryDate ? medicine.expiryDate.toISOString().slice(0, 10) : ""}
+              className="h-9"
+            />
+          </Field>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" name="isActive" defaultChecked={medicine.isActive} />
             Active (visible in the consultation picker)

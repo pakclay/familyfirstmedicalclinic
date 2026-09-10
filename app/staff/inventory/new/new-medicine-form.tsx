@@ -25,6 +25,7 @@ export function NewMedicineForm() {
       reorderLevel: String(formData.get("reorderLevel") ?? "0"),
       unitCost: Math.round(Number(formData.get("unitCostPesos") ?? 0) * 100),
       sellingPrice: Math.round(Number(formData.get("sellingPricePesos") ?? 0) * 100),
+      expiryDate: String(formData.get("expiryDate") ?? ""),
       isActive: true,
     }
     const res = await createMedicineAction(input)
@@ -85,8 +86,12 @@ export function NewMedicineForm() {
               <Input name="sellingPricePesos" type="number" step="0.01" min={0} required className="h-10" />
             </Field>
           </div>
+          <Field label="Expiry date (optional)">
+            <Input name="expiryDate" type="date" className="h-10" />
+          </Field>
           <p className="text-xs text-muted-foreground">
-            Starts with 0 stock — use Receive stock afterward to bring in the first delivery.
+            Starts with 0 stock — use Receive stock afterward to bring in the first delivery. Leave the
+            expiry blank to set it from that first delivery instead.
           </p>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <Button type="submit" disabled={pending} className="h-10">

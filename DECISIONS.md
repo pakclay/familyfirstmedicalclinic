@@ -9,6 +9,37 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-09-10 — Expiry dates belong in the catalog after all
+
+Reported against the branch-admin screens: Add medicine has no field for the
+medicine's expiration. It was missing on purpose — the 2026-09-07 entry below
+says "No expiry dates in the catalog. An expiry belongs to a delivery, not to
+a medicine." That reasoning still holds for where an expiry normally *comes
+from*, but it left a hole, so `medicineCatalogSchema` now carries an optional
+`expiryDate` and both catalog screens show the field.
+
+- **Receiving is still the normal path.** `receiveStock` and §7.5's DECISION
+  are untouched: staff enter the delivery's expiry and explicitly choose
+  whether it should govern the single stored date. The catalog field is for
+  the two cases receiving cannot serve — the first load of stock that
+  predates the system, and correcting a mistyped date.
+- **The hole was that nothing else could write the column.** `expiryDate`
+  drives the Expiring Soon and Expired panels and the consultation picker's
+  expired-medicine filter, yet a branch admin had no way to set or fix it
+  from either catalog screen. The only remedy for a typo was booking a
+  receipt that never happened — writing fiction into the ledger to correct
+  a date, which is exactly what the 2026-09-07 seeder decision refused to
+  do for quantities.
+- **Absent means "leave alone"; empty means "clear".** `updateMedicine`
+  writes the column only when the key is present. Both forms always submit
+  it, so blanking the input clears the date as a user expects — but a caller
+  written before this field existed cannot silently wipe every expiry date
+  in a branch by omitting it. A test pins all four paths (set on create,
+  correct, omit, clear).
+- **Still one date per medicine.** This is not batch/lot tracking, which
+  stays future work (SPEC.md §6). A medicine holding two deliveries with
+  different expiries can still only record one of them.
+
 ## 2026-09-06 — Production ran out of database connections (EMAXCONNSESSION)
 
 A doctor completing a consultation was shown, in the form itself:

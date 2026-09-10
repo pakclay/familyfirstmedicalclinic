@@ -116,6 +116,7 @@ export async function createMedicine(user: AbilitySubject, input: unknown): Prom
         reorderLevel: parsed.reorderLevel,
         unitCost: parsed.unitCost,
         sellingPrice: parsed.sellingPrice,
+        expiryDate: parsed.expiryDate || null,
         isActive: parsed.isActive,
       },
     })
@@ -147,6 +148,9 @@ export async function updateMedicine(user: AbilitySubject, medicineId: string, i
         reorderLevel: parsed.reorderLevel,
         unitCost: parsed.unitCost,
         sellingPrice: parsed.sellingPrice,
+        // Absent field means "leave the stored expiry alone"; an empty
+        // string is the catalog form explicitly clearing it.
+        ...(parsed.expiryDate === undefined ? {} : { expiryDate: parsed.expiryDate || null }),
         isActive: parsed.isActive,
       },
     })
