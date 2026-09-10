@@ -56,7 +56,8 @@
     "vitest": "^4.1.11"
   },
   "overrides": {
-    "deepmerge-ts": "^8.0.2"
+    "deepmerge-ts": "^8.0.2",
+    "mysql2": "^3.24.4"
   },
   "allowScripts": {
     "sharp@0.35.3": true,
