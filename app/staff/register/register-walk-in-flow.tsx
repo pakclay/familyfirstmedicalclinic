@@ -99,11 +99,15 @@ export function RegisterWalkInFlow() {
     setPending(true)
     setError(null)
     try {
-      const { patient, queueEntry } = await checkInExistingAction(patientId, step.reasonForVisit, step.priority)
+      const res = await checkInExistingAction(patientId, step.reasonForVisit, step.priority)
+      if (!res.ok) {
+        setError(res.error)
+        return
+      }
       setStep({
         name: "done",
-        patientName: patient ? `${patient.firstName} ${patient.lastName}` : "Patient",
-        queueNumber: queueEntry.queueNumber,
+        patientName: res.patient ? `${res.patient.firstName} ${res.patient.lastName}` : "Patient",
+        queueNumber: res.queueEntry.queueNumber,
       })
     } catch {
       setError("Couldn't check in this patient. Try again.")

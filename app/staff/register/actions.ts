@@ -8,6 +8,7 @@ import {
   registerWalkIn,
   checkInExistingPatient,
   getPatientById,
+  PatientAlreadyQueuedError,
 } from "@/lib/queries/patients"
 import { patientIntakeSchema } from "@/lib/validation/patient"
 import type { PatientDTO } from "@/lib/dto/patient"
@@ -49,13 +50,28 @@ export async function registerNewPatientAction(
   return { ok: true, result }
 }
 
+export type CheckInResult =
+  | { ok: true; patient: PatientDTO | null; queueEntry: QueueEntryDTO }
+  | { ok: false; error: string }
+
+/**
+ * A result rather than a throw for the one failure the desk can act on —
+ * the patient already holds a place in today's queue — because a thrown
+ * server-action error reaches the browser with its message stripped in
+ * production. Anything else still throws to the flow's generic handler.
+ */
 export async function checkInExistingAction(
   patientId: string,
   reasonForVisit: string,
   priority: boolean
-): Promise<{ patient: PatientDTO | null; queueEntry: QueueEntryDTO }> {
+): Promise<CheckInResult> {
   const user = await actingUser()
-  const queueEntry = await checkInExistingPatient(user, patientId, { reasonForVisit, priority })
-  const patient = await getPatientById(user, patientId)
-  return { patient, queueEntry }
+  try {
+    const queueEntry = await checkInExistingPatient(user, patientId, { reasonForVisit, priority })
+    const patient = await getPatientById(user, patientId)
+    return { ok: true, patient, queueEntry }
+  } catch (err) {
+    if (err instanceof PatientAlreadyQueuedError) return { ok: false, error: err.message }
+    throw err
+  }
 }

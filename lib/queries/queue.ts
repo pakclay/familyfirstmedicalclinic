@@ -105,6 +105,15 @@ export async function branchTimezone(tx: Prisma.TransactionClient, branchId: str
 /** §7.3: entries physically present and eligible to be called next. */
 export const ACTIVE_STATUSES: QueueStatus[] = ["CHECKED_IN", "WAITING"]
 
+/**
+ * Entries that still hold a place in today's queue — booked but not yet
+ * arrived, waiting, called, or in with the doctor: everything except the
+ * three ways a visit ends. One patient holds at most one of these per day:
+ * `checkInExistingPatient` refuses a second, and the patient search shows
+ * the number they already have instead of an "Add to queue" button.
+ */
+export const OPEN_STATUSES: QueueStatus[] = ["BOOKED", "CHECKED_IN", "WAITING", "CALLED", "IN_CONSULTATION"]
+
 export type StaffQueueEntryDTO = QueueEntryDTO & {
   patientName: string
   patientAge: number
