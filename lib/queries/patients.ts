@@ -1,10 +1,11 @@
+import type { QueueStatus } from "@prisma/client"
 import { runWithRls } from "@/lib/db/rls"
 import { isHoldingAdmin, isClinicAdmin, requireBranchId, type AbilitySubject } from "@/lib/permissions/ability"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import { toPatientDTO, type PatientDTO } from "@/lib/dto/patient"
 import { toQueueEntryDTO, type QueueEntryDTO } from "@/lib/dto/queue-entry"
 import { patientIntakeSchema } from "@/lib/validation/patient"
-import { nextQueueNumber, todayAsQueueDate, branchTimezone } from "@/lib/queries/queue"
+import { nextQueueNumber, todayAsQueueDate, branchTimezone, OPEN_STATUSES } from "@/lib/queries/queue"
 import { generateAccessToken } from "@/lib/utils/token"
 
 /**
@@ -368,7 +369,34 @@ export async function registerWalkIn(
   })
 }
 
-/** Checks in a patient the front desk already found via `searchPatientsByPhone` — no new Patient row. */
+/**
+ * Thrown when the patient already holds a place in today's queue (any
+ * `OPEN_STATUSES` entry). One person cannot wait twice: a second entry
+ * would give them two numbers, list them twice on the board and the
+ * display, and text them twice. The message is written for the desk, which
+ * is why the actions that catch it pass it to the screen verbatim.
+ */
+export class PatientAlreadyQueuedError extends Error {
+  queueNumber: number
+  status: QueueStatus
+
+  constructor(patientName: string, queueNumber: number, status: QueueStatus) {
+    super(
+      status === "BOOKED"
+        ? `${patientName} already has a booking for today (#${queueNumber}). Check them in from the queue board instead.`
+        : `${patientName} is already in today's queue as #${queueNumber}.`
+    )
+    this.name = "PatientAlreadyQueuedError"
+    this.queueNumber = queueNumber
+    this.status = status
+  }
+}
+
+/**
+ * Checks in a patient the front desk already found — through the register
+ * screen's intake search or the patient search's "Add to queue" — with no
+ * new Patient row. Refuses if they already hold a place in today's queue.
+ */
 export async function checkInExistingPatient(
   user: AbilitySubject,
   patientId: string,
@@ -387,7 +415,24 @@ export async function checkInExistingPatient(
 
     const timezone = await branchTimezone(tx, branchId)
     const queueDate = todayAsQueueDate(timezone)
+    // Allocating the number takes the branch+day advisory lock, so the
+    // duplicate check below runs serialized against every other check-in
+    // for this branch today: two taps on "Add to queue" a moment apart
+    // cannot both pass it. The number is simply discarded if we throw.
     const queueNumber = await nextQueueNumber(tx, branchId, queueDate)
+
+    const alreadyQueued = await tx.queueEntry.findFirst({
+      where: { branchId, patientId, queueDate, status: { in: OPEN_STATUSES } },
+      orderBy: { queueNumber: "asc" },
+      select: { queueNumber: true, status: true },
+    })
+    if (alreadyQueued) {
+      throw new PatientAlreadyQueuedError(
+        `${patient.firstName} ${patient.lastName}`,
+        alreadyQueued.queueNumber,
+        alreadyQueued.status
+      )
+    }
 
     const queueEntry = await tx.queueEntry.create({
       data: {

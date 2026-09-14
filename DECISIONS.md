@@ -9,6 +9,55 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-09-15 — Add to queue from patient search
+
+The front desk's Patients screen (`/staff/patients`) now checks a found
+patient into today's queue from the search results — an **Add to queue**
+button on each row — instead of sending the desk back to Register walk-in
+to search the same name a second time.
+
+- **It is the register screen's "This is the patient", reached from the
+  other place the desk finds people.** Same query function
+  (`checkInExistingPatient`), same two questions first — reason for visit
+  and priority — asked in a dialog rather than skipped: the board prints
+  the reason on every row and orders by priority, so a one-tap add would
+  put a blank, mis-ordered row on it. The dialog ends on the queue number
+  at the size the register screen uses, so it can be read across the
+  counter. No toast: nothing mounts a `Toaster` yet, and a number the desk
+  has to repeat aloud shouldn't fade out on its own.
+- **One person cannot wait twice.** `checkInExistingPatient` now refuses a
+  patient who already holds a place in today's queue — booked, checked in,
+  waiting, called or in consultation (`OPEN_STATUSES` in
+  `lib/queries/queue.ts`) — with a message that names the number they
+  already have, and says to check in the booking from the board when that
+  is what it is. A completed, no-show or cancelled visit does not count, so
+  a patient who comes back later the same day gets a new number. The check
+  runs after `nextQueueNumber` has taken the branch+day advisory lock, so
+  two taps a moment apart serialize on it and the second sees the first's
+  committed row. Before this the register screen would hand the same
+  patient two numbers without complaint; it now shows the refusal too,
+  which meant `checkInExistingAction` had to return a result instead of
+  throwing — a thrown server-action error reaches the browser with its
+  message stripped in production.
+- **The search result shows the number instead of the button when the
+  patient is already queued.** `listTodayQueue` already answers that for
+  the branch in one query; a row whose button would only be refused is
+  better spent linking to the board, where the entry is.
+- **The button and the number are one client component
+  (`app/staff/patients/add-to-queue.tsx`), not a button swapped for a link.**
+  Found by watching it in the browser: the action's `revalidatePath` for
+  this page re-renders the list in the same round trip as the check-in, so
+  a row that swaps components unmounts the button — and the dialog holding
+  the number the desk is about to read out with it. The first version
+  showed the number for a frame and then closed itself. One component that
+  renders either state stays mounted through the re-render, so the row
+  turns into the number behind the dialog while the dialog stays open.
+- **Only the search results got the button, not the profile page.** The
+  desk tells two people with the same name apart by the phone number and
+  age printed on the row, and the dialog repeats both before asking
+  anything, so the profile is not needed to confirm who is being added.
+  It can grow the same button if the desk turns out to open it first.
+
 ## 2026-09-10 — Expiry dates belong in the catalog after all
 
 Reported against the branch-admin screens: Add medicine has no field for the

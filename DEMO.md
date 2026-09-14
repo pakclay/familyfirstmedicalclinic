@@ -84,6 +84,11 @@ an existing patient by phone surfaces their prior visits.
    patient row.
 3. Open that new patient's profile (`/staff/patients/<id>`) — their visit
    (today, source "walk-in") is already listed under history.
+4. On **Patients**, search that patient by name: the row shows the queue
+   number they already hold today, linking to the board, instead of an
+   **Add to queue** button. Search any other seeded patient and tap
+   **Add to queue** — the dialog asks for the reason and priority the
+   board needs, then shows the new number.
 
 ---
 

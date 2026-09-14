@@ -49,6 +49,17 @@ export const patientIntakeSchema = patientBaseFields
 export type PatientIntakeInput = z.infer<typeof patientIntakeSchema>
 
 /**
+ * What the desk supplies when checking an already-registered patient into
+ * today's queue — from the register screen's "This is the patient" or the
+ * patient search's "Add to queue". The same two fields the walk-in form
+ * collects up front, so a returning patient's entry is no thinner than a
+ * new one's: the board prints the reason on every row and orders by priority.
+ */
+export const queueCheckInSchema = patientBaseFields.pick({ reasonForVisit: true, priority: true })
+
+export type QueueCheckInInput = z.infer<typeof queueCheckInSchema>
+
+/**
  * §7.1 public online booking — same fields plus a preferred date, which
  * the DECISION at §7.1 restricts to same-day or next-day only (a full
  * appointment-time-slot system is explicitly out of scope).

@@ -7,6 +7,7 @@ import {
   checkInExistingPatient,
   searchPatientsByPhone,
   searchPatientsForIntake,
+  PatientAlreadyQueuedError,
 } from "@/lib/queries/patients"
 import { ForbiddenError } from "@/lib/permissions/errors"
 import type { AbilitySubject } from "@/lib/permissions/ability"
@@ -161,6 +162,12 @@ describe("walk-in registration", () => {
 
   it("checks in an existing patient without creating a duplicate Patient row", async () => {
     const [existing] = await searchPatientsByPhone(frontDeskA, "09175550001")
+    // Juan's registration visit is still open; a returning patient is one
+    // whose earlier visit has ended.
+    await superuserPrisma.queueEntry.updateMany({
+      where: { patientId: existing.id, status: "CHECKED_IN" },
+      data: { status: "COMPLETED", completedAt: new Date() },
+    })
     const patientsBefore = await superuserPrisma.patient.count({ where: { branchId: branchA.id } })
 
     const queueEntry = await checkInExistingPatient(frontDeskA, existing.id, {
@@ -179,6 +186,55 @@ describe("walk-in registration", () => {
     await expect(
       checkInExistingPatient(frontDeskB, patientInA.id, { reasonForVisit: "x", priority: false })
     ).rejects.toBeInstanceOf(ForbiddenError)
+  })
+
+  /**
+   * One person cannot wait twice. The register screen's "This is the
+   * patient" and the patient search's "Add to queue" both land here, and a
+   * second tap on either would otherwise hand the same patient two numbers.
+   */
+  describe("a patient already in today's queue", () => {
+    const juan = async () => (await searchPatientsByPhone(frontDeskA, "09175550001"))[0]
+    const openEntry = (patientId: string) =>
+      superuserPrisma.queueEntry.findFirstOrThrow({
+        where: { patientId, status: { in: ["BOOKED", "CHECKED_IN", "WAITING", "CALLED", "IN_CONSULTATION"] } },
+      })
+
+    it("is refused a second check-in, and told the number they already hold", async () => {
+      const existing = await juan()
+      const held = await openEntry(existing.id)
+      const entriesBefore = await superuserPrisma.queueEntry.count({ where: { patientId: existing.id } })
+
+      const attempt = checkInExistingPatient(frontDeskA, existing.id, { reasonForVisit: "Again", priority: false })
+      await expect(attempt).rejects.toBeInstanceOf(PatientAlreadyQueuedError)
+      await expect(attempt).rejects.toThrow(`Juan Dela Cruz is already in today's queue as #${held.queueNumber}.`)
+
+      const entriesAfter = await superuserPrisma.queueEntry.count({ where: { patientId: existing.id } })
+      expect(entriesAfter).toBe(entriesBefore)
+    })
+
+    it("is told to check in a booking rather than be added beside it", async () => {
+      const existing = await juan()
+      const held = await openEntry(existing.id)
+      await superuserPrisma.queueEntry.update({ where: { id: held.id }, data: { status: "BOOKED" } })
+
+      await expect(
+        checkInExistingPatient(frontDeskA, existing.id, { reasonForVisit: "Again", priority: false })
+      ).rejects.toThrow(`already has a booking for today (#${held.queueNumber}). Check them in from the queue board`)
+    })
+
+    it("can be checked in again once the earlier visit is over", async () => {
+      const existing = await juan()
+      const held = await openEntry(existing.id)
+      await superuserPrisma.queueEntry.update({ where: { id: held.id }, data: { status: "NO_SHOW" } })
+
+      const queueEntry = await checkInExistingPatient(frontDeskA, existing.id, {
+        reasonForVisit: "Came back",
+        priority: false,
+      })
+      expect(queueEntry.status).toBe("CHECKED_IN")
+      expect(queueEntry.queueNumber).toBeGreaterThan(held.queueNumber)
+    })
   })
 
   /**
