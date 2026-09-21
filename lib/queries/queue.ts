@@ -168,6 +168,44 @@ export async function listTodayQueue(user: AbilitySubject): Promise<StaffQueueEn
   })
 }
 
+export type TodayQueueCounts = {
+  /** BOOKED: holds a number, hasn't arrived. */
+  expected: number
+  /** CHECKED_IN, WAITING or CALLED: physically here, not yet with a doctor. */
+  waiting: number
+  inConsultation: number
+  completed: number
+}
+
+/**
+ * Today's queue as four numbers, for the branch dashboard. A groupBy rather
+ * than `listTodayQueue` because a count needs no names — the dashboard
+ * shouldn't pull every patient row of the day to say "4 waiting".
+ */
+export async function getTodayQueueCounts(user: AbilitySubject): Promise<TodayQueueCounts> {
+  if (isHoldingAdmin(user)) {
+    throw new Error("getTodayQueueCounts requires a branch-scoped user")
+  }
+  const branchId = requireBranchId(user)
+
+  return runWithRls(user, async (tx) => {
+    const timezone = await branchTimezone(tx, branchId)
+    const rows = await tx.queueEntry.groupBy({
+      by: ["status"],
+      where: { branchId, queueDate: todayAsQueueDate(timezone) },
+      _count: { _all: true },
+    })
+    const byStatus = new Map(rows.map((r) => [r.status, r._count._all]))
+    const sum = (statuses: QueueStatus[]) => statuses.reduce((n, s) => n + (byStatus.get(s) ?? 0), 0)
+    return {
+      expected: sum(["BOOKED"]),
+      waiting: sum(["CHECKED_IN", "WAITING", "CALLED"]),
+      inConsultation: sum(["IN_CONSULTATION"]),
+      completed: sum(["COMPLETED"]),
+    }
+  })
+}
+
 /** A doctor's own queue — only patients assigned to them, today, not yet completed. */
 export async function listDoctorQueue(user: AbilitySubject): Promise<StaffQueueEntryDTO[]> {
   if (user.role !== "DOCTOR") {

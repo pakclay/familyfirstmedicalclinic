@@ -1,7 +1,7 @@
 import { toZonedTime } from "date-fns-tz"
 import { runWithRls } from "@/lib/db/rls"
 import { requireBranchId, type AbilitySubject } from "@/lib/permissions/ability"
-import { resolveReportInstantRange, resolveReportDateOnlyRange, type DateRangeParams } from "@/lib/utils/report-dates"
+import { eachDayLabel, resolveReportInstantRange, resolveReportDateOnlyRange, type DateRangeParams } from "@/lib/utils/report-dates"
 
 export type BranchReportData = {
   branchName: string
@@ -97,9 +97,9 @@ export async function getBranchReport(user: AbilitySubject, params: DateRangePar
       const dayLabel = `${zoned.getFullYear()}-${String(zoned.getMonth() + 1).padStart(2, "0")}-${String(zoned.getDate()).padStart(2, "0")}`
       dailyRevenueMap.set(dayLabel, (dailyRevenueMap.get(dayLabel) ?? 0) + p.amount)
     }
-    const dailyRevenue = [...dailyRevenueMap.entries()]
-      .map(([date, amount]) => ({ date, amount }))
-      .sort((a, b) => a.date.localeCompare(b.date))
+    // Every day of the range, zero-filled. Listing only the days that took
+    // money would draw a full week of bars for a branch that opened twice.
+    const dailyRevenue = eachDayLabel(startLabel, endLabel).map((date) => ({ date, amount: dailyRevenueMap.get(date) ?? 0 }))
 
     const consultations = await tx.consultation.findMany({
       where: { branchId, createdAt: { gte: start, lt: end }, deletedAt: null },

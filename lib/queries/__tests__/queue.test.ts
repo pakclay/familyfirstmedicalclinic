@@ -14,6 +14,7 @@ import {
   moveQueueEntryOrder,
   nextQueueNumber,
   todayAsQueueDate,
+  getTodayQueueCounts,
 } from "@/lib/queries/queue"
 import { getPublicDisplayState, getPatientStatusByToken } from "@/lib/queries/public-queue"
 import { createPublicBooking } from "@/lib/queries/booking"
@@ -161,6 +162,27 @@ describe("queue", () => {
 
     const board = await listTodayQueue(frontDesk)
     expect(board.map((e) => e.id)).toEqual(expect.arrayContaining([early.id, late.id]))
+  })
+
+  it("counts today's queue by stage for the dashboard, without a patient row in sight", async () => {
+    const [a, b, c, d, e] = await Promise.all([createPatient(), createPatient(), createPatient(), createPatient(), createPatient()])
+    await createEntry({ patientId: a.id, status: "BOOKED" })
+    await createEntry({ patientId: b.id, status: "CHECKED_IN" })
+    await createEntry({ patientId: c.id, status: "WAITING", doctorId: doctorAId })
+    await createEntry({ patientId: d.id, status: "CALLED", doctorId: doctorAId })
+    // createEntry stops at CALLED; a finished visit is written directly.
+    entryCounter += 1
+    await superuserPrisma.queueEntry.create({
+      data: {
+        branchId: branch.id, patientId: e.id, queueNumber: 1000 + entryCounter, queueDate: queueDate(),
+        status: "COMPLETED", source: QueueSource.WALK_IN, checkedInAt: new Date(), accessToken: `test-token-${entryCounter}-${Date.now()}`,
+      },
+    })
+
+    expect(await getTodayQueueCounts(frontDesk)).toEqual({ expected: 1, waiting: 3, inConsultation: 0, completed: 1 })
+
+    const holdingAdmin: AbilitySubject = { id: frontDesk.id, role: Role.HOLDING_ADMIN, branchId: null, clinicId: null, holdingCompanyId: "x" }
+    await expect(getTodayQueueCounts(holdingAdmin)).rejects.toThrow(/branch-scoped/)
   })
 
   it("interleaves a booking (checked in later) and a walk-in correctly by time within the same priority tier", async () => {

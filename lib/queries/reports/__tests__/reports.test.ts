@@ -226,6 +226,23 @@ describe("reports and reconciliation", () => {
     expect(report.revenueTotal).toBe(80000)
   })
 
+  it("the dashboard's 7-day window is honoured, and every day in a window gets a bar", async () => {
+    const branch = branches[0]
+    await payment(branch.id, patients[0][0], frontDeskUsers[0].id, 50000)
+    const tenDaysAgo = await payment(branch.id, patients[0][1], frontDeskUsers[0].id, 30000)
+    await superuserPrisma.payment.update({ where: { id: tenDaysAgo.id }, data: { receivedAt: new Date(Date.now() - 10 * 86_400_000) } })
+
+    const week = await getBranchReport(branchAdmins[0], { days: 7 })
+    expect(week.revenueTotal).toBe(50000)
+    expect(week.dailyRevenue).toHaveLength(7)
+    expect(week.dailyRevenue[6]).toEqual({ date: week.endLabel, amount: 50000 })
+
+    const month = await getBranchReport(branchAdmins[0], {})
+    expect(month.revenueTotal).toBe(80000)
+    expect(month.dailyRevenue).toHaveLength(30)
+    expect(month.dailyRevenue.filter((d) => d.amount === 0)).toHaveLength(28)
+  })
+
   it("holding consolidated report: per-branch revenue reconciles exactly to the sum of payment rows, across three branches", async () => {
     await payment(branches[0].id, patients[0][0], frontDeskUsers[0].id, 50000)
     await payment(branches[0].id, patients[0][1], frontDeskUsers[0].id, 25000)

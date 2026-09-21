@@ -9,6 +9,53 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-09-21 — The dashboard leads with numbers
+
+`/console/dashboard` is the first page a branch admin and a holding admin
+see. A month after M6 shipped it still read "Revenue and patient reports
+land in M6" above the three inventory panels, and the holding admin's arm
+was a paragraph pointing at two other pages. Both arms now open on the
+week's figures, from the same queries Reports already runs.
+
+- **Seven days, no date picker.** A dashboard answers "how is this week
+  going"; the full month, the picker and the CSVs stay on Reports, one
+  click away. Rather than a second range helper, `DateRangeParams` gained
+  `days` — the window length when `start` is unset, default still 30 — so
+  `getBranchReport` and `getHoldingConsolidatedReport` serve both pages
+  unchanged. An explicit `start` always wins over it.
+- **Today's queue is four counts from one `groupBy`**
+  (`getTodayQueueCounts`): booked-but-not-here, waiting (checked in,
+  waiting or called), with doctor, seen. `listTodayQueue` would have pulled
+  every patient row of the day to count them. "Revenue today" is the
+  week's last bar rather than another query — the window ends today.
+- **The daily revenue series is zero-filled** (`eachDayLabel`). It was
+  built from a map keyed by days that took money, so a branch open twice
+  in a week drew two bars, side by side, as if it were a two-day week.
+  This changes the Reports chart too, deliberately: the quiet days are
+  data. The chart's empty state now also covers "every day was zero".
+- **Two shared pieces, no charting framework** (§8). `StatTile`
+  (`components/console/stat-tile.tsx`) is the label/value/hint tile the
+  reports page had inline; Reports now uses it, and `formatPesos` — so its
+  figures gained thousands separators. `BarList` draws the holding
+  admin's branch rankings as plain markup: name, bar, value on one line,
+  which is its own table for a screen reader and needs no axis or tooltip
+  for a handful of branches. One hue for both, since each is one series.
+- **Chart polish on `RevenueChart`:** solid hairline grid in the border
+  token, bars capped at 24px so a short range isn't a wall of colour,
+  thousands on the ticks, and a `--muted` hover cursor instead of
+  recharts' fixed grey, which was wrong in dark mode.
+- **A clinic admin is redirected to `/`.** The old fallback offered two
+  links that both refused that role; `/` already knows their home is
+  `/console/users`.
+- **Verified live** at 375px and 1280px, light and dark, as the Quezon
+  City branch admin and as a holding admin — a throwaway account on the
+  seed company, deleted after, because the seed owner's password is no
+  longer the DEMO.md one. The local seed has never recorded a payment at
+  that branch, so five temporary payments were inserted to see the bars
+  and removed after; today's tile, the week's tile and the holding
+  rankings reconciled to them by hand. `tsc`, eslint, and the report/queue suites pass, with
+  tests added for `days`, `eachDayLabel` and `getTodayQueueCounts`.
+
 ## 2026-09-15 — Add to queue from patient search
 
 The front desk's Patients screen (`/staff/patients`) now checks a found

@@ -5,15 +5,13 @@ import { getBranchReport } from "@/lib/queries/reports/clinic"
 import { getInventoryReport } from "@/lib/queries/reports/inventory"
 import { getHoldingConsolidatedReport } from "@/lib/queries/reports/holding"
 import type { AbilitySubject } from "@/lib/permissions/ability"
+import { formatPesos as pesos } from "@/lib/utils/billing"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { StatTile as Stat } from "@/components/console/stat-tile"
 import { DateRangeForm } from "./date-range-form"
 import { RevenueChart } from "./revenue-chart"
 import { firstParam, type SearchParam } from "@/lib/utils/search-params"
-
-function pesos(centavos: number): string {
-  return `₱${(centavos / 100).toFixed(2)}`
-}
 
 export default async function ReportsPage({
   searchParams,
@@ -202,15 +200,6 @@ export default async function ReportsPage({
           </tbody>
         </table>
       </div>
-    </div>
-  )
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-border p-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="font-numeric text-lg font-semibold">{value}</p>
     </div>
   )
 }
