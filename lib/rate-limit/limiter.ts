@@ -133,7 +133,7 @@ export async function consumeRateLimit(
       // already being throttled. See `rateLimitKey` for why header-less
       // requests share a bucket instead of being skipped or refused.
       console.error(
-        `[rate-limit] No trustworthy client IP on a "${surface.name}" request — falling back to the shared "${UNKNOWN_SOURCE}" bucket. Check that the deployment's proxy sets x-vercel-forwarded-for / x-real-ip / x-forwarded-for and that the origin is not reachable directly.`
+        `[rate-limit] No trustworthy client IP on a "${surface.name}" request — falling back to the shared "${UNKNOWN_SOURCE}" bucket. Check that the deployment's proxy sets x-forwarded-for (or, on Vercel, x-vercel-forwarded-for / x-real-ip) and that the origin is not reachable directly.`
       )
     }
 

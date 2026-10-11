@@ -86,30 +86,56 @@ describe("clientIpFromHeaders", () => {
     expect(clientIpFromHeaders(headersOf({}))).toBeNull()
   })
 
-  it("prefers the platform-set x-vercel-forwarded-for over the others", () => {
-    const ip = clientIpFromHeaders(
-      headersOf({
-        "x-forwarded-for": "198.51.100.9",
-        "x-real-ip": "198.51.100.8",
-        "x-vercel-forwarded-for": "203.0.113.7",
-      })
-    )
-    expect(ip).toBe("203.0.113.7")
+  describe("on Vercel", () => {
+    it("prefers the platform-set x-vercel-forwarded-for over the others", () => {
+      const ip = clientIpFromHeaders(
+        headersOf({
+          "x-forwarded-for": "198.51.100.9",
+          "x-real-ip": "198.51.100.8",
+          "x-vercel-forwarded-for": "203.0.113.7",
+        }),
+        true
+      )
+      expect(ip).toBe("203.0.113.7")
+    })
+
+    it("falls back to x-real-ip before the generic x-forwarded-for", () => {
+      const ip = clientIpFromHeaders(headersOf({ "x-forwarded-for": "198.51.100.9", "x-real-ip": "203.0.113.7" }), true)
+      expect(ip).toBe("203.0.113.7")
+    })
+
+    it("falls back to the rightmost x-forwarded-for entry when nothing better exists", () => {
+      const ip = clientIpFromHeaders(headersOf({ "x-forwarded-for": "198.51.100.9, 203.0.113.7" }), true)
+      expect(ip).toBe("203.0.113.7")
+    })
+
+    it("skips a header that is present but unusable rather than giving up", () => {
+      const ip = clientIpFromHeaders(
+        headersOf({ "x-vercel-forwarded-for": "unknown", "x-real-ip": "203.0.113.7" }),
+        true
+      )
+      expect(ip).toBe("203.0.113.7")
+    })
   })
 
-  it("falls back to x-real-ip before the generic x-forwarded-for", () => {
-    const ip = clientIpFromHeaders(headersOf({ "x-forwarded-for": "198.51.100.9", "x-real-ip": "203.0.113.7" }))
-    expect(ip).toBe("203.0.113.7")
-  })
+  describe("off Vercel (Cloud Run)", () => {
+    it("ignores client-sent x-vercel-forwarded-for and x-real-ip, which nothing overwrites there", () => {
+      // An attacker rotating these per request must not get a fresh budget
+      // each time; only the address Google appended counts.
+      const ip = clientIpFromHeaders(
+        headersOf({
+          "x-vercel-forwarded-for": "198.51.100.1",
+          "x-real-ip": "198.51.100.2",
+          "x-forwarded-for": "198.51.100.3, 203.0.113.7",
+        }),
+        false
+      )
+      expect(ip).toBe("203.0.113.7")
+    })
 
-  it("falls back to the rightmost x-forwarded-for entry when nothing better exists", () => {
-    const ip = clientIpFromHeaders(headersOf({ "x-forwarded-for": "198.51.100.9, 203.0.113.7" }))
-    expect(ip).toBe("203.0.113.7")
-  })
-
-  it("skips a header that is present but unusable rather than giving up", () => {
-    const ip = clientIpFromHeaders(headersOf({ "x-vercel-forwarded-for": "unknown", "x-real-ip": "203.0.113.7" }))
-    expect(ip).toBe("203.0.113.7")
+    it("returns null rather than trusting a spoofable header when x-forwarded-for is absent", () => {
+      expect(clientIpFromHeaders(headersOf({ "x-real-ip": "203.0.113.7" }), false)).toBeNull()
+    })
   })
 })
 

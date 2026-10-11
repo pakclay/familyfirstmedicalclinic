@@ -21,8 +21,8 @@ import {
 const stub = vi.hoisted(() => ({ ip: "" }))
 
 vi.mock("next/headers", () => ({
-  // The one header the deployment can be trusted on — see lib/rate-limit/key.ts.
-  headers: async () => new Headers(stub.ip ? { "x-vercel-forwarded-for": stub.ip } : {}),
+  // The header trusted on every platform (rightmost entry) — see lib/rate-limit/key.ts.
+  headers: async () => new Headers(stub.ip ? { "x-forwarded-for": stub.ip } : {}),
 }))
 
 const signIn = vi.hoisted(() => vi.fn())
