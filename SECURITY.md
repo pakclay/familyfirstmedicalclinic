@@ -123,9 +123,9 @@ patient data.
   per source per window is audited; the ones after it are not, so an
   attacker cannot flood `audit_logs` by continuing to hammer a surface they
   are already blocked on. Two things this depends on that live outside the
-  code: the source address comes from the platform proxy's headers
-  (`x-vercel-forwarded-for`, then `x-real-ip`, then the rightmost
-  `x-forwarded-for` entry), so the origin must be reachable only through
+  code: the source address comes from the platform proxy's headers (on
+  Cloud Run only the rightmost `x-forwarded-for` entry; on Vercel
+  `x-vercel-forwarded-for`, then `x-real-ip`, then that), so the origin must be reachable only through
   that proxy or the limit becomes per-*claimed*-IP; and `rate_limits` must
   never get an RLS policy — the writes happen before any session exists.
 - **Admin-managed user accounts, scoped by role.** A Holding Admin can
@@ -195,10 +195,13 @@ patient data.
 
 ## What must be hardened before real patient data goes in
 
-- **TLS.** Terminated by the hosting platform: production runs on Vercel,
-  which serves HTTPS, answers plain HTTP with a 308 to HTTPS, and sends
-  HSTS (two years, `includeSubDomains`, `preload`) — verified with curl on
-  2026-09-07. The app's own link to the database is encrypted as well:
+- **TLS.** Terminated by the hosting platform. On Vercel (verified with
+  curl on 2026-09-07), it served HTTPS, answered plain HTTP with a 308 to
+  HTTPS, and sent HSTS (two years, `includeSubDomains`, `preload`).
+  Production is moving to Google Cloud Run (`docs/deploy-cloud-run.md`),
+  which terminates TLS at Google's front end but does not add HSTS, so
+  `next.config.ts` now sends the same header itself. Re-verify with curl on
+  the Cloud Run URL before cutover. The app's own link to the database is encrypted as well:
   since Prisma 7 (`lib/db/client-factory.ts`) a remote host gets TLS by
   default, without certificate verification unless the URL says
   `sslmode=verify-full`. The remaining infrastructure step is Supabase's

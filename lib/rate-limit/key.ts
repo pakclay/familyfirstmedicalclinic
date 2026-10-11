@@ -20,19 +20,30 @@
  * allowed to add — and all that function does is read the same headers
  * below, so reading them directly loses nothing.
  *
- * Precedence, most trustworthy first:
+ * Which headers are trustworthy depends on the platform, so there are two
+ * lists:
+ *
+ * **On Vercel** (`VERCEL=1`, which the platform sets), most trustworthy
+ * first:
  *
  *  1. `x-vercel-forwarded-for` — set by Vercel's edge network on every
  *     request to a Vercel deployment, from the TCP peer address it
  *     actually observed. It is in Vercel's own `x-vercel-*` namespace,
  *     which the platform overwrites on ingress, so a client that sends its
- *     own copy has it replaced rather than honoured. This is the header to
- *     trust on the target deployment.
- *  2. `x-real-ip` — also set by Vercel (and by most reverse proxies) to a
- *     single observed client address. Same guarantee, less specific name.
- *  3. `x-forwarded-for` — the generic fallback, and the only one of the
- *     three that is *client-supplied in the general case*. See the
- *     rightmost-entry rule on `parseForwardedFor` below.
+ *     own copy has it replaced rather than honoured.
+ *  2. `x-real-ip` — also set by Vercel to a single observed client
+ *     address. Same guarantee, less specific name.
+ *  3. `x-forwarded-for` — the generic fallback. See the rightmost-entry
+ *     rule on `parseForwardedFor` below.
+ *
+ * **Everywhere else — Cloud Run in production** — `x-forwarded-for` only.
+ * Google's front end does not touch `x-vercel-forwarded-for` or
+ * `x-real-ip`: a client that sends them has them passed straight through,
+ * so consulting them first would hand every attacker a free "use this
+ * address instead" header and the limiter would stop nobody. What Google
+ * does guarantee is that it *appends* the address it observed to
+ * `x-forwarded-for`, which is exactly the case `parseForwardedFor`'s
+ * rightmost rule is written for.
  *
  * ── This control is only as strong as the deployment in front of it ────
  * Every guarantee above comes from the proxy, not from this code. If the
@@ -59,10 +70,12 @@ const IP_SHAPE = /^[0-9a-f.:]+$/
 
 /**
  * Headers to consult, in descending order of trustworthiness. See the
- * module comment — order matters, and the first one that yields a usable
- * address wins.
+ * module comment — order matters, the first one that yields a usable
+ * address wins, and off Vercel the platform-specific two are not trusted
+ * at all.
  */
-const SOURCE_HEADERS = ["x-vercel-forwarded-for", "x-real-ip", "x-forwarded-for"] as const
+const VERCEL_SOURCE_HEADERS = ["x-vercel-forwarded-for", "x-real-ip", "x-forwarded-for"] as const
+const DEFAULT_SOURCE_HEADERS = ["x-forwarded-for"] as const
 
 /**
  * The key used when no trustworthy address could be derived. See
@@ -121,9 +134,11 @@ export function normalizeIp(raw: string): string | null {
  * step that starts trusting client-supplied values.
  *
  * Caveat for a future deployment change: "rightmost" is correct for
- * *one* trusted hop. Behind two (a CDN in front of Vercel, say) the
- * rightmost entry is the inner proxy's own address, and every visitor
- * would collapse into one key. Adding a second hop means revisiting this
+ * *one* trusted hop — Cloud Run reached on its own URL or a domain
+ * mapping. Behind two (a Google external load balancer or Firebase
+ * Hosting in front of Cloud Run, a CDN in front of Vercel) the rightmost
+ * entry is the inner proxy's own address, and every visitor would
+ * collapse into one key. Adding a second hop means revisiting this
  * function, not just the DNS.
  */
 export function parseForwardedFor(value: string | null): string | null {
@@ -142,8 +157,8 @@ export function parseForwardedFor(value: string | null): string | null {
  * is misconfigured or the origin is being reached directly. Callers turn
  * it into the shared `UNKNOWN_SOURCE` bucket — see `rateLimitKey`.
  */
-export function clientIpFromHeaders(headers: HeaderReader): string | null {
-  for (const name of SOURCE_HEADERS) {
+export function clientIpFromHeaders(headers: HeaderReader, onVercel = process.env.VERCEL === "1"): string | null {
+  for (const name of onVercel ? VERCEL_SOURCE_HEADERS : DEFAULT_SOURCE_HEADERS) {
     const ip = parseForwardedFor(headers.get(name))
     if (ip) return ip
   }

@@ -1,0 +1,132 @@
+name: Deploy
+
+# Production deploy to Google Cloud Run (DECISIONS.md 2026-10-11).
+#
+# Runs only after CI has passed on a push to master, or by hand. Until the
+# repository variables below are set (docs/deploy-cloud-run.md) the job is
+# skipped rather than failing, so merging this changes nothing on its own.
+#
+# Repository variables (Settings → Secrets and variables → Actions → Variables):
+#   GCP_PROJECT_ID                  e.g. familyfirst-prod
+#   GCP_REGION                      optional, defaults to asia-southeast1 (Singapore, next to Supabase)
+#   GCP_WORKLOAD_IDENTITY_PROVIDER  projects/<number>/locations/global/workloadIdentityPools/github/providers/github
+#   GCP_SERVICE_ACCOUNT             deployer@<project>.iam.gserviceaccount.com
+#   APP_URL                         the public origin, e.g. https://app.example.com
+#
+# No GitHub secrets: the database URLs and AUTH_SECRET live in Google Secret
+# Manager only, and this job reads them through keyless (OIDC) auth.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # `branches: [master]` above matches the *head branch name*, which a fork
+    # can also call master — so also require a push to this repository.
+    if: >-
+      vars.GCP_PROJECT_ID != '' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+
+    env:
+      REGION: ${{ vars.GCP_REGION || 'asia-southeast1' }}
+      SERVICE: familyfirst
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SHA }}
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - id: secrets
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            database_url:${{ vars.GCP_PROJECT_ID }}/database-url
+            app_database_url:${{ vars.GCP_PROJECT_ID }}/app-database-url
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # What `npm run build` did on Vercel before `next build`, moved out of
+      # the image build so no database credential ever enters a Docker
+      # layer. Runs before the new revision takes traffic, as it did there.
+      # ensure-app-role is what keeps RLS enforced — see its header comment.
+      - name: Apply migrations and the app-role grants
+        env:
+          DATABASE_URL: ${{ steps.secrets.outputs.database_url }}
+          APP_DATABASE_URL: ${{ steps.secrets.outputs.app_database_url }}
+        run: |
+          npx prisma generate
+          npx prisma migrate deploy
+          npx tsx prisma/ensure-app-role.ts
+
+      - name: Build and push the image
+        run: |
+          IMAGE="$REGION-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/familyfirst/app:$SHA"
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      # Instance and pool sizing: each instance's pool is capped by
+      # `connection_limit` in APP_DATABASE_URL (5), so 3 instances hold at
+      # most 15 connections to Supabase's transaction pooler. Concurrency 20
+      # makes Cloud Run add an instance before one queues too deep behind
+      # five connections. min-instances 0 keeps an idle clinic at $0 at the
+      # cost of a cold start of a few seconds on the first request.
+      - id: deploy
+        uses: google-github-actions/deploy-cloudrun@v3
+        with:
+          service: ${{ env.SERVICE }}
+          region: ${{ env.REGION }}
+          image: ${{ env.IMAGE }}
+          flags: >-
+            --port=8080
+            --cpu=1
+            --memory=1Gi
+            --concurrency=20
+            --min-instances=0
+            --max-instances=3
+            --service-account=familyfirst-run@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+          # Auth.js trusts the request host only on Vercel or when AUTH_URL
+          # is set (@auth/core setEnvDefaults); NEXTAUTH_URL alone does not
+          # count, and without either every sign-in fails with UntrustedHost.
+          env_vars: |-
+            AUTH_URL=${{ vars.APP_URL }}
+            NEXTAUTH_URL=${{ vars.APP_URL }}
+          secrets: |-
+            APP_DATABASE_URL=app-database-url:latest
+            AUTH_SECRET=auth-secret:latest
+
+      - name: Smoke test
+        run: |
+          status=$(curl -s -o /dev/null -w '%{http_code}' "${{ steps.deploy.outputs.url }}/login")
+          echo "GET /login -> $status"
+          test "$status" = "200"

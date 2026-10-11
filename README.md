@@ -35,7 +35,12 @@ scoping at the database layer. Re-run it any time after
 `prisma migrate reset`, which recreates the schema from scratch and drops
 these grants with it.
 
-In production (Supabase, Vercel) the two URLs point at two different
+Production runs on Google Cloud Run (Singapore) against Supabase. Deploys
+happen from `.github/workflows/deploy.yml` after CI passes on `master`; the
+one-time setup, verification and cutover steps are in
+[`docs/deploy-cloud-run.md`](docs/deploy-cloud-run.md).
+
+In production (Supabase) the two URLs point at two different
 things on purpose: `DATABASE_URL` at the direct or session-mode connection,
 because Prisma Migrate needs one, and `APP_DATABASE_URL` at the pooler in
 **transaction mode** — port 6543, with `?connection_limit=5` (since Prisma 7

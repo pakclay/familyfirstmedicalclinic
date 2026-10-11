@@ -9,6 +9,59 @@ rehab therapy console). That build's own decisions log is preserved in git
 history (`git log -- DECISIONS.md`) but doesn't apply to anything below —
 this is a fresh log for Family First Medical Clinic.
 
+## 2026-10-11 — Hosting moves from Vercel to Google Cloud Run; the database stays on Supabase
+
+The owner asked to move to Google Cloud, database included, on Google's
+free tier. **The database part was declined, with the owner's agreement:**
+Google has no permanently free managed Postgres. Cloud SQL gets a 30-day
+trial instance and the new-account credit, then costs money. The only $0
+option is self-run Postgres on the always-free e2-micro VM, which exists
+only in US regions. That would make the owner responsible for backups,
+patching and recovery of patient records, and would put the app and its
+users across the Pacific from each other. Supabase stays; only the app moves.
+Runbook: `docs/deploy-cloud-run.md`.
+
+- **Cloud Run in `asia-southeast1`**, the same city as the Supabase
+  database. The `sin1` entry below explains why that is not negotiable.
+  The image is `output: "standalone"` (`next.config.ts`) in a
+  three-stage `Dockerfile`, running as the unprivileged `node` user.
+- **Migrations left the build.** `npm run build` on Vercel ran
+  `prisma migrate deploy` and `ensure-app-role` before `next build`. Inside
+  `docker build` that would have meant baking the superuser URL into a layer.
+  `.github/workflows/deploy.yml` now runs them as a step after CI passes and
+  before the new revision rolls out, which is the same ordering as before.
+  `npm run build` still contains them, for anyone still deploying to Vercel during the cutover.
+  `next build` was checked to succeed with the database unreachable.
+- **Secrets live in Secret Manager only**, and GitHub reaches them
+  through Workload Identity Federation limited to this repository's
+  `production` environment. GitHub stores no long-lived Google key.
+- **Two security properties Vercel provided implicitly had to be made
+  explicit.**
+  1. *Client IP.* `lib/rate-limit/key.ts` trusted `x-vercel-forwarded-for`
+     and `x-real-ip` first. Vercel overwrites both headers; Google
+     passes both straight through from the client. On Cloud Run that would
+     have let anyone pick their own rate-limit key on every request. Those
+     two are now consulted only when `VERCEL=1`, and otherwise only the
+     rightmost `x-forwarded-for` entry counts. The runbook has a check for
+     this that must pass before cutover.
+  2. *HSTS.* Vercel's edge sent it; Cloud Run does not. `next.config.ts`
+     now sends the same header itself.
+- **Auth.js needs `AUTH_URL`.** It trusts the request host on Vercel
+  (`VERCEL` env) or when `AUTH_URL`/`AUTH_TRUST_HOST` is set
+  (`@auth/core` `setEnvDefaults`). `NEXTAUTH_URL` alone doesn't count, so
+  without `AUTH_URL` every sign-in would have failed with `UntrustedHost`.
+  The deploy sets both from one repository variable.
+- **Sizing:** concurrency 20, max 3 instances, min 0. With
+  `connection_limit=5` on the transaction pooler, that is at most 15 app
+  connections. Unlike a Vercel function, one Cloud Run instance serves many
+  requests at once, so they share its five connections. The low
+  concurrency makes Cloud Run add an instance before that queue gets deep.
+  `min-instances=0` keeps an idle clinic free and costs a cold start of a
+  few seconds.
+- `vercel.json` stays until the owner moves DNS. Rollback is now Cloud Run
+  "Manage traffic" to a previous revision, replacing `vercel rollback`, and
+  logs are in Cloud Logging, replacing `vercel logs`.
+
 ## 2026-09-21 — The dashboard leads with numbers
 
 `/console/dashboard` is the first page a branch admin and a holding admin
